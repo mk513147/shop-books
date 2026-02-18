@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { theme } from "../theme";
 import FloatingButton from "../components/FloatingButton";
 
@@ -15,84 +15,94 @@ export default function DashboardScreen() {
 	const todayDate = new Date().toLocaleDateString();
 
 	return (
-		<View style={{ flex: 1 }}>
-			<View style={styles.container}>
-				{/* DATE */}
-				<Text style={styles.dateText}>{todayDate}</Text>
+		<ScrollView
+			contentContainerStyle={styles.container}
+			keyboardShouldPersistTaps="handled"
+		>
+			<View style={{ flex: 1 }}>
+				<View>
+					{/* DATE */}
+					<Text style={styles.dateText}>{todayDate}</Text>
 
-				{/* TODAY SECTION */}
-				<Text style={styles.sectionTitle}>Today</Text>
+					{/* TODAY SECTION */}
+					<Text style={styles.sectionTitle}>Today</Text>
 
-				<View style={styles.summaryCard}>
-					<Text style={styles.label}>Income</Text>
-					<Text style={[styles.value, { color: theme.colors.income }]}>
-						₹ {todayIncome}
+					<View style={styles.summaryCard}>
+						<Text style={styles.label}>Income</Text>
+						<Text style={[styles.value, { color: theme.colors.income }]}>
+							₹ {todayIncome}
+						</Text>
+					</View>
+
+					<View style={styles.summaryCard}>
+						<Text style={styles.label}>Expense</Text>
+						<Text style={[styles.value, { color: theme.colors.expense }]}>
+							₹ {todayExpense}
+						</Text>
+					</View>
+
+					<View style={styles.profitCard}>
+						<Text style={styles.label}>Profit</Text>
+						<Text
+							style={[
+								styles.bigValue,
+								{
+									color:
+										todayProfit >= 0
+											? theme.colors.income
+											: theme.colors.expense,
+								},
+							]}
+						>
+							₹ {todayProfit}
+						</Text>
+					</View>
+
+					{/* MONTH SECTION */}
+					<Text style={[styles.sectionTitle, { marginTop: 24 }]}>
+						This Month
 					</Text>
+
+					<View style={styles.summaryCard}>
+						<Text style={styles.label}>Income</Text>
+						<Text style={[styles.value, { color: theme.colors.income }]}>
+							₹ {monthIncome}
+						</Text>
+					</View>
+
+					<View style={styles.summaryCard}>
+						<Text style={styles.label}>Expense</Text>
+						<Text style={[styles.value, { color: theme.colors.expense }]}>
+							₹ {monthExpense}
+						</Text>
+					</View>
+
+					<View style={styles.summaryCard}>
+						<Text style={styles.label}>Profit</Text>
+						<Text
+							style={[
+								styles.value,
+								{
+									color:
+										monthProfit >= 0
+											? theme.colors.income
+											: theme.colors.expense,
+								},
+							]}
+						>
+							₹ {monthProfit}
+						</Text>
+					</View>
 				</View>
 
-				<View style={styles.summaryCard}>
-					<Text style={styles.label}>Expense</Text>
-					<Text style={[styles.value, { color: theme.colors.expense }]}>
-						₹ {todayExpense}
-					</Text>
-				</View>
-
-				<View style={styles.profitCard}>
-					<Text style={styles.label}>Profit</Text>
-					<Text
-						style={[
-							styles.bigValue,
-							{
-								color:
-									todayProfit >= 0 ? theme.colors.income : theme.colors.expense,
-							},
-						]}
-					>
-						₹ {todayProfit}
-					</Text>
-				</View>
-
-				{/* MONTH SECTION */}
-				<Text style={[styles.sectionTitle, { marginTop: 24 }]}>This Month</Text>
-
-				<View style={styles.summaryCard}>
-					<Text style={styles.label}>Income</Text>
-					<Text style={[styles.value, { color: theme.colors.income }]}>
-						₹ {monthIncome}
-					</Text>
-				</View>
-
-				<View style={styles.summaryCard}>
-					<Text style={styles.label}>Expense</Text>
-					<Text style={[styles.value, { color: theme.colors.expense }]}>
-						₹ {monthExpense}
-					</Text>
-				</View>
-
-				<View style={styles.summaryCard}>
-					<Text style={styles.label}>Profit</Text>
-					<Text
-						style={[
-							styles.value,
-							{
-								color:
-									monthProfit >= 0 ? theme.colors.income : theme.colors.expense,
-							},
-						]}
-					>
-						₹ {monthProfit}
-					</Text>
-				</View>
+				<FloatingButton />
 			</View>
-
-			<FloatingButton />
-		</View>
+		</ScrollView>
 	);
 }
 
 const styles = StyleSheet.create({
 	container: {
-		flex: 1,
 		backgroundColor: theme.colors.background,
 		padding: 16,
 	},
