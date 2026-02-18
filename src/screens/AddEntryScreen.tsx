@@ -10,6 +10,13 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { incomeCategories, expenseCategories } from "../constants/categories";
+import { addTransaction } from "../database/transactionService";
+import { addSupplier } from "../database/supplierService";
+import { useNavigation } from "@react-navigation/native";
+import * as ImagePicker from "expo-image-picker";
+
+import { Image } from "react-native";
+import { File, Directory, Paths } from "expo-file-system";
 
 import { theme } from "../theme";
 
@@ -22,6 +29,101 @@ export default function AddEntryScreen() {
 	const [supplier, setSupplier] = useState("");
 	const [paymentType, setPaymentType] = useState("cash");
 	const [note, setNote] = useState("");
+	const [images, setImages] = useState<string[]>([]);
+
+	const navigation: any = useNavigation();
+
+	const formatDate = (date: Date) => {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, "0");
+		const day = String(date.getDate()).padStart(2, "0");
+		return `${year}-${month}-${day}`;
+	};
+
+	const handleSave = async () => {
+		try {
+			if (!amount || !category) {
+				alert("Amount and Category are required");
+				return;
+			}
+
+			let supplierId: number | null = null;
+
+			if (type === "expense" && supplier) {
+				// Create supplier (simple version for now)
+				const result: any = await addSupplier(supplier);
+				supplierId = result?.lastInsertRowId ?? null;
+			}
+
+			await addTransaction({
+				type,
+				amount: parseFloat(amount),
+				category,
+				note,
+				date: formatDate(new Date()),
+				paymentType,
+				supplierId,
+				imagePath: JSON.stringify(images),
+			});
+
+			// Reset form
+			setAmount("");
+			setCategory("");
+			setSupplier("");
+			setNote("");
+			setPaymentType("cash");
+
+			alert("Transaction Saved");
+
+			navigation.goBack();
+		} catch (error) {
+			console.log(error);
+			alert("Error saving transaction");
+		}
+	};
+
+	const pickImage = async () => {
+		if (images.length >= 7) {
+			alert("Maximum 7 images allowed");
+			return;
+		}
+
+		const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+		if (!permission.granted) {
+			alert("Permission required");
+			return;
+		}
+
+		const result = await ImagePicker.launchImageLibraryAsync({
+			mediaTypes: ["images"],
+			quality: 0.7,
+			allowsMultipleSelection: true,
+			selectionLimit: 7 - images.length,
+		});
+
+		if (!result.canceled) {
+			const billsDir = new Directory(Paths.document, "bills");
+
+			if (!(await billsDir.exists)) {
+				await billsDir.create({ intermediates: true });
+			}
+
+			const newImagePaths: string[] = [];
+
+			for (const asset of result.assets) {
+				const fileName = `bill_${Date.now()}_${Math.random()}.jpg`;
+				const newFile = new File(billsDir, fileName);
+
+				const sourceFile = new File(asset.uri);
+				await sourceFile.copy(newFile);
+
+				newImagePaths.push(newFile.uri);
+			}
+
+			setImages((prev) => [...prev, ...newImagePaths]);
+		}
+	};
 
 	return (
 		<ScrollView
@@ -37,7 +139,16 @@ export default function AddEntryScreen() {
 					]}
 					onPress={() => setType("income")}
 				>
-					<Text style={styles.toggleText}>Income</Text>
+					<Text
+						style={[
+							styles.toggleText,
+							{
+								color: type === "income" ? "#fff" : theme.colors.textPrimary,
+							},
+						]}
+					>
+						Income
+					</Text>
 				</TouchableOpacity>
 
 				<TouchableOpacity
@@ -47,7 +158,16 @@ export default function AddEntryScreen() {
 					]}
 					onPress={() => setType("expense")}
 				>
-					<Text style={styles.toggleText}>Expense</Text>
+					<Text
+						style={[
+							styles.toggleText,
+							{
+								color: type === "expense" ? "#fff" : theme.colors.textPrimary,
+							},
+						]}
+					>
+						Expense
+					</Text>
 				</TouchableOpacity>
 			</View>
 
@@ -107,7 +227,16 @@ export default function AddEntryScreen() {
 						]}
 						onPress={() => setPaymentType(p)}
 					>
-						<Text style={styles.paymentText}>{p.toUpperCase()}</Text>
+						<Text
+							style={[
+								styles.paymentText,
+								{
+									color: paymentType === p ? "#fff" : theme.colors.textPrimary,
+								},
+							]}
+						>
+							{p.toUpperCase()}
+						</Text>
 					</TouchableOpacity>
 				))}
 			</View>
@@ -122,14 +251,39 @@ export default function AddEntryScreen() {
 				multiline
 			/>
 
-			{/* BILL IMAGE BUTTON */}
-			<TouchableOpacity style={styles.imageButton}>
-				<Ionicons name="camera-outline" size={20} color="#fff" />
-				<Text style={styles.imageButtonText}> Add Bill Image</Text>
-			</TouchableOpacity>
+			{type === "expense" && (
+				<>
+					<TouchableOpacity style={styles.imageButton} onPress={pickImage}>
+						<Ionicons name="camera-outline" size={20} color="#fff" />
+						<Text style={styles.imageButtonText}>
+							Add Bill Images ({images.length}/7)
+						</Text>
+					</TouchableOpacity>
+
+					<View style={styles.grid}>
+						{images.map((img, index) => (
+							<View key={index} style={styles.imageBox}>
+								<Image source={{ uri: img }} style={styles.previewImage} />
+
+								<TouchableOpacity
+									style={styles.removeImageButton}
+									onPress={async () => {
+										const file = new File(img);
+										await file.delete();
+
+										setImages((prev) => prev.filter((_, i) => i !== index));
+									}}
+								>
+									<Ionicons name="close" size={14} color="#fff" />
+								</TouchableOpacity>
+							</View>
+						))}
+					</View>
+				</>
+			)}
 
 			{/* SAVE BUTTON */}
-			<TouchableOpacity style={styles.saveButton}>
+			<TouchableOpacity style={styles.saveButton} onPress={handleSave}>
 				<Text style={styles.saveButtonText}>Save Entry</Text>
 			</TouchableOpacity>
 		</ScrollView>
@@ -152,20 +306,23 @@ const styles = StyleSheet.create({
 		padding: 14,
 		alignItems: "center",
 		borderRadius: 8,
-		backgroundColor: theme.colors.card,
 		marginHorizontal: 4,
+		borderWidth: 1,
+		borderColor: theme.colors.border,
+		backgroundColor: theme.colors.card,
 	},
 
 	activeIncome: {
 		backgroundColor: theme.colors.income,
+		borderColor: theme.colors.income,
 	},
 
 	activeExpense: {
 		backgroundColor: theme.colors.expense,
+		borderColor: theme.colors.expense,
 	},
 
 	toggleText: {
-		color: "#fff",
 		fontWeight: "600",
 	},
 
@@ -212,8 +369,38 @@ const styles = StyleSheet.create({
 	},
 
 	paymentText: {
-		color: "#fff",
 		fontWeight: "600",
+	},
+
+	grid: {
+		flexDirection: "row",
+		flexWrap: "wrap",
+		marginTop: 12,
+	},
+
+	imageBox: {
+		width: "30%",
+		aspectRatio: 1,
+		margin: "1.5%",
+		position: "relative",
+	},
+
+	previewImage: {
+		width: "100%",
+		height: "100%",
+		borderRadius: 8,
+	},
+
+	removeImageButton: {
+		position: "absolute",
+		top: 6,
+		right: 6,
+		backgroundColor: theme.colors.expense,
+		width: 22,
+		height: 22,
+		borderRadius: 11,
+		justifyContent: "center",
+		alignItems: "center",
 	},
 
 	imageButton: {
@@ -229,6 +416,11 @@ const styles = StyleSheet.create({
 	imageButtonText: {
 		color: "#fff",
 		fontWeight: "600",
+	},
+
+	imagePreviewContainer: {
+		marginTop: 12,
+		position: "relative",
 	},
 
 	saveButton: {
