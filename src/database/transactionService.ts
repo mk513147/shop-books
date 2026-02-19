@@ -37,21 +37,6 @@ export const getSummaryByDateRange = async (from: string, to: string) => {
 	return result;
 };
 
-export const checkExistingEntry = async (date: string, type: string) => {
-	const db = await getDb();
-
-	const result = await db.getFirstAsync(
-		`
-    SELECT id FROM transactions
-    WHERE date = ? AND type = ?
-    LIMIT 1
-    `,
-		[date, type],
-	);
-
-	return result;
-};
-
 export const getTransactionsByDateRange = async (from: string, to: string) => {
 	const db = await getDb();
 
@@ -65,6 +50,61 @@ export const getTransactionsByDateRange = async (from: string, to: string) => {
     ORDER BY t.date DESC, t.createdAt DESC
     `,
 		[from, to],
+	);
+
+	return result;
+};
+
+export const getDailyTransactionCount = async (date: string, type: string) => {
+	const db = await getDb();
+
+	const result = await db.getFirstAsync<{ count: number }>(
+		`
+	SELECT COUNT(*) as count
+	FROM transactions
+	WHERE date = ? AND type = ?
+	`,
+		[date, type],
+	);
+
+	return result?.count ?? 0;
+};
+
+export const checkIncomeCategorySameDay = async (
+	date: string,
+	category: string,
+) => {
+	const db = await getDb();
+
+	const result = await db.getFirstAsync(
+		`
+    SELECT id FROM transactions
+    WHERE date = ?
+      AND type = 'income'
+      AND category = ?
+    LIMIT 1
+    `,
+		[date, category],
+	);
+
+	return result;
+};
+
+export const checkExpenseSupplierSameDay = async (
+	date: string,
+	supplierId: number,
+) => {
+	const db = await getDb();
+
+	const result = await db.getFirstAsync(
+		`
+    SELECT id FROM transactions
+    WHERE date = ?
+      AND type = 'expense'
+      AND supplierId = ?
+    LIMIT 1
+    `,
+		[date, supplierId],
 	);
 
 	return result;

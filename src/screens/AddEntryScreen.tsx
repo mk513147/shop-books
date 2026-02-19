@@ -12,9 +12,11 @@ import { Picker } from "@react-native-picker/picker";
 import { incomeCategories, expenseCategories } from "../constants/categories";
 import {
 	addTransaction,
-	checkExistingEntry,
+	checkExpenseSupplierSameDay,
+	checkIncomeCategorySameDay,
+	getDailyTransactionCount,
 } from "../database/transactionService";
-import { addSupplier } from "../database/supplierService";
+import { addSupplier, getOrCreateSupplier } from "../database/supplierService";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 
@@ -57,44 +59,73 @@ export default function AddEntryScreen() {
 				return;
 			}
 
-			let supplierId: number | null = null;
-
-			if (type === "expense" && supplier) {
-				// Create supplier (simple version for now)
-				const result: any = await addSupplier(supplier);
-				supplierId = result?.lastInsertRowId ?? null;
-			}
-			const formattedDate = formatDate(selectedDate);
-
-			const existing = await checkExistingEntry(formattedDate, type);
-
-			if (existing) {
-				alert(`An ${type} entry already exists for this date.`);
-
-				setSelectedDate(new Date()); // reset to today
+			if (type === "expense" && !supplier) {
+				alert("Supplier is required for expense.");
 				return;
 			}
+
+			const formattedDate = formatDate(selectedDate);
+
+			// 1️⃣ Daily limit
+			const count = await getDailyTransactionCount(formattedDate, type);
+
+			if (count >= 12) {
+				alert(`Maximum 12 ${type} entries allowed per day.`);
+				return;
+			}
+
+			// 2️⃣ Income duplicate category same day
+			if (type === "income") {
+				const existingCategory = await checkIncomeCategorySameDay(
+					formattedDate,
+					category,
+				);
+
+				if (existingCategory) {
+					alert(`Income category "${category}" already exists for this date.`);
+					return;
+				}
+			}
+
+			let supplierId: number | null = null;
+
+			// 3️⃣ Expense supplier duplicate same day
+			if (type === "expense") {
+				supplierId = await getOrCreateSupplier(supplier);
+
+				const existingSupplier = await checkExpenseSupplierSameDay(
+					formattedDate,
+					supplierId,
+				);
+
+				if (existingSupplier) {
+					alert(
+						`Expense for supplier "${supplier}" already exists for this date.`,
+					);
+					return;
+				}
+			}
+
+			// 4️⃣ Insert
 			await addTransaction({
 				type,
 				amount: parseFloat(amount),
 				category,
 				note,
 				date: formattedDate,
-
 				paymentType,
 				supplierId,
 				imagePath: JSON.stringify(images),
 			});
 
-			// Reset form
 			setAmount("");
 			setCategory("");
 			setSupplier("");
 			setNote("");
 			setPaymentType("cash");
+			setImages([]);
 
 			alert("Transaction Saved");
-
 			navigation.goBack();
 		} catch (error) {
 			console.log(error);
