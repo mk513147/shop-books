@@ -9,41 +9,26 @@ import {
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Platform } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback } from "react";
+import { getTransactionsByDateRange } from "../database/transactionService";
+import { Modal, Dimensions } from "react-native";
 
 import { theme } from "../theme";
 
 type Transaction = {
-	id: string;
+	id: number;
 	type: "income" | "expense";
 	amount: number;
 	category: string;
-	supplier?: string;
-	paymentType: string;
+	note?: string;
 	date: string;
-	image?: string;
+	paymentType: string;
+	supplierId?: number | null;
+	supplierName?: string | null;
+	imagePath?: string | null;
+	createdAt?: string;
 };
-
-const mockData: Transaction[] = [
-	{
-		id: "1",
-		type: "expense",
-		amount: 5000,
-		category: "Stock",
-		supplier: "Sharma Steel",
-		paymentType: "cash",
-		date: "2026-02-18",
-	},
-	{
-		id: "2",
-		type: "expense",
-		amount: 2500,
-		category: "Transport",
-		supplier: "Gupta Traders",
-		paymentType: "online",
-		date: "2026-02-17",
-		image: "https://via.placeholder.com/60",
-	},
-];
 
 export default function TransactionsScreen() {
 	const today = new Date();
@@ -56,12 +41,39 @@ export default function TransactionsScreen() {
 	const [showFromPicker, setShowFromPicker] = useState(false);
 	const [showToPicker, setShowToPicker] = useState(false);
 
+	const [transactions, setTransactions] = useState<Transaction[]>([]);
+
+	const [viewerVisible, setViewerVisible] = useState(false);
+	const [viewerImages, setViewerImages] = useState<string[]>([]);
+	const [currentIndex, setCurrentIndex] = useState(0);
+
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, "0");
 		const day = String(date.getDate()).padStart(2, "0");
 		return `${year}-${month}-${day}`;
 	};
+
+	const openViewer = (images: string[], index: number) => {
+		setViewerImages(images);
+		setCurrentIndex(index);
+		setViewerVisible(true);
+	};
+
+	const loadTransactions = async () => {
+		const from = formatDate(fromDate);
+		const to = formatDate(toDate);
+
+		const data = await getTransactionsByDateRange(from, to);
+
+		setTransactions(data as Transaction[]);
+	};
+
+	useFocusEffect(
+		useCallback(() => {
+			loadTransactions();
+		}, [fromDate, toDate]),
+	);
 
 	const renderItem = ({ item }: { item: Transaction }) => {
 		return (
@@ -86,18 +98,46 @@ export default function TransactionsScreen() {
 
 				<Text style={styles.category}>{item.category}</Text>
 
-				{item.supplier && (
-					<Text style={styles.supplier}>Supplier: {item.supplier}</Text>
+				{item.supplierName && (
+					<Text style={styles.supplier}>Supplier: {item.supplierName}</Text>
+				)}
+
+				{/* IMAGE GRID */}
+				{item.imagePath && (
+					<View style={styles.thumbnailRow}>
+						{(() => {
+							const images = JSON.parse(item.imagePath || "[]");
+							const visibleImages = images.slice(0, 5);
+							const remaining = images.length - 5;
+
+							return visibleImages.map((img: string, index: number) => {
+								const isLastVisible = index === 4 && remaining > 0;
+
+								return (
+									<TouchableOpacity
+										key={index}
+										onPress={() => openViewer(images, index)}
+									>
+										<View style={styles.thumbnailWrapper}>
+											<Image source={{ uri: img }} style={styles.thumbnail} />
+
+											{isLastVisible && (
+												<View style={styles.overlay}>
+													<Text style={styles.overlayText}>+{remaining}</Text>
+												</View>
+											)}
+										</View>
+									</TouchableOpacity>
+								);
+							});
+						})()}
+					</View>
 				)}
 
 				<View style={styles.rowBottom}>
 					<Text style={styles.paymentBadge}>
 						{item.paymentType.toUpperCase()}
 					</Text>
-
-					{item.image && (
-						<Image source={{ uri: item.image }} style={styles.thumbnail} />
-					)}
 				</View>
 			</View>
 		);
@@ -125,11 +165,49 @@ export default function TransactionsScreen() {
 			</View>
 
 			<FlatList
-				data={mockData}
-				keyExtractor={(item) => item.id}
+				data={transactions}
+				keyExtractor={(item) => item.id.toString()}
 				renderItem={renderItem}
 				contentContainerStyle={{ paddingBottom: 20 }}
 			/>
+
+			<Modal visible={viewerVisible} transparent>
+				<View style={styles.viewerContainer}>
+					<Image
+						source={{ uri: viewerImages[currentIndex] }}
+						style={styles.viewerImage}
+						resizeMode="contain"
+					/>
+
+					{/* Close Button */}
+					<TouchableOpacity
+						style={styles.closeButton}
+						onPress={() => setViewerVisible(false)}
+					>
+						<Text style={{ color: "#fff", fontSize: 18 }}>✕</Text>
+					</TouchableOpacity>
+
+					{/* Previous */}
+					{currentIndex > 0 && (
+						<TouchableOpacity
+							style={styles.prevButton}
+							onPress={() => setCurrentIndex(currentIndex - 1)}
+						>
+							<Text style={styles.navText}>‹</Text>
+						</TouchableOpacity>
+					)}
+
+					{/* Next */}
+					{currentIndex < viewerImages.length - 1 && (
+						<TouchableOpacity
+							style={styles.nextButton}
+							onPress={() => setCurrentIndex(currentIndex + 1)}
+						>
+							<Text style={styles.navText}>›</Text>
+						</TouchableOpacity>
+					)}
+				</View>
+			</Modal>
 
 			{showFromPicker && (
 				<DateTimePicker
@@ -196,6 +274,70 @@ const styles = StyleSheet.create({
 		justifyContent: "space-between",
 		alignItems: "center",
 		marginTop: 8,
+	},
+
+	thumbnailRow: {
+		flexDirection: "row",
+		marginTop: 8,
+	},
+
+	thumbnailWrapper: {
+		position: "relative",
+		marginRight: 6,
+	},
+
+	overlay: {
+		position: "absolute",
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
+		backgroundColor: "rgba(0,0,0,0.6)",
+		justifyContent: "center",
+		alignItems: "center",
+		borderRadius: 6,
+	},
+
+	overlayText: {
+		color: "#fff",
+		fontWeight: "700",
+		fontSize: 16,
+	},
+
+	viewerContainer: {
+		flex: 1,
+		backgroundColor: "rgba(0,0,0,0.95)",
+		justifyContent: "center",
+		alignItems: "center",
+	},
+
+	viewerImage: {
+		width: Dimensions.get("window").width,
+		height: Dimensions.get("window").height * 0.7,
+	},
+
+	closeButton: {
+		position: "absolute",
+		top: 50,
+		right: 20,
+	},
+
+	prevButton: {
+		position: "absolute",
+		left: 20,
+		top: "50%",
+	},
+
+	nextButton: {
+		position: "absolute",
+		right: 20,
+		top: "50%",
+	},
+
+	navText: {
+		color: "#fff",
+		fontSize: 40,
+		fontWeight: "bold",
 	},
 
 	dateText: {

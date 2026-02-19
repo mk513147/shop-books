@@ -51,3 +51,21 @@ export const checkExistingEntry = async (date: string, type: string) => {
 
 	return result;
 };
+
+export const getTransactionsByDateRange = async (from: string, to: string) => {
+	const db = await getDb();
+
+	const result = await db.getAllAsync(
+		`
+    SELECT t.*, s.name as supplierName
+    FROM transactions t
+    LEFT JOIN suppliers s
+    ON t.supplierId = s.id
+    WHERE t.date BETWEEN ? AND ?
+    ORDER BY t.date DESC, t.createdAt DESC
+    `,
+		[from, to],
+	);
+
+	return result;
+};
