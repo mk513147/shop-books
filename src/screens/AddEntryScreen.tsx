@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
 	View,
 	Text,
@@ -15,41 +15,75 @@ import {
 	checkExpenseSupplierSameDay,
 	checkIncomeCategorySameDay,
 	getDailyTransactionCount,
+	getTransactionsByDate,
 } from "../database/transactionService";
-import { addSupplier, getOrCreateSupplier } from "../database/supplierService";
+import { getOrCreateSupplier, getSuppliers } from "../database/supplierService";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 
 import { Image } from "react-native";
 import { File, Directory, Paths } from "expo-file-system";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { Animated } from "react-native";
+
 import { Platform } from "react-native";
 
 import { theme } from "../theme";
 
-const mockSuppliers = ["Sharma Steel", "Gupta Traders", "ABC Supplies"];
+type Supplier = {
+	id: number;
+	name: string;
+};
 
 export default function AddEntryScreen() {
 	const [type, setType] = useState<"income" | "expense">("income");
 	const [amount, setAmount] = useState("");
 	const [category, setCategory] = useState("");
 	const [supplier, setSupplier] = useState("");
+
+	const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
 	const [paymentType, setPaymentType] = useState("cash");
 	const [note, setNote] = useState("");
+
 	const [images, setImages] = useState<string[]>([]);
 
-	const navigation: any = useNavigation();
+	const [dailyTransactions, setDailyTransactions] = useState<any[]>([]);
+
+	const [isExpanded, setIsExpanded] = useState(false);
+	const panelHeight = useState(new Animated.Value(70))[0];
 
 	const today = new Date();
 
 	const [selectedDate, setSelectedDate] = useState<Date>(today);
 	const [showDatePicker, setShowDatePicker] = useState(false);
 
+	const togglePanel = () => {
+		Animated.timing(panelHeight, {
+			toValue: isExpanded ? 70 : 300,
+			duration: 250,
+			useNativeDriver: false,
+		}).start();
+
+		setIsExpanded(!isExpanded);
+	};
+
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, "0");
 		const day = String(date.getDate()).padStart(2, "0");
 		return `${year}-${month}-${day}`;
+	};
+
+	const loadSuppliers = async () => {
+		const dbSuppliers = await getSuppliers();
+		setSuppliers(dbSuppliers as Supplier[]);
+	};
+
+	const loadDailyTransactions = async () => {
+		const formattedDate = formatDate(selectedDate);
+		const data = await getTransactionsByDate(formattedDate);
+		setDailyTransactions(data);
 	};
 
 	const handleSave = async () => {
@@ -59,7 +93,14 @@ export default function AddEntryScreen() {
 				return;
 			}
 
-			if (type === "expense" && !supplier) {
+			const numericAmount = parseFloat(amount);
+
+			if (isNaN(numericAmount) || numericAmount <= 0) {
+				alert("Enter a valid amount");
+				return;
+			}
+
+			if (type === "expense" && !suppliers) {
 				alert("Supplier is required for expense.");
 				return;
 			}
@@ -109,7 +150,7 @@ export default function AddEntryScreen() {
 			// 4️⃣ Insert
 			await addTransaction({
 				type,
-				amount: parseFloat(amount),
+				amount: numericAmount,
 				category,
 				note,
 				date: formattedDate,
@@ -126,7 +167,7 @@ export default function AddEntryScreen() {
 			setImages([]);
 
 			alert("Transaction Saved");
-			navigation.goBack();
+			await loadDailyTransactions();
 		} catch (error) {
 			console.log(error);
 			alert("Error saving transaction");
@@ -176,11 +217,24 @@ export default function AddEntryScreen() {
 		}
 	};
 
+	const incomeList = dailyTransactions.filter((t) => t.type === "income");
+
+	const expenseList = dailyTransactions.filter((t) => t.type === "expense");
+
+	const incomeTotal = incomeList.reduce(
+		(sum, t) => sum + Number(t.amount || 0),
+		0,
+	);
+
+	const expenseTotal = expenseList.reduce((sum, t) => sum + t.amount, 0);
+
+	useEffect(() => {
+		loadDailyTransactions();
+		loadSuppliers();
+	}, [selectedDate]);
+
 	return (
-		<ScrollView
-			contentContainerStyle={styles.container}
-			keyboardShouldPersistTaps="handled"
-		>
+		<View style={styles.container}>
 			{showDatePicker && (
 				<DateTimePicker
 					value={selectedDate}
@@ -192,180 +246,285 @@ export default function AddEntryScreen() {
 					}}
 				/>
 			)}
-
-			{/* TYPE TOGGLE */}
-			<View style={styles.toggleContainer}>
-				<TouchableOpacity
-					style={[
-						styles.toggleButton,
-						type === "income" && styles.activeIncome,
-					]}
-					onPress={() => setType("income")}
+			<View style={styles.formSection}>
+				{/* TYPE TOGGLE */}
+				<ScrollView
+					showsVerticalScrollIndicator={false}
+					keyboardShouldPersistTaps="never"
 				>
-					<Text
-						style={[
-							styles.toggleText,
-							{
-								color: type === "income" ? "#fff" : theme.colors.textPrimary,
-							},
-						]}
+					<View style={styles.toggleContainer}>
+						<TouchableOpacity
+							style={[
+								styles.toggleButton,
+								type === "income" && styles.activeIncome,
+							]}
+							onPress={() => setType("income")}
+						>
+							<Text
+								style={[
+									styles.toggleText,
+									{
+										color:
+											type === "income" ? "#fff" : theme.colors.textPrimary,
+									},
+								]}
+							>
+								Income
+							</Text>
+						</TouchableOpacity>
+
+						<TouchableOpacity
+							style={[
+								styles.toggleButton,
+								type === "expense" && styles.activeExpense,
+							]}
+							onPress={() => setType("expense")}
+						>
+							<Text
+								style={[
+									styles.toggleText,
+									{
+										color:
+											type === "expense" ? "#fff" : theme.colors.textPrimary,
+									},
+								]}
+							>
+								Expense
+							</Text>
+						</TouchableOpacity>
+					</View>
+
+					<Text style={styles.label}>Date</Text>
+
+					<TouchableOpacity
+						style={styles.input}
+						onPress={() => setShowDatePicker(true)}
 					>
-						Income
-					</Text>
-				</TouchableOpacity>
+						<Text>{formatDate(selectedDate)}</Text>
+					</TouchableOpacity>
 
-				<TouchableOpacity
-					style={[
-						styles.toggleButton,
-						type === "expense" && styles.activeExpense,
-					]}
-					onPress={() => setType("expense")}
-				>
-					<Text
-						style={[
-							styles.toggleText,
-							{
-								color: type === "expense" ? "#fff" : theme.colors.textPrimary,
-							},
-						]}
-					>
-						Expense
-					</Text>
-				</TouchableOpacity>
-			</View>
+					{/* AMOUNT */}
+					<Text style={styles.label}>Amount</Text>
+					<TextInput
+						style={styles.amountInput}
+						keyboardType="numeric"
+						placeholder="₹ 0.00"
+						value={amount}
+						onChangeText={setAmount}
+					/>
 
-			<Text style={styles.label}>Date</Text>
-
-			<TouchableOpacity
-				style={styles.input}
-				onPress={() => setShowDatePicker(true)}
-			>
-				<Text>{formatDate(selectedDate)}</Text>
-			</TouchableOpacity>
-
-			{/* AMOUNT */}
-			<Text style={styles.label}>Amount</Text>
-			<TextInput
-				style={styles.amountInput}
-				keyboardType="numeric"
-				placeholder="₹ 0.00"
-				value={amount}
-				onChangeText={setAmount}
-			/>
-
-			{/* CATEGORY */}
-			<Text style={styles.label}>Category</Text>
-			<View style={styles.pickerWrapper}>
-				<Picker
-					selectedValue={category}
-					onValueChange={(itemValue) => setCategory(itemValue)}
-				>
-					<Picker.Item label="Select Category" value="" />
-					{(type === "income" ? incomeCategories : expenseCategories).map(
-						(cat) => (
-							<Picker.Item key={cat} label={cat} value={cat} />
-						),
-					)}
-				</Picker>
-			</View>
-
-			{/* SUPPLIER (only for expense) */}
-			{type === "expense" && (
-				<>
-					<Text style={styles.label}>Supplier</Text>
+					{/* CATEGORY */}
+					<Text style={styles.label}>Category</Text>
 					<View style={styles.pickerWrapper}>
 						<Picker
-							selectedValue={supplier}
-							onValueChange={(itemValue) => setSupplier(itemValue)}
+							selectedValue={category}
+							onValueChange={(itemValue) => setCategory(itemValue)}
 						>
-							<Picker.Item label="Select Supplier" value="" />
-							{mockSuppliers.map((sup) => (
-								<Picker.Item key={sup} label={sup} value={sup} />
-							))}
+							<Picker.Item label="Select Category" value="" />
+							{(type === "income" ? incomeCategories : expenseCategories).map(
+								(cat) => (
+									<Picker.Item key={cat} label={cat} value={cat} />
+								),
+							)}
 						</Picker>
 					</View>
-				</>
-			)}
 
-			{/* PAYMENT TYPE */}
-			<Text style={styles.label}>Payment Type</Text>
-			<View style={styles.paymentRow}>
-				{["cash", "online", "due"].map((p) => (
-					<TouchableOpacity
-						key={p}
-						style={[
-							styles.paymentButton,
-							paymentType === p && styles.paymentActive,
-						]}
-						onPress={() => setPaymentType(p)}
-					>
-						<Text
-							style={[
-								styles.paymentText,
-								{
-									color: paymentType === p ? "#fff" : theme.colors.textPrimary,
-								},
-							]}
-						>
-							{p.toUpperCase()}
-						</Text>
-					</TouchableOpacity>
-				))}
-			</View>
-
-			{/* NOTE */}
-			<Text style={styles.label}>Note</Text>
-			<TextInput
-				style={[styles.input, { height: 80 }]}
-				placeholder="Optional note"
-				value={note}
-				onChangeText={setNote}
-				multiline
-			/>
-
-			{type === "expense" && (
-				<>
-					<TouchableOpacity style={styles.imageButton} onPress={pickImage}>
-						<Ionicons name="camera-outline" size={20} color="#fff" />
-						<Text style={styles.imageButtonText}>
-							Add Bill Images ({images.length}/7)
-						</Text>
-					</TouchableOpacity>
-
-					<View style={styles.grid}>
-						{images.map((img, index) => (
-							<View key={index} style={styles.imageBox}>
-								<Image source={{ uri: img }} style={styles.previewImage} />
-
-								<TouchableOpacity
-									style={styles.removeImageButton}
-									onPress={async () => {
-										const file = new File(img);
-										await file.delete();
-
-										setImages((prev) => prev.filter((_, i) => i !== index));
-									}}
+					{/* SUPPLIER (only for expense) */}
+					{type === "expense" && (
+						<>
+							<Text style={styles.label}>Supplier</Text>
+							<View style={styles.pickerWrapper}>
+								<Picker
+									selectedValue={supplier}
+									onValueChange={(itemValue) => setSupplier(itemValue)}
 								>
-									<Ionicons name="close" size={14} color="#fff" />
-								</TouchableOpacity>
+									<Picker.Item label="Select Supplier" value="" />
+									{suppliers.map((sup) => (
+										<Picker.Item
+											key={sup.id}
+											label={sup.name}
+											value={sup.name}
+										/>
+									))}
+								</Picker>
 							</View>
+						</>
+					)}
+
+					{/* PAYMENT TYPE */}
+					<Text style={styles.label}>Payment Type</Text>
+					<View style={styles.paymentRow}>
+						{["cash", "online", "due"].map((p) => (
+							<TouchableOpacity
+								key={p}
+								style={[
+									styles.paymentButton,
+									paymentType === p && styles.paymentActive,
+								]}
+								onPress={() => setPaymentType(p)}
+							>
+								<Text
+									style={[
+										styles.paymentText,
+										{
+											color:
+												paymentType === p ? "#fff" : theme.colors.textPrimary,
+										},
+									]}
+								>
+									{p.toUpperCase()}
+								</Text>
+							</TouchableOpacity>
 						))}
 					</View>
-				</>
-			)}
 
-			{/* SAVE BUTTON */}
-			<TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-				<Text style={styles.saveButtonText}>Save Entry</Text>
-			</TouchableOpacity>
-		</ScrollView>
+					{/* NOTE */}
+					<Text style={styles.label}>Note</Text>
+					<TextInput
+						style={[styles.input, { height: 80 }]}
+						placeholder="Optional note"
+						value={note}
+						onChangeText={setNote}
+						multiline
+					/>
+
+					{type === "expense" && (
+						<>
+							<TouchableOpacity style={styles.imageButton} onPress={pickImage}>
+								<Ionicons name="camera-outline" size={20} color="#fff" />
+								<Text style={styles.imageButtonText}>
+									Add Bill Images ({images.length}/7)
+								</Text>
+							</TouchableOpacity>
+
+							<View style={styles.grid}>
+								{images.map((img, index) => (
+									<View key={index} style={styles.imageBox}>
+										<Image source={{ uri: img }} style={styles.previewImage} />
+
+										<TouchableOpacity
+											style={styles.removeImageButton}
+											onPress={async () => {
+												const file = new File(img);
+												await file.delete();
+
+												setImages((prev) => prev.filter((_, i) => i !== index));
+											}}
+										>
+											<Ionicons name="close" size={14} color="#fff" />
+										</TouchableOpacity>
+									</View>
+								))}
+							</View>
+						</>
+					)}
+
+					{/* SAVE BUTTON */}
+					<TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+						<Text style={styles.saveButtonText}>Save Entry</Text>
+					</TouchableOpacity>
+				</ScrollView>
+			</View>
+
+			{/* SUMMARY SECTION*/}
+			<Animated.View style={[styles.summaryPanel, { height: panelHeight }]}>
+				{/* HEADER */}
+				<TouchableOpacity style={styles.panelHeader} onPress={togglePanel}>
+					<Text style={styles.panelTitle}>Today's Summary</Text>
+
+					<Ionicons
+						name={isExpanded ? "chevron-down" : "chevron-up"}
+						size={20}
+						color={theme.colors.textPrimary}
+					/>
+				</TouchableOpacity>
+
+				{/* CONTENT */}
+				{isExpanded && (
+					<ScrollView>
+						{/* Income */}
+						<Text style={styles.subHeading}>Income</Text>
+						{incomeList.map((item) => (
+							<View key={item.id} style={styles.row}>
+								<Text>{item.category}</Text>
+								<Text>₹{item.amount}</Text>
+							</View>
+						))}
+						<View style={styles.totalRow}>
+							<Text>Total</Text>
+							<Text>₹{incomeTotal}</Text>
+						</View>
+
+						{/* Expense */}
+						<Text style={[styles.subHeading, { marginTop: 16 }]}>Expense</Text>
+						{expenseList.map((item) => (
+							<View key={item.id} style={styles.row}>
+								<Text>{item.supplierName}</Text>
+								<Text>₹{item.amount}</Text>
+							</View>
+						))}
+						<View style={styles.totalRow}>
+							<Text>Total</Text>
+							<Text>₹{expenseTotal}</Text>
+						</View>
+					</ScrollView>
+				)}
+			</Animated.View>
+		</View>
 	);
 }
 
 const styles = StyleSheet.create({
 	container: {
-		padding: 16,
+		flex: 1,
 		backgroundColor: theme.colors.background,
+	},
+
+	formSection: {
+		flex: 1,
+		padding: 16,
+	},
+
+	summaryPanel: {
+		backgroundColor: theme.colors.card,
+		borderTopLeftRadius: 20,
+		borderTopRightRadius: 20,
+		paddingHorizontal: 16,
+		paddingTop: 10,
+		elevation: 8,
+	},
+
+	panelHeader: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		alignItems: "center",
+		paddingBottom: 8,
+	},
+
+	panelTitle: {
+		fontSize: 16,
+		fontWeight: "700",
+	},
+
+	subHeading: {
+		fontWeight: "600",
+		marginTop: 10,
+		marginBottom: 4,
+	},
+
+	row: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		paddingVertical: 4,
+	},
+
+	totalRow: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		paddingVertical: 6,
+		borderTopWidth: 1,
+		borderColor: theme.colors.border,
+		marginTop: 4,
 	},
 
 	toggleContainer: {
@@ -511,5 +670,11 @@ const styles = StyleSheet.create({
 	pickerWrapper: {
 		backgroundColor: theme.colors.card,
 		borderRadius: 8,
+	},
+
+	sectionTitle: {
+		fontSize: 16,
+		fontWeight: "700",
+		marginBottom: 10,
 	},
 });

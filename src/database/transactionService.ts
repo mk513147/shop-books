@@ -109,3 +109,21 @@ export const checkExpenseSupplierSameDay = async (
 
 	return result;
 };
+
+export const getTransactionsByDate = async (date: string) => {
+	const db = await getDb();
+
+	const result = await db.getAllAsync(
+		`
+    SELECT t.*, s.name as supplierName
+    FROM transactions t
+    LEFT JOIN suppliers s
+    ON t.supplierId = s.id
+    WHERE t.date = ?
+    ORDER BY t.type, t.createdAt ASC
+    `,
+		[date],
+	);
+
+	return result;
+};
