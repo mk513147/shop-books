@@ -73,6 +73,7 @@ export const getDailyTransactionCount = async (date: string, type: string) => {
 export const checkIncomeCategorySameDay = async (
 	date: string,
 	category: string,
+	excludeId?: number,
 ) => {
 	const db = await getDb();
 
@@ -82,9 +83,10 @@ export const checkIncomeCategorySameDay = async (
     WHERE date = ?
       AND type = 'income'
       AND category = ?
+      ${excludeId ? "AND id != ?" : ""}
     LIMIT 1
     `,
-		[date, category],
+		excludeId ? [date, category, excludeId] : [date, category],
 	);
 
 	return result;
@@ -93,6 +95,7 @@ export const checkIncomeCategorySameDay = async (
 export const checkExpenseSupplierSameDay = async (
 	date: string,
 	supplierId: number,
+	excludeId?: number,
 ) => {
 	const db = await getDb();
 
@@ -102,9 +105,10 @@ export const checkExpenseSupplierSameDay = async (
     WHERE date = ?
       AND type = 'expense'
       AND supplierId = ?
+	  ${excludeId ? "AND id != ?" : ""}
     LIMIT 1
     `,
-		[date, supplierId],
+		excludeId ? [date, supplierId, excludeId] : [date, supplierId],
 	);
 
 	return result;
@@ -126,4 +130,40 @@ export const getTransactionsByDate = async (date: string) => {
 	);
 
 	return result;
+};
+
+export const updateTransaction = async (id: number, data: any) => {
+	const db = await getDb();
+
+	await db.runAsync(
+		`
+    UPDATE transactions
+    SET type = ?,
+        amount = ?,
+        category = ?,
+        note = ?,
+        date = ?,
+        paymentType = ?,
+        supplierId = ?,
+        imagePath = ?
+    WHERE id = ?
+    `,
+		[
+			data.type,
+			data.amount,
+			data.category,
+			data.note,
+			data.date,
+			data.paymentType,
+			data.supplierId,
+			data.imagePath,
+			id,
+		],
+	);
+};
+
+export const deleteTransaction = async (id: number) => {
+	const db = await getDb();
+
+	await db.runAsync(`DELETE FROM transactions WHERE id = ?`, [id]);
 };

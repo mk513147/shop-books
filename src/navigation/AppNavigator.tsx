@@ -10,6 +10,7 @@ import SuppliersScreen from "../screens/SuppliersScreen";
 import ReportsScreen from "../screens/ReportsScreen";
 import AddEntryScreen from "../screens/AddEntryScreen";
 import SupplierDetailScreen from "../screens/SupplierDetailScreen";
+import TransactionDetailScreen from "../screens/TransactionDetailScreen";
 
 import { theme } from "../theme";
 
@@ -81,6 +82,15 @@ export default function AppNavigator() {
 					component={SupplierDetailScreen}
 					options={{
 						title: "Supplier Details",
+						headerStyle: { backgroundColor: theme.colors.primary },
+						headerTintColor: "#fff",
+					}}
+				/>
+				<Stack.Screen
+					name="TransactionDetail"
+					component={TransactionDetailScreen}
+					options={{
+						title: "Transaction Details",
 						headerStyle: { backgroundColor: theme.colors.primary },
 						headerTintColor: "#fff",
 					}}

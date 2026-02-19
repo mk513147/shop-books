@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useCallback, useState } from "react";
 import {
 	View,
 	Text,
@@ -16,6 +16,7 @@ import {
 	checkIncomeCategorySameDay,
 	getDailyTransactionCount,
 	getTransactionsByDate,
+	updateTransaction,
 } from "../database/transactionService";
 import { getOrCreateSupplier, getSuppliers } from "../database/supplierService";
 
@@ -24,9 +25,18 @@ import * as ImagePicker from "expo-image-picker";
 import { File, Directory, Paths } from "expo-file-system";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
-import { Animated, Image, PanResponder, Dimensions } from "react-native";
+import { Image, Platform } from "react-native";
 
-import { Platform } from "react-native";
+import {
+	useRoute,
+	RouteProp,
+	useFocusEffect,
+	useNavigation,
+} from "@react-navigation/native";
+
+import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+
+import { RootStackParamList } from "../navigation/types";
 
 import { theme } from "../theme";
 import DraggableBottomSheet from "../components/DraggableBottomSheet";
@@ -36,7 +46,15 @@ type Supplier = {
 	name: string;
 };
 
+type RouteProps = RouteProp<RootStackParamList, "AddEntry">;
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, "AddEntry">;
+
 export default function AddEntryScreen() {
+	const route = useRoute<RouteProps>();
+	const editingTransaction = route.params?.transaction ?? null;
+	const isEditMode = !!editingTransaction;
+
 	const [type, setType] = useState<"income" | "expense">("income");
 	const [amount, setAmount] = useState("");
 	const [category, setCategory] = useState("");
@@ -50,6 +68,8 @@ export default function AddEntryScreen() {
 	const [images, setImages] = useState<string[]>([]);
 
 	const [dailyTransactions, setDailyTransactions] = useState<any[]>([]);
+
+	const navigation = useNavigation<NavigationProp>();
 
 	const today = new Date();
 	const [selectedDate, setSelectedDate] = useState<Date>(today);
@@ -87,7 +107,7 @@ export default function AddEntryScreen() {
 				return;
 			}
 
-			if (type === "expense" && !suppliers) {
+			if (type === "expense" && !supplier) {
 				alert("Supplier is required for expense.");
 				return;
 			}
@@ -95,11 +115,13 @@ export default function AddEntryScreen() {
 			const formattedDate = formatDate(selectedDate);
 
 			// 1️⃣ Daily limit
-			const count = await getDailyTransactionCount(formattedDate, type);
+			if (!isEditMode) {
+				const count = await getDailyTransactionCount(formattedDate, type);
 
-			if (count >= 12) {
-				alert(`Maximum 12 ${type} entries allowed per day.`);
-				return;
+				if (count >= 12) {
+					alert(`Maximum 12 ${type} entries allowed per day.`);
+					return;
+				}
 			}
 
 			// 2️⃣ Income duplicate category same day
@@ -107,6 +129,7 @@ export default function AddEntryScreen() {
 				const existingCategory = await checkIncomeCategorySameDay(
 					formattedDate,
 					category,
+					editingTransaction?.id,
 				);
 
 				if (existingCategory) {
@@ -124,6 +147,7 @@ export default function AddEntryScreen() {
 				const existingSupplier = await checkExpenseSupplierSameDay(
 					formattedDate,
 					supplierId,
+					editingTransaction?.id,
 				);
 
 				if (existingSupplier) {
@@ -135,26 +159,43 @@ export default function AddEntryScreen() {
 			}
 
 			// 4️⃣ Insert
-			await addTransaction({
-				type,
-				amount: numericAmount,
-				category,
-				note,
-				date: formattedDate,
-				paymentType,
-				supplierId,
-				imagePath: JSON.stringify(images),
-			});
+			if (isEditMode) {
+				await updateTransaction(editingTransaction.id, {
+					type,
+					amount: numericAmount,
+					category,
+					note,
+					date: formattedDate,
+					paymentType,
+					supplierId,
+					imagePath: JSON.stringify(images),
+				});
 
-			setAmount("");
-			setCategory("");
-			setSupplier("");
-			setNote("");
-			setPaymentType("cash");
-			setImages([]);
+				alert("Transaction Updated");
+				await loadDailyTransactions();
+				navigation.goBack();
+			} else {
+				await addTransaction({
+					type,
+					amount: numericAmount,
+					category,
+					note,
+					date: formattedDate,
+					paymentType,
+					supplierId,
+					imagePath: JSON.stringify(images),
+				});
 
-			alert("Transaction Saved");
-			await loadDailyTransactions();
+				setAmount("");
+				setCategory("");
+				setSupplier("");
+				setNote("");
+				setPaymentType("cash");
+				setImages([]);
+
+				alert("Transaction Saved");
+				await loadDailyTransactions();
+			}
 		} catch (error) {
 			console.log(error);
 			alert("Error saving transaction");
@@ -213,12 +254,39 @@ export default function AddEntryScreen() {
 		0,
 	);
 
-	const expenseTotal = expenseList.reduce((sum, t) => sum + t.amount, 0);
+	const expenseTotal = expenseList.reduce(
+		(sum, t) => sum + Number(t.amount || 0),
+		0,
+	);
+
+	useFocusEffect(
+		useCallback(() => {
+			loadDailyTransactions();
+			loadSuppliers();
+		}, [selectedDate]),
+	);
 
 	useEffect(() => {
-		loadDailyTransactions();
-		loadSuppliers();
-	}, [selectedDate]);
+		if (editingTransaction) {
+			setType(editingTransaction.type);
+			setAmount(String(editingTransaction.amount));
+			setCategory(editingTransaction.category ?? "");
+			setSupplier(editingTransaction.supplierName ?? "");
+			setPaymentType(editingTransaction.paymentType ?? "cash");
+			setNote(editingTransaction.note ?? "");
+			setSelectedDate(new Date(editingTransaction.date));
+
+			if (editingTransaction.imagePath) {
+				setImages(JSON.parse(editingTransaction.imagePath));
+			}
+		}
+	}, [editingTransaction]);
+
+	useEffect(() => {
+		if (type === "income") {
+			setSupplier("");
+		}
+	}, [type]);
 
 	return (
 		<View style={styles.container}>
@@ -237,7 +305,8 @@ export default function AddEntryScreen() {
 				{/* TYPE TOGGLE */}
 				<ScrollView
 					showsVerticalScrollIndicator={false}
-					keyboardShouldPersistTaps="never"
+					keyboardShouldPersistTaps="handled"
+					contentContainerStyle={{ paddingBottom: 90 }}
 				>
 					<View style={styles.toggleContainer}>
 						<TouchableOpacity
@@ -408,7 +477,9 @@ export default function AddEntryScreen() {
 
 					{/* SAVE BUTTON */}
 					<TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-						<Text style={styles.saveButtonText}>Save Entry</Text>
+						<Text style={styles.saveButtonText}>
+							{isEditMode ? "Update Entry" : "Save Entry"}
+						</Text>
 					</TouchableOpacity>
 				</ScrollView>
 			</View>
@@ -417,32 +488,62 @@ export default function AddEntryScreen() {
 			<DraggableBottomSheet>
 				<Text style={styles.panelTitle}>Today's Summary</Text>
 
-				<ScrollView>
+				<ScrollView
+					showsVerticalScrollIndicator={false}
+					contentContainerStyle={{ paddingBottom: 20 }}
+				>
 					{/* Income */}
-					<Text style={styles.subHeading}>Income</Text>
-					{incomeList.map((item) => (
-						<View key={item.id} style={styles.row}>
-							<Text>{item.category}</Text>
-							<Text>₹{item.amount}</Text>
-						</View>
-					))}
-					<View style={styles.totalRow}>
-						<Text>Total</Text>
-						<Text>₹{incomeTotal}</Text>
-					</View>
+					{incomeList.length > 0 && (
+						<>
+							<Text style={styles.subHeading}>Income</Text>
+							{incomeList.map((item) => (
+								<TouchableOpacity
+									key={item.id}
+									style={styles.row}
+									onPress={() =>
+										navigation.navigate("TransactionDetail", {
+											transaction: item,
+										})
+									}
+								>
+									<Text>{item.category}</Text>
+									<Text>₹{item.amount}</Text>
+								</TouchableOpacity>
+							))}
+
+							<View style={styles.totalRow}>
+								<Text>Total</Text>
+								<Text>₹{incomeTotal}</Text>
+							</View>
+						</>
+					)}
 
 					{/* Expense */}
-					<Text style={[styles.subHeading, { marginTop: 16 }]}>Expense</Text>
-					{expenseList.map((item) => (
-						<View key={item.id} style={styles.row}>
-							<Text>{item.supplierName}</Text>
-							<Text>₹{item.amount}</Text>
-						</View>
-					))}
-					<View style={styles.totalRow}>
-						<Text>Total</Text>
-						<Text>₹{expenseTotal}</Text>
-					</View>
+					{expenseList.length > 0 && (
+						<>
+							<Text style={[styles.subHeading, { marginTop: 16 }]}>
+								Expense
+							</Text>
+							{expenseList.map((item) => (
+								<TouchableOpacity
+									key={item.id}
+									style={styles.row}
+									onPress={() =>
+										navigation.navigate("TransactionDetail", {
+											transaction: item,
+										})
+									}
+								>
+									<Text>{item.supplierName}</Text>
+									<Text>₹{item.amount}</Text>
+								</TouchableOpacity>
+							))}
+							<View style={styles.totalRow}>
+								<Text>Total</Text>
+								<Text>₹{expenseTotal}</Text>
+							</View>
+						</>
+					)}
 				</ScrollView>
 			</DraggableBottomSheet>
 		</View>
