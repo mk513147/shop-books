@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
 	View,
 	Text,
@@ -18,17 +18,18 @@ import {
 	getTransactionsByDate,
 } from "../database/transactionService";
 import { getOrCreateSupplier, getSuppliers } from "../database/supplierService";
-import { useNavigation } from "@react-navigation/native";
+
 import * as ImagePicker from "expo-image-picker";
 
-import { Image } from "react-native";
 import { File, Directory, Paths } from "expo-file-system";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Animated } from "react-native";
+
+import { Animated, Image, PanResponder, Dimensions } from "react-native";
 
 import { Platform } from "react-native";
 
 import { theme } from "../theme";
+import DraggableBottomSheet from "../components/DraggableBottomSheet";
 
 type Supplier = {
 	id: number;
@@ -50,23 +51,9 @@ export default function AddEntryScreen() {
 
 	const [dailyTransactions, setDailyTransactions] = useState<any[]>([]);
 
-	const [isExpanded, setIsExpanded] = useState(false);
-	const panelHeight = useState(new Animated.Value(70))[0];
-
 	const today = new Date();
-
 	const [selectedDate, setSelectedDate] = useState<Date>(today);
 	const [showDatePicker, setShowDatePicker] = useState(false);
-
-	const togglePanel = () => {
-		Animated.timing(panelHeight, {
-			toValue: isExpanded ? 70 : 300,
-			duration: 250,
-			useNativeDriver: false,
-		}).start();
-
-		setIsExpanded(!isExpanded);
-	};
 
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
@@ -427,49 +414,37 @@ export default function AddEntryScreen() {
 			</View>
 
 			{/* SUMMARY SECTION*/}
-			<Animated.View style={[styles.summaryPanel, { height: panelHeight }]}>
-				{/* HEADER */}
-				<TouchableOpacity style={styles.panelHeader} onPress={togglePanel}>
-					<Text style={styles.panelTitle}>Today's Summary</Text>
+			<DraggableBottomSheet>
+				<Text style={styles.panelTitle}>Today's Summary</Text>
 
-					<Ionicons
-						name={isExpanded ? "chevron-down" : "chevron-up"}
-						size={20}
-						color={theme.colors.textPrimary}
-					/>
-				</TouchableOpacity>
-
-				{/* CONTENT */}
-				{isExpanded && (
-					<ScrollView>
-						{/* Income */}
-						<Text style={styles.subHeading}>Income</Text>
-						{incomeList.map((item) => (
-							<View key={item.id} style={styles.row}>
-								<Text>{item.category}</Text>
-								<Text>₹{item.amount}</Text>
-							</View>
-						))}
-						<View style={styles.totalRow}>
-							<Text>Total</Text>
-							<Text>₹{incomeTotal}</Text>
+				<ScrollView>
+					{/* Income */}
+					<Text style={styles.subHeading}>Income</Text>
+					{incomeList.map((item) => (
+						<View key={item.id} style={styles.row}>
+							<Text>{item.category}</Text>
+							<Text>₹{item.amount}</Text>
 						</View>
+					))}
+					<View style={styles.totalRow}>
+						<Text>Total</Text>
+						<Text>₹{incomeTotal}</Text>
+					</View>
 
-						{/* Expense */}
-						<Text style={[styles.subHeading, { marginTop: 16 }]}>Expense</Text>
-						{expenseList.map((item) => (
-							<View key={item.id} style={styles.row}>
-								<Text>{item.supplierName}</Text>
-								<Text>₹{item.amount}</Text>
-							</View>
-						))}
-						<View style={styles.totalRow}>
-							<Text>Total</Text>
-							<Text>₹{expenseTotal}</Text>
+					{/* Expense */}
+					<Text style={[styles.subHeading, { marginTop: 16 }]}>Expense</Text>
+					{expenseList.map((item) => (
+						<View key={item.id} style={styles.row}>
+							<Text>{item.supplierName}</Text>
+							<Text>₹{item.amount}</Text>
 						</View>
-					</ScrollView>
-				)}
-			</Animated.View>
+					))}
+					<View style={styles.totalRow}>
+						<Text>Total</Text>
+						<Text>₹{expenseTotal}</Text>
+					</View>
+				</ScrollView>
+			</DraggableBottomSheet>
 		</View>
 	);
 }
@@ -486,12 +461,16 @@ const styles = StyleSheet.create({
 	},
 
 	summaryPanel: {
+		position: "absolute",
+		bottom: 0,
+		left: 0,
+		right: 0,
 		backgroundColor: theme.colors.card,
-		borderTopLeftRadius: 20,
-		borderTopRightRadius: 20,
+		borderTopLeftRadius: 24,
+		borderTopRightRadius: 24,
 		paddingHorizontal: 16,
 		paddingTop: 10,
-		elevation: 8,
+		elevation: 10,
 	},
 
 	panelHeader: {
