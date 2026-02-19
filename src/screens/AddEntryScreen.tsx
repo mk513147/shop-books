@@ -10,13 +10,18 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { incomeCategories, expenseCategories } from "../constants/categories";
-import { addTransaction } from "../database/transactionService";
+import {
+	addTransaction,
+	checkExistingEntry,
+} from "../database/transactionService";
 import { addSupplier } from "../database/supplierService";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 
 import { Image } from "react-native";
 import { File, Directory, Paths } from "expo-file-system";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { Platform } from "react-native";
 
 import { theme } from "../theme";
 
@@ -32,6 +37,11 @@ export default function AddEntryScreen() {
 	const [images, setImages] = useState<string[]>([]);
 
 	const navigation: any = useNavigation();
+
+	const today = new Date();
+
+	const [selectedDate, setSelectedDate] = useState<Date>(today);
+	const [showDatePicker, setShowDatePicker] = useState(false);
 
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
@@ -54,13 +64,23 @@ export default function AddEntryScreen() {
 				const result: any = await addSupplier(supplier);
 				supplierId = result?.lastInsertRowId ?? null;
 			}
+			const formattedDate = formatDate(selectedDate);
 
+			const existing = await checkExistingEntry(formattedDate, type);
+
+			if (existing) {
+				alert(`An ${type} entry already exists for this date.`);
+
+				setSelectedDate(new Date()); // reset to today
+				return;
+			}
 			await addTransaction({
 				type,
 				amount: parseFloat(amount),
 				category,
 				note,
-				date: formatDate(new Date()),
+				date: formattedDate,
+
 				paymentType,
 				supplierId,
 				imagePath: JSON.stringify(images),
@@ -130,6 +150,18 @@ export default function AddEntryScreen() {
 			contentContainerStyle={styles.container}
 			keyboardShouldPersistTaps="handled"
 		>
+			{showDatePicker && (
+				<DateTimePicker
+					value={selectedDate}
+					mode="date"
+					display={Platform.OS === "ios" ? "spinner" : "default"}
+					onChange={(event, date) => {
+						setShowDatePicker(false);
+						if (date) setSelectedDate(date);
+					}}
+				/>
+			)}
+
 			{/* TYPE TOGGLE */}
 			<View style={styles.toggleContainer}>
 				<TouchableOpacity
@@ -170,6 +202,15 @@ export default function AddEntryScreen() {
 					</Text>
 				</TouchableOpacity>
 			</View>
+
+			<Text style={styles.label}>Date</Text>
+
+			<TouchableOpacity
+				style={styles.input}
+				onPress={() => setShowDatePicker(true)}
+			>
+				<Text>{formatDate(selectedDate)}</Text>
+			</TouchableOpacity>
 
 			{/* AMOUNT */}
 			<Text style={styles.label}>Amount</Text>

@@ -36,3 +36,18 @@ export const getSummaryByDateRange = async (from: string, to: string) => {
 
 	return result;
 };
+
+export const checkExistingEntry = async (date: string, type: string) => {
+	const db = await getDb();
+
+	const result = await db.getFirstAsync(
+		`
+    SELECT id FROM transactions
+    WHERE date = ? AND type = ?
+    LIMIT 1
+    `,
+		[date, type],
+	);
+
+	return result;
+};
