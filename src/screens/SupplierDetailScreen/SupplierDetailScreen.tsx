@@ -7,7 +7,7 @@ import {
 	TouchableOpacity,
 } from "react-native";
 import { useRoute } from "@react-navigation/native";
-import { theme } from "../theme";
+import { theme } from "@theme";
 
 type LedgerEntry = {
 	id: string;

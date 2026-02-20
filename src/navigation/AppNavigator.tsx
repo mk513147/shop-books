@@ -4,14 +4,15 @@ import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 
-import DashboardScreen from "../screens/DashboardScreen";
-import TransactionsScreen from "../screens/TransactionsScreen";
-import SuppliersScreen from "../screens/SuppliersScreen";
-import ReportsScreen from "../screens/ReportsScreen";
-import AddEntryScreen from "../screens/AddEntryScreen";
-import SupplierDetailScreen from "../screens/SupplierDetailScreen";
-import TransactionDetailScreen from "../screens/TransactionDetailScreen";
-
+import {
+	DashboardScreen,
+	TransactionsScreen,
+	SuppliersScreen,
+	ReportsScreen,
+	AddEntryScreen,
+	SupplierDetailScreen,
+	TransactionDetailScreen,
+} from "../screens/index";
 import { theme } from "../theme";
 
 const Tab = createBottomTabNavigator();

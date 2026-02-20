@@ -11,10 +11,10 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { Platform } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
-import { getTransactionsByDateRange } from "../database/transactionService";
+import { getTransactionsByDateRange } from "../../database/transactionService";
 import { Modal, Dimensions } from "react-native";
 
-import { theme } from "../theme";
+import { theme } from "../../theme";
 
 type Transaction = {
 	id: number;

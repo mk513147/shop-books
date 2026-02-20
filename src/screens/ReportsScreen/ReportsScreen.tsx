@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, Dimensions } from "react-native";
 import { BarChart } from "react-native-chart-kit";
-import { theme } from "../theme";
+import { theme } from "@theme";
 
 const screenWidth = Dimensions.get("window").width;
 

@@ -7,7 +7,7 @@ import {
 	TouchableOpacity,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { theme } from "../theme";
+import { theme } from "@theme";
 
 type Supplier = {
 	id: string;

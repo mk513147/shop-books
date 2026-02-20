@@ -12,8 +12,8 @@ import {
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { deleteTransaction } from "../database/transactionService";
-import { theme } from "../theme";
+import { deleteTransaction } from "@database/transactionService";
+import { theme } from "@theme";
 
 const screenWidth = Dimensions.get("window").width;
 

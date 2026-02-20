@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
-import { incomeCategories, expenseCategories } from "../constants/categories";
+import { incomeCategories, expenseCategories } from "@constants/categories";
 import {
 	addTransaction,
 	checkExpenseSupplierSameDay,
@@ -17,8 +17,8 @@ import {
 	getDailyTransactionCount,
 	getTransactionsByDate,
 	updateTransaction,
-} from "../database/transactionService";
-import { getOrCreateSupplier, getSuppliers } from "../database/supplierService";
+} from "@database/transactionService";
+import { getOrCreateSupplier, getSuppliers } from "@database/supplierService";
 
 import * as ImagePicker from "expo-image-picker";
 
@@ -36,10 +36,10 @@ import {
 
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
-import { RootStackParamList } from "../navigation/types";
+import { RootStackParamList } from "@navigation/types";
 
-import { theme } from "../theme";
-import DraggableBottomSheet from "../components/DraggableBottomSheet";
+import { theme } from "@theme";
+import DraggableBottomSheet from "@components/DraggableBottomSheet";
 
 type Supplier = {
 	id: number;
