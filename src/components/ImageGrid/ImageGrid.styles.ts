@@ -10,8 +10,8 @@ export const styles = StyleSheet.create({
 		marginRight: 6,
 	},
 	thumbnail: {
-		width: 60,
-		height: 60,
+		width: 50,
+		height: 50,
 		borderRadius: 8,
 	},
 	overlay: {
@@ -27,7 +27,7 @@ export const styles = StyleSheet.create({
 	},
 	overlayText: {
 		...theme.typography.body,
-		color: theme.colors.textPrimary,
+		color: theme.colors.background,
 		fontWeight: "bold",
 	},
 });

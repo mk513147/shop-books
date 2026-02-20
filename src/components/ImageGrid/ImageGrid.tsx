@@ -10,14 +10,23 @@ type Props = {
 export default function ImageGrid({ imagePath, onPressImage }: Props) {
 	if (!imagePath) return null;
 
-	const images: string[] = JSON.parse(imagePath || "[]");
-	const visibleImages = images.slice(0, 5);
-	const remaining = images.length - 5;
+	let images: string[] = [];
+
+	try {
+		images = JSON.parse(imagePath);
+	} catch {
+		return null;
+	}
+
+	const MAX_VISIBLE = 5;
+	const visibleImages = images.slice(0, MAX_VISIBLE);
+	const remaining =
+		images.length > MAX_VISIBLE ? images.length - MAX_VISIBLE : 0;
 
 	return (
 		<View style={styles.row}>
 			{visibleImages.map((img, index) => {
-				const isLastVisible = index === 4 && remaining > 0;
+				const isLastVisible = index === MAX_VISIBLE - 1 && remaining > 0;
 
 				return (
 					<TouchableOpacity
