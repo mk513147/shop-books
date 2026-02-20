@@ -7,6 +7,8 @@ import {
 	StyleSheet,
 } from "react-native";
 
+const MAX_OVERSHOOT = 40;
+
 type Props = {
 	children: React.ReactNode;
 	collapsedHeight?: number;
@@ -31,8 +33,8 @@ export default function DraggableBottomSheet({
 		Animated.spring(panelHeight, {
 			toValue: EXPANDED_HEIGHT,
 			useNativeDriver: false,
-			damping: 20,
-			stiffness: 150,
+			damping: 15,
+			stiffness: 120,
 		}).start();
 
 		currentHeight.current = EXPANDED_HEIGHT;
@@ -43,8 +45,8 @@ export default function DraggableBottomSheet({
 		Animated.spring(panelHeight, {
 			toValue: collapsedHeight,
 			useNativeDriver: false,
-			damping: 20,
-			stiffness: 150,
+			damping: 15,
+			stiffness: 120,
 		}).start();
 
 		currentHeight.current = collapsedHeight;
@@ -71,7 +73,7 @@ export default function DraggableBottomSheet({
 				const midpoint = (collapsedHeight + EXPANDED_HEIGHT) / 2;
 
 				const shouldExpand =
-					currentHeight.current > midpoint || gestureState.vy < -0.5;
+					currentHeight.current > midpoint || gestureState.vy < -0.3;
 
 				if (shouldExpand) {
 					expandPanel();
