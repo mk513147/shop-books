@@ -6,6 +6,7 @@ export const colors = {
 	warning: "#F59E0B",
 
 	background: "#F8FAFC",
+	backgroundDark: "#212121c4",
 	card: "#FFFFFF",
 
 	textPrimary: "#111827",

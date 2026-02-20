@@ -1,21 +1,15 @@
 import React, { useState } from "react";
-import {
-	View,
-	Text,
-	StyleSheet,
-	FlatList,
-	TouchableOpacity,
-	Image,
-} from "react-native";
+import { View, Text, FlatList, TouchableOpacity, Image } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Platform } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
 import { getTransactionsByDateRange } from "../../database/transactionService";
-import { Modal } from "react-native";
 
 import { theme } from "../../theme";
 import { styles } from "./Transactions.styles";
+import ImageViewer from "@components/ImageViewer/ImageViewer";
+import ImageGrid from "@components/ImageGrid/ImageGrid";
 
 type Transaction = {
 	id: number;
@@ -105,34 +99,10 @@ export default function TransactionsScreen() {
 
 				{/* IMAGE GRID */}
 				{item.imagePath && (
-					<View style={styles.thumbnailRow}>
-						{(() => {
-							const images = JSON.parse(item.imagePath || "[]");
-							const visibleImages = images.slice(0, 5);
-							const remaining = images.length - 5;
-
-							return visibleImages.map((img: string, index: number) => {
-								const isLastVisible = index === 4 && remaining > 0;
-
-								return (
-									<TouchableOpacity
-										key={index}
-										onPress={() => openViewer(images, index)}
-									>
-										<View style={styles.thumbnailWrapper}>
-											<Image source={{ uri: img }} style={styles.thumbnail} />
-
-											{isLastVisible && (
-												<View style={styles.overlay}>
-													<Text style={styles.overlayText}>+{remaining}</Text>
-												</View>
-											)}
-										</View>
-									</TouchableOpacity>
-								);
-							});
-						})()}
-					</View>
+					<ImageGrid
+						imagePath={item.imagePath || ""}
+						onPressImage={openViewer}
+					/>
 				)}
 
 				<View style={styles.rowBottom}>
@@ -172,43 +142,14 @@ export default function TransactionsScreen() {
 				contentContainerStyle={{ paddingBottom: 20 }}
 			/>
 
-			<Modal visible={viewerVisible} transparent>
-				<View style={styles.viewerContainer}>
-					<Image
-						source={{ uri: viewerImages[currentIndex] }}
-						style={styles.viewerImage}
-						resizeMode="contain"
-					/>
-
-					{/* Close Button */}
-					<TouchableOpacity
-						style={styles.closeButton}
-						onPress={() => setViewerVisible(false)}
-					>
-						<Text style={{ color: "#fff", fontSize: 18 }}>✕</Text>
-					</TouchableOpacity>
-
-					{/* Previous */}
-					{currentIndex > 0 && (
-						<TouchableOpacity
-							style={styles.prevButton}
-							onPress={() => setCurrentIndex(currentIndex - 1)}
-						>
-							<Text style={styles.navText}>‹</Text>
-						</TouchableOpacity>
-					)}
-
-					{/* Next */}
-					{currentIndex < viewerImages.length - 1 && (
-						<TouchableOpacity
-							style={styles.nextButton}
-							onPress={() => setCurrentIndex(currentIndex + 1)}
-						>
-							<Text style={styles.navText}>›</Text>
-						</TouchableOpacity>
-					)}
-				</View>
-			</Modal>
+			<ImageViewer
+				visible={viewerVisible}
+				images={viewerImages}
+				currentIndex={currentIndex}
+				onClose={() => setViewerVisible(false)}
+				onPrev={() => setCurrentIndex((prev) => prev - 1)}
+				onNext={() => setCurrentIndex((prev) => prev + 1)}
+			/>
 
 			{showFromPicker && (
 				<DateTimePicker
