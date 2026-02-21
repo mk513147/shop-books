@@ -35,6 +35,8 @@ import {
 	TransactionInput,
 } from "src/types/transaction";
 
+import { useToast } from "@context/ToastContext";
+
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, "AddEntry">;
 
 type Supplier = {
@@ -54,7 +56,7 @@ export default function ExpenseForm({
 	onSaveSuccess,
 }: Props) {
 	const navigation = useNavigation<NavigationProp>();
-
+	const { show } = useToast();
 	const [amount, setAmount] = useState("");
 	const [category, setCategory] = useState("");
 	const [supplier, setSupplier] = useState("");
@@ -97,14 +99,14 @@ export default function ExpenseForm({
 
 	const pickImage = async () => {
 		if (images.length >= 7) {
-			alert("Maximum 7 images allowed");
+			show("Maximum 7 images allowed", "info");
 			return;
 		}
 
 		const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
 		if (!permission.granted) {
-			alert("Permission required");
+			show("Permission required", "warning");
 			return;
 		}
 
@@ -141,7 +143,7 @@ export default function ExpenseForm({
 	const handleSave = async () => {
 		try {
 			if (!amount || !category || !supplier) {
-				alert("Amount, Category and Supplier are required");
+				show("Amount, Category and Supplier are required", "warning");
 				return;
 			}
 
@@ -152,7 +154,7 @@ export default function ExpenseForm({
 				numericAmount <= 0 ||
 				numericAmount > 20000
 			) {
-				alert("Enter a valid amount");
+				show("Enter a valid amount", "warning");
 				return;
 			}
 
@@ -162,7 +164,7 @@ export default function ExpenseForm({
 				const count = await getDailyTransactionCount(formattedDate, "expense");
 
 				if (count >= 12) {
-					alert("Maximum 12 expense entries allowed per day.");
+					show("Maximum 12 expense entries allowed per day.", "warning");
 					return;
 				}
 			}
@@ -176,8 +178,9 @@ export default function ExpenseForm({
 			);
 
 			if (existingSupplier) {
-				alert(
+				show(
 					`Expense for supplier "${supplier}" already exists for this date.`,
+					"warning",
 				);
 				return;
 			}
@@ -196,11 +199,11 @@ export default function ExpenseForm({
 			if (isEditMode) {
 				await updateTransaction(editingTransaction.id, payload);
 				onSaveSuccess();
-				alert("Transaction Updated");
+				show("Transaction Updated", "success");
 				navigation.goBack();
 			} else {
 				await addTransaction(payload);
-				alert("Transaction Saved");
+				show("Transaction Saved", "success");
 
 				setAmount("");
 				setCategory("");
@@ -212,7 +215,7 @@ export default function ExpenseForm({
 			}
 		} catch (error) {
 			console.log(error);
-			alert("Error saving transaction");
+			show("Error saving transaction", "error");
 		}
 	};
 

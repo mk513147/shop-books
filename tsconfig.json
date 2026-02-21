@@ -11,7 +11,8 @@
 			"@database/*": ["src/database/*"],
 			"@navigation/*": ["src/navigation/*"],
 			"@constants/*": ["src/constants/*"],
-			"@utils/*": ["src/utils/*"]
+			"@utils/*": ["src/utils/*"],
+			"@context/*": ["src/context/*"]
 		}
 	}
 }

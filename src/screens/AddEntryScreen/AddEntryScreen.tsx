@@ -12,6 +12,8 @@ import ExpenseForm from "@components/ExpenseForm";
 import DraggableBottomSheet from "@components/DraggableBottomSheet";
 
 import { getTransactionsByDate } from "@database/transactionService";
+import ConfirmDiscardModal from "@components/ConfirmDiscardModal";
+import AppToast from "@components/AppToast";
 
 type RouteProps = RouteProp<RootStackParamList, "AddEntry">;
 
@@ -28,6 +30,14 @@ export default function AddEntryScreen() {
 	const [selectedDate, setSelectedDate] = useState(
 		editingTransaction?.date ? new Date(editingTransaction.date) : new Date(),
 	);
+
+	const [pendingType, setPendingType] = useState<"income" | "expense" | null>(
+		null,
+	);
+	const [showDiscardModal, setShowDiscardModal] = useState(false);
+
+	const [toastMessage, setToastMessage] = useState("");
+	const [showToast, setShowToast] = useState(false);
 
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
@@ -62,6 +72,27 @@ export default function AddEntryScreen() {
 		0,
 	);
 
+	const handleTypeChange = (newType: "income" | "expense") => {
+		if (newType === type) return;
+
+		setPendingType(newType);
+		setShowDiscardModal(true);
+	};
+
+	const confirmDiscard = () => {
+		setShowDiscardModal(false);
+
+		if (pendingType) {
+			setType(pendingType);
+			setPendingType(null);
+		}
+	};
+
+	const cancelDiscard = () => {
+		setShowDiscardModal(false);
+		setPendingType(null);
+	};
+
 	return (
 		<View style={styles.container}>
 			<View style={styles.formSection}>
@@ -77,7 +108,7 @@ export default function AddEntryScreen() {
 								styles.toggleButton,
 								type === "income" && styles.activeIncome,
 							]}
-							onPress={() => setType("income")}
+							onPress={() => handleTypeChange("income")}
 						>
 							<Text
 								style={[
@@ -97,7 +128,7 @@ export default function AddEntryScreen() {
 								styles.toggleButton,
 								type === "expense" && styles.activeExpense,
 							]}
-							onPress={() => setType("expense")}
+							onPress={() => handleTypeChange("expense")}
 						>
 							<Text
 								style={[
@@ -179,6 +210,11 @@ export default function AddEntryScreen() {
 					)}
 				</ScrollView>
 			</DraggableBottomSheet>
+			<ConfirmDiscardModal
+				visible={showDiscardModal}
+				onCancel={cancelDiscard}
+				onConfirm={confirmDiscard}
+			/>
 		</View>
 	);
 }
