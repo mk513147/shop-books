@@ -1,14 +1,10 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import Animated, {
-	LinearTransition,
 	useSharedValue,
 	useAnimatedStyle,
 	withTiming,
-	FadeIn,
-	FadeOut,
-	StretchInY,
-	StretchOutY,
+	Easing,
 } from "react-native-reanimated";
 import { theme } from "@theme";
 import ImageGrid from "@components/ImageGrid/ImageGrid";
@@ -26,21 +22,25 @@ export default function TransactionRow({
 	onToggle,
 	onOpenViewer,
 }: Props) {
-	const progress = useSharedValue(isExpanded ? 1 : 0);
+	const progress = useSharedValue(0);
 
-	React.useEffect(() => {
+	useEffect(() => {
 		progress.value = withTiming(isExpanded ? 1 : 0, {
-			duration: 250,
+			duration: 350,
+			easing: Easing.out(Easing.cubic),
 		});
 	}, [isExpanded]);
+
 	const animatedStyle = useAnimatedStyle(() => ({
 		opacity: progress.value,
+		transform: [
+			{ translateY: (1 - progress.value) * -12 },
+			{ scale: 0.97 + progress.value * 0.03 },
+		],
 	}));
-	if (!item) return null;
 
 	return (
-		<Animated.View
-			layout={LinearTransition.springify().damping(18).stiffness(180)}
+		<View
 			style={{
 				marginHorizontal: 8,
 				marginVertical: 4,
@@ -55,7 +55,7 @@ export default function TransactionRow({
 					borderRadius: 10,
 				}}
 			>
-				{/* Compact */}
+				{/* Compact Row */}
 				<View
 					style={{
 						flexDirection: "row",
@@ -87,37 +87,28 @@ export default function TransactionRow({
 				</Text>
 
 				{/* Expanded Section */}
-				<Animated.View
-					entering={StretchInY}
-					exiting={StretchOutY}
-					style={[
-						{
-							overflow: "hidden",
-						},
-						animatedStyle,
-					]}
-				>
-					{isExpanded && (
-						<Animated.View
-							entering={FadeIn}
-							exiting={FadeOut}
-							layout={LinearTransition.springify().damping(18).stiffness(180)}
-							style={{ marginTop: 8 }}
-						>
-							{item.supplierName && <Text>Supplier: {item.supplierName}</Text>}
-							{item.note && <Text>Note: {item.note}</Text>}
-							<Text>Payment: {item.paymentType}</Text>
+				{isExpanded && (
+					<Animated.View
+						style={[
+							{
+								marginTop: 10,
+							},
+							animatedStyle,
+						]}
+					>
+						{item.supplierName && <Text>Supplier: {item.supplierName}</Text>}
+						{item.note && <Text>Note: {item.note}</Text>}
+						<Text>Payment: {item.paymentType}</Text>
 
-							{item.imagePath && (
-								<ImageGrid
-									imagePath={item.imagePath}
-									onPressImage={onOpenViewer}
-								/>
-							)}
-						</Animated.View>
-					)}
-				</Animated.View>
+						{item.imagePath && (
+							<ImageGrid
+								imagePath={item.imagePath}
+								onPressImage={onOpenViewer}
+							/>
+						)}
+					</Animated.View>
+				)}
 			</TouchableOpacity>
-		</Animated.View>
+		</View>
 	);
 }

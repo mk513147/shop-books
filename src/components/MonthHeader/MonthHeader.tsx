@@ -4,8 +4,7 @@ import Animated, {
 	useSharedValue,
 	useAnimatedStyle,
 	withTiming,
-	Layout,
-	LinearTransition,
+	withSpring,
 } from "react-native-reanimated";
 import { theme } from "@theme";
 
@@ -23,29 +22,57 @@ export default function MonthHeader({
 	onToggle,
 }: Props) {
 	const isExpanded = !collapsed;
-	const rotate = useSharedValue(isExpanded ? 1 : 0);
+
+	const scale = useSharedValue(1);
+	const progress = useSharedValue(isExpanded ? 1 : 0);
 
 	useEffect(() => {
-		rotate.value = withTiming(isExpanded ? 1 : 0, { duration: 200 });
+		progress.value = withTiming(isExpanded ? 1 : 0, {
+			duration: 220,
+		});
 	}, [isExpanded]);
 
-	const arrowStyle = useAnimatedStyle(() => ({
-		transform: [{ rotate: `${rotate.value * 180}deg` }],
+	const leftLine = useAnimatedStyle(() => ({
+		transform: [
+			{ rotate: `${progress.value * 45 - 45}deg` },
+			{ translateY: progress.value * 2 },
+		],
+	}));
+
+	const rightLine = useAnimatedStyle(() => ({
+		transform: [
+			{ rotate: `${45 - progress.value * 45}deg` },
+			{ translateY: progress.value * 2 },
+		],
+	}));
+
+	const pressStyle = useAnimatedStyle(() => ({
+		transform: [{ scale: scale.value }],
 	}));
 
 	return (
 		<Animated.View
-			layout={LinearTransition.springify().damping(18).stiffness(180)}
-			style={{
-				backgroundColor: theme.colors.background,
-				paddingVertical: 14,
-				paddingHorizontal: 16,
-				borderBottomWidth: 1,
-				borderBottomColor: "#e5e5e5",
-			}}
+			style={[
+				{
+					backgroundColor: theme.colors.background,
+					paddingVertical: 14,
+					paddingHorizontal: 16,
+					borderBottomWidth: 1,
+					borderBottomColor: "#e5e5e5",
+				},
+				pressStyle,
+			]}
 		>
 			<TouchableOpacity
-				onPress={onToggle}
+				activeOpacity={0.9}
+				onPress={() => {
+					scale.value = withSpring(0.97, { damping: 15 });
+					setTimeout(() => {
+						scale.value = withSpring(1);
+					}, 120);
+
+					onToggle();
+				}}
 				style={{
 					flexDirection: "row",
 					justifyContent: "space-between",
@@ -74,7 +101,39 @@ export default function MonthHeader({
 					</Text>
 				</View>
 
-				<Animated.Text style={arrowStyle}>▼</Animated.Text>
+				<View
+					style={{
+						width: 20,
+						height: 20,
+						alignItems: "center",
+						justifyContent: "center",
+					}}
+				>
+					<Animated.View
+						style={[
+							{
+								position: "absolute",
+								width: 12,
+								height: 2,
+								backgroundColor: theme.colors.textSecondary,
+								borderRadius: 1,
+							},
+							leftLine,
+						]}
+					/>
+					<Animated.View
+						style={[
+							{
+								position: "absolute",
+								width: 12,
+								height: 2,
+								backgroundColor: theme.colors.textSecondary,
+								borderRadius: 1,
+							},
+							rightLine,
+						]}
+					/>
+				</View>
 			</TouchableOpacity>
 		</Animated.View>
 	);

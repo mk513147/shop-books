@@ -47,7 +47,6 @@ export default function TransactionsScreen() {
 	>({});
 	const [expandedId, setExpandedId] = useState<number | null>(null);
 
-	// Image viewer
 	const [viewerVisible, setViewerVisible] = useState(false);
 	const [viewerImages, setViewerImages] = useState<string[]>([]);
 	const [currentIndex, setCurrentIndex] = useState(0);
@@ -69,12 +68,13 @@ export default function TransactionsScreen() {
 	useFocusEffect(
 		useCallback(() => {
 			loadTransactions();
+
+			return () => {
+				setExpandedId(null);
+			};
 		}, [fromDate, toDate]),
 	);
 
-	// ============================
-	// GROUP + SORT
-	// ============================
 	const sections = useMemo(() => {
 		const grouped: Record<string, Transaction[]> = {};
 
@@ -110,13 +110,10 @@ export default function TransactionsScreen() {
 			});
 	}, [transactions]);
 
-	// ============================
-	// TOGGLE MONTH (ONLY ONE OPEN)
-	// ============================
 	const toggleSection = useCallback(
 		(title: string) => {
 			setCollapsedSections((prev) => {
-				const isCollapsed = prev[title] === true;
+				const isCurrentlyCollapsed = prev[title] === true;
 
 				const newState: Record<string, boolean> = {};
 
@@ -124,8 +121,10 @@ export default function TransactionsScreen() {
 					newState[section.title] = true;
 				});
 
-				if (isCollapsed) {
+				if (isCurrentlyCollapsed) {
 					newState[title] = false;
+				} else {
+					setExpandedId(null);
 				}
 
 				return newState;
@@ -134,9 +133,6 @@ export default function TransactionsScreen() {
 		[sections],
 	);
 
-	// ============================
-	// FLATTEN FOR FLASHLIST
-	// ============================
 	const flatData = useMemo<FlashListItem[]>(() => {
 		const result: FlashListItem[] = [];
 
@@ -160,7 +156,6 @@ export default function TransactionsScreen() {
 		return result;
 	}, [sections, collapsedSections]);
 
-	// Sticky headers
 	const stickyHeaderIndices = useMemo(() => {
 		const indices: number[] = [];
 		flatData.forEach((item, index) => {
@@ -204,34 +199,26 @@ export default function TransactionsScreen() {
 				renderItem={({ item }) => {
 					if (item.type === "header") {
 						return (
-							<Animated.View
-								layout={LinearTransition.springify().damping(10).stiffness(100)}
-							>
-								<MonthHeader
-									title={item.title}
-									total={item.total}
-									collapsed={collapsedSections[item.title] === true}
-									onToggle={() => toggleSection(item.title)}
-								/>
-							</Animated.View>
+							<MonthHeader
+								title={item.title}
+								total={item.total}
+								collapsed={collapsedSections[item.title] === true}
+								onToggle={() => toggleSection(item.title)}
+							/>
 						);
 					}
 
 					return (
-						<Animated.View
-							layout={LinearTransition.springify().damping(18).stiffness(180)}
-						>
-							<TransactionRow
-								item={item.item}
-								isExpanded={expandedId === item.item.id}
-								onToggle={() =>
-									setExpandedId((prev) =>
-										prev === item.item.id ? null : item.item.id,
-									)
-								}
-								onOpenViewer={openViewer}
-							/>
-						</Animated.View>
+						<TransactionRow
+							item={item.item}
+							isExpanded={expandedId === item.item.id}
+							onToggle={() =>
+								setExpandedId((prev) =>
+									prev === item.item.id ? null : item.item.id,
+								)
+							}
+							onOpenViewer={openViewer}
+						/>
 					);
 				}}
 			/>
