@@ -101,12 +101,14 @@ export const styles = StyleSheet.create({
 		fontSize: 26,
 		fontWeight: "700",
 		borderRadius: 10,
+		color: theme.colors.textPrimary,
 	},
 
 	input: {
 		backgroundColor: theme.colors.card,
 		padding: 14,
 		borderRadius: 8,
+		color: theme.colors.textPrimary,
 	},
 
 	paymentRow: {

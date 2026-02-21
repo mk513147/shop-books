@@ -365,6 +365,7 @@ export default function AddEntryScreen() {
 						placeholder="₹ 0.00"
 						value={amount}
 						onChangeText={setAmount}
+						placeholderTextColor={theme.colors.textSecondary}
 					/>
 
 					{/* CATEGORY */}
@@ -373,6 +374,11 @@ export default function AddEntryScreen() {
 						<Picker
 							selectedValue={category}
 							onValueChange={(itemValue) => setCategory(itemValue)}
+							style={{
+								color: theme.colors.textPrimary,
+								backgroundColor: theme.colors.card,
+							}}
+							dropdownIconColor={theme.colors.textPrimary}
 						>
 							<Picker.Item label="Select Category" value="" />
 							{(type === "income" ? incomeCategories : expenseCategories).map(
@@ -439,6 +445,7 @@ export default function AddEntryScreen() {
 						placeholder="Optional note"
 						value={note}
 						onChangeText={setNote}
+						placeholderTextColor={theme.colors.textSecondary}
 						multiline
 					/>
 
