@@ -1,13 +1,14 @@
-import React, { useRef, useState } from "react";
-import {
-	Animated,
-	PanResponder,
-	Dimensions,
-	View,
-	StyleSheet,
-} from "react-native";
-
-const MAX_OVERSHOOT = 40;
+import React from "react";
+import { View, StyleSheet, Dimensions, Pressable } from "react-native";
+import Animated, {
+	useSharedValue,
+	useAnimatedStyle,
+	withTiming,
+	Easing,
+	interpolate,
+	Extrapolation,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 type Props = {
 	children: React.ReactNode;
@@ -23,78 +24,90 @@ export default function DraggableBottomSheet({
 	const screenHeight = Dimensions.get("window").height;
 	const EXPANDED_HEIGHT = expandedHeight ?? screenHeight * 0.6;
 
-	const panelHeight = useRef(new Animated.Value(collapsedHeight)).current;
+	const CLOSED_TRANSLATE_Y = EXPANDED_HEIGHT - collapsedHeight;
 
-	const currentHeight = useRef(collapsedHeight);
-	const [isExpanded, setIsExpanded] = useState(false);
-	const startHeight = useRef(collapsedHeight);
+	const translateY = useSharedValue(CLOSED_TRANSLATE_Y);
+	const startY = useSharedValue(CLOSED_TRANSLATE_Y);
 
-	const expandPanel = () => {
-		Animated.spring(panelHeight, {
-			toValue: EXPANDED_HEIGHT,
-			useNativeDriver: false,
-			damping: 15,
-			stiffness: 120,
-		}).start();
-
-		currentHeight.current = EXPANDED_HEIGHT;
-		setIsExpanded(true);
+	const openSheet = () => {
+		translateY.value = withTiming(0, {
+			duration: 250,
+			easing: Easing.out(Easing.cubic),
+		});
 	};
 
-	const collapsePanel = () => {
-		Animated.spring(panelHeight, {
-			toValue: collapsedHeight,
-			useNativeDriver: false,
-			damping: 15,
-			stiffness: 120,
-		}).start();
-
-		currentHeight.current = collapsedHeight;
-		setIsExpanded(false);
+	const closeSheet = () => {
+		translateY.value = withTiming(CLOSED_TRANSLATE_Y, {
+			duration: 220,
+			easing: Easing.out(Easing.cubic),
+		});
 	};
 
-	const panResponder = useRef(
-		PanResponder.create({
-			onMoveShouldSetPanResponder: (_, gestureState) =>
-				Math.abs(gestureState.dy) > 5,
+	const gesture = Gesture.Pan()
+		.onStart(() => {
+			startY.value = translateY.value;
+		})
+		.onUpdate((event) => {
+			let next = startY.value + event.translationY;
 
-			onPanResponderMove: (_, gestureState) => {
-				let newHeight = startHeight.current - gestureState.dy;
+			if (next < 0) next = 0;
 
-				if (newHeight < collapsedHeight) newHeight = collapsedHeight;
+			if (next > CLOSED_TRANSLATE_Y) {
+				const diff = next - CLOSED_TRANSLATE_Y;
+				next = CLOSED_TRANSLATE_Y + diff * 0.8;
+			}
 
-				if (newHeight > EXPANDED_HEIGHT) newHeight = EXPANDED_HEIGHT;
+			translateY.value = next;
+		})
+		.onEnd((event) => {
+			const midpoint = CLOSED_TRANSLATE_Y / 2;
 
-				currentHeight.current = newHeight;
-				panelHeight.setValue(newHeight);
-			},
+			const shouldExpand =
+				translateY.value < midpoint || event.velocityY < -800;
 
-			onPanResponderRelease: (_, gestureState) => {
-				const midpoint = (collapsedHeight + EXPANDED_HEIGHT) / 2;
+			translateY.value = withTiming(shouldExpand ? 0 : CLOSED_TRANSLATE_Y, {
+				duration: 250,
+				easing: Easing.out(Easing.cubic),
+			});
+		});
 
-				const shouldExpand =
-					currentHeight.current > midpoint || gestureState.vy < -0.3;
+	const sheetStyle = useAnimatedStyle(() => ({
+		transform: [{ translateY: translateY.value }],
+	}));
 
-				if (shouldExpand) {
-					expandPanel();
-				} else {
-					collapsePanel();
-				}
-			},
-			onPanResponderGrant: () => {
-				startHeight.current = currentHeight.current;
-			},
-		}),
-	).current;
+	const backdropStyle = useAnimatedStyle(() => {
+		const opacity = interpolate(
+			translateY.value,
+			[0, CLOSED_TRANSLATE_Y],
+			[0.5, 0],
+			Extrapolation.CLAMP,
+		);
+
+		return {
+			opacity,
+		};
+	});
 
 	return (
-		<Animated.View
-			style={[styles.container, { height: panelHeight }]}
-			{...panResponder.panHandlers}
-		>
-			<View style={styles.dragIndicator} />
-			{children}
-		</Animated.View>
+		<View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+			{/* Backdrop */}
+			<Animated.View
+				style={[styles.backdrop, backdropStyle]}
+				pointerEvents="auto"
+			>
+				<Pressable style={{ flex: 1 }} onPress={closeSheet} />
+			</Animated.View>
+
+			{/* Sheet */}
+			<GestureDetector gesture={gesture}>
+				<Animated.View
+					style={[styles.container, { height: EXPANDED_HEIGHT }, sheetStyle]}
+				>
+					<View style={styles.dragIndicator} />
+					{children}
+				</Animated.View>
+			</GestureDetector>
+		</View>
 	);
 }
 
@@ -110,6 +123,11 @@ const styles = StyleSheet.create({
 		paddingHorizontal: 16,
 		paddingTop: 10,
 		elevation: 10,
+	},
+
+	backdrop: {
+		...StyleSheet.absoluteFillObject,
+		backgroundColor: "black",
 	},
 
 	dragIndicator: {
