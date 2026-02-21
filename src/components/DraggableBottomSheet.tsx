@@ -54,19 +54,32 @@ export default function DraggableBottomSheet({
 
 			if (next > CLOSED_TRANSLATE_Y) {
 				const diff = next - CLOSED_TRANSLATE_Y;
-				next = CLOSED_TRANSLATE_Y + diff * 0.8;
+
+				if (Math.abs(event.velocityY) < 800) {
+					next = CLOSED_TRANSLATE_Y + diff * 0.25;
+				} else {
+					next = CLOSED_TRANSLATE_Y;
+				}
 			}
 
 			translateY.value = next;
 		})
 		.onEnd((event) => {
+			const velocityThreshold = 700;
 			const midpoint = CLOSED_TRANSLATE_Y / 2;
 
-			const shouldExpand =
-				translateY.value < midpoint || event.velocityY < -800;
+			let destination = CLOSED_TRANSLATE_Y;
 
-			translateY.value = withTiming(shouldExpand ? 0 : CLOSED_TRANSLATE_Y, {
-				duration: 250,
+			if (event.velocityY > velocityThreshold) {
+				destination = CLOSED_TRANSLATE_Y;
+			} else if (event.velocityY < -velocityThreshold) {
+				destination = 0;
+			} else {
+				destination = translateY.value < midpoint ? 0 : CLOSED_TRANSLATE_Y;
+			}
+
+			translateY.value = withTiming(destination, {
+				duration: 220,
 				easing: Easing.out(Easing.cubic),
 			});
 		});
