@@ -105,7 +105,7 @@ export default function IncomeForm({
 
 			if (existingCategory) {
 				show(
-					`Income category "${category}" already exists for this date.`,
+					`${category.toUpperCase()} already exists for this date.`,
 					"warning",
 				);
 				return;

@@ -179,7 +179,7 @@ export default function ExpenseForm({
 
 			if (existingSupplier) {
 				show(
-					`Expense for supplier "${supplier}" already exists for this date.`,
+					`${supplier.toUpperCase()} already exists for this date.`,
 					"warning",
 				);
 				return;
