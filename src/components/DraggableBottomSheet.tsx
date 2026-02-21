@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, StyleSheet, Dimensions, Pressable } from "react-native";
+
 import Animated, {
 	useSharedValue,
 	useAnimatedStyle,
@@ -7,7 +8,9 @@ import Animated, {
 	Easing,
 	interpolate,
 	Extrapolation,
+	runOnJS,
 } from "react-native-reanimated";
+
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 type Props = {
@@ -29,7 +32,12 @@ export default function DraggableBottomSheet({
 	const translateY = useSharedValue(CLOSED_TRANSLATE_Y);
 	const startY = useSharedValue(CLOSED_TRANSLATE_Y);
 
+	const [isOpen, setIsOpen] = useState(false);
+
+	/* -------------------- OPEN / CLOSE -------------------- */
+
 	const openSheet = () => {
+		setIsOpen(true);
 		translateY.value = withTiming(0, {
 			duration: 250,
 			easing: Easing.out(Easing.cubic),
@@ -37,11 +45,19 @@ export default function DraggableBottomSheet({
 	};
 
 	const closeSheet = () => {
-		translateY.value = withTiming(CLOSED_TRANSLATE_Y, {
-			duration: 220,
-			easing: Easing.out(Easing.cubic),
-		});
+		translateY.value = withTiming(
+			CLOSED_TRANSLATE_Y,
+			{
+				duration: 220,
+				easing: Easing.out(Easing.cubic),
+			},
+			() => {
+				runOnJS(setIsOpen)(false);
+			},
+		);
 	};
+
+	/* -------------------- GESTURE -------------------- */
 
 	const gesture = Gesture.Pan()
 		.onStart(() => {
@@ -53,13 +69,7 @@ export default function DraggableBottomSheet({
 			if (next < 0) next = 0;
 
 			if (next > CLOSED_TRANSLATE_Y) {
-				const diff = next - CLOSED_TRANSLATE_Y;
-
-				if (Math.abs(event.velocityY) < 800) {
-					next = CLOSED_TRANSLATE_Y + diff * 0.25;
-				} else {
-					next = CLOSED_TRANSLATE_Y;
-				}
+				next = CLOSED_TRANSLATE_Y;
 			}
 
 			translateY.value = next;
@@ -78,11 +88,25 @@ export default function DraggableBottomSheet({
 				destination = translateY.value < midpoint ? 0 : CLOSED_TRANSLATE_Y;
 			}
 
-			translateY.value = withTiming(destination, {
-				duration: 220,
-				easing: Easing.out(Easing.cubic),
-			});
+			if (destination === 0) {
+				runOnJS(setIsOpen)(true);
+			}
+
+			translateY.value = withTiming(
+				destination,
+				{
+					duration: 220,
+					easing: Easing.out(Easing.cubic),
+				},
+				() => {
+					if (destination === CLOSED_TRANSLATE_Y) {
+						runOnJS(setIsOpen)(false);
+					}
+				},
+			);
 		});
+
+	/* -------------------- ANIMATED STYLES -------------------- */
 
 	const sheetStyle = useAnimatedStyle(() => ({
 		transform: [{ translateY: translateY.value }],
@@ -96,20 +120,19 @@ export default function DraggableBottomSheet({
 			Extrapolation.CLAMP,
 		);
 
-		return {
-			opacity,
-		};
+		return { opacity };
 	});
+
+	/* -------------------- RENDER -------------------- */
 
 	return (
 		<View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-			{/* Backdrop */}
-			<Animated.View
-				style={[styles.backdrop, backdropStyle]}
-				pointerEvents="auto"
-			>
-				<Pressable style={{ flex: 1 }} onPress={closeSheet} />
-			</Animated.View>
+			{/* Backdrop ONLY when open */}
+			{isOpen && (
+				<Animated.View style={[styles.backdrop, backdropStyle]}>
+					<Pressable style={{ flex: 1 }} onPress={closeSheet} />
+				</Animated.View>
+			)}
 
 			{/* Sheet */}
 			<GestureDetector gesture={gesture}>
@@ -123,6 +146,8 @@ export default function DraggableBottomSheet({
 		</View>
 	);
 }
+
+/* -------------------- STYLES -------------------- */
 
 const styles = StyleSheet.create({
 	container: {
