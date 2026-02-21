@@ -1,12 +1,13 @@
 import { getDb } from "./db";
+import { TransactionInput } from "../types/transaction";
 
-export const addTransaction = async (transaction: any) => {
+export const addTransaction = async (transaction: TransactionInput) => {
 	const db = await getDb();
 
 	await db.runAsync(
 		`INSERT INTO transactions 
-    (type, amount, category, note, date, paymentType, supplierId, imagePath, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(type, amount, category, note, date, paymentType, supplierId, imagePath, createdAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			transaction.type,
 			transaction.amount,
@@ -20,7 +21,6 @@ export const addTransaction = async (transaction: any) => {
 		],
 	);
 };
-
 export const getSummaryByDateRange = async (from: string, to: string) => {
 	const db = await getDb();
 
@@ -132,31 +132,26 @@ export const getTransactionsByDate = async (date: string) => {
 	return result;
 };
 
-export const updateTransaction = async (id: number, data: any) => {
+export const updateTransaction = async (
+	id: number,
+	transaction: TransactionInput,
+) => {
 	const db = await getDb();
 
 	await db.runAsync(
-		`
-    UPDATE transactions
-    SET type = ?,
-        amount = ?,
-        category = ?,
-        note = ?,
-        date = ?,
-        paymentType = ?,
-        supplierId = ?,
-        imagePath = ?
-    WHERE id = ?
-    `,
+		`UPDATE transactions
+		 SET type = ?, amount = ?, category = ?, note = ?, date = ?, 
+		     paymentType = ?, supplierId = ?, imagePath = ?
+		 WHERE id = ?`,
 		[
-			data.type,
-			data.amount,
-			data.category,
-			data.note,
-			data.date,
-			data.paymentType,
-			data.supplierId,
-			data.imagePath,
+			transaction.type,
+			transaction.amount,
+			transaction.category,
+			transaction.note,
+			transaction.date,
+			transaction.paymentType,
+			transaction.supplierId,
+			transaction.imagePath,
 			id,
 		],
 	);
