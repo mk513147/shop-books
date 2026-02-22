@@ -29,27 +29,49 @@ import {
 	TransactionInput,
 } from "src/types/transaction";
 import { useToast } from "@context/ToastContext";
+import { useFormDirty } from "src/hooks/useFormDirty";
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, "AddEntry">;
 
 type Props = {
 	editingTransaction: any;
 	isEditMode: boolean;
 	onSaveSuccess: () => void;
+	setIsFormDirty: (value: boolean) => void;
 };
 
 export default function IncomeForm({
 	editingTransaction,
 	isEditMode,
 	onSaveSuccess,
+	setIsFormDirty,
 }: Props) {
 	const navigation = useNavigation<NavigationProp>();
 	const { show } = useToast();
-	const [amount, setAmount] = useState("");
-	const [category, setCategory] = useState("");
-	const [paymentType, setPaymentType] = useState<PaymentType>("cash");
-	const [note, setNote] = useState("");
-	const [selectedDate, setSelectedDate] = useState(new Date());
+	const initialValues = {
+		amount: editingTransaction?.amount?.toString() ?? "",
+		category: editingTransaction?.category ?? "",
+		paymentType: editingTransaction?.paymentType ?? "cash",
+		note: editingTransaction?.note ?? "",
+		date: editingTransaction?.date
+			? new Date(editingTransaction.date)
+			: new Date(),
+	};
 	const [showDatePicker, setShowDatePicker] = useState(false);
+
+	const [formValues, setFormValues] = useState(initialValues);
+
+	const { isDirty, resetDirty } = useFormDirty(formValues);
+
+	const handleChange = (key: keyof typeof formValues, value: any) => {
+		setFormValues((prev) => ({
+			...prev,
+			[key]: value,
+		}));
+	};
+
+	useEffect(() => {
+		setIsFormDirty(isDirty);
+	}, [isDirty]);
 
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
@@ -59,23 +81,28 @@ export default function IncomeForm({
 	};
 
 	useEffect(() => {
-		if (editingTransaction?.type === "income") {
-			setAmount(String(editingTransaction.amount));
-			setCategory(editingTransaction.category ?? "");
-			setPaymentType(editingTransaction.paymentType ?? "cash");
-			setNote(editingTransaction.note ?? "");
-			setSelectedDate(new Date(editingTransaction.date));
-		}
+		if (!editingTransaction) return;
+
+		const updatedValues = {
+			amount: editingTransaction.amount?.toString() ?? "",
+			category: editingTransaction.category ?? "",
+			paymentType: editingTransaction.paymentType ?? "cash",
+			note: editingTransaction.note ?? "",
+			date: new Date(editingTransaction.date),
+		};
+
+		setFormValues(updatedValues);
+		resetDirty(updatedValues);
 	}, [editingTransaction]);
 
 	const handleSave = async () => {
 		try {
-			if (!amount || !category) {
+			if (!formValues.amount || !formValues.category) {
 				show("Amount and Category are required", "info");
 				return;
 			}
 
-			const numericAmount = Number(amount.trim());
+			const numericAmount = Number(formValues.amount.trim());
 
 			if (
 				!Number.isFinite(numericAmount) ||
@@ -86,8 +113,7 @@ export default function IncomeForm({
 				return;
 			}
 
-			const formattedDate = formatDate(selectedDate);
-
+			const formattedDate = formatDate(formValues.date);
 			if (!isEditMode) {
 				const count = await getDailyTransactionCount(formattedDate, "income");
 
@@ -99,13 +125,13 @@ export default function IncomeForm({
 
 			const existingCategory = await checkIncomeCategorySameDay(
 				formattedDate,
-				category,
+				formValues.category,
 				editingTransaction?.id,
 			);
 
 			if (existingCategory) {
 				show(
-					`${category.toUpperCase()} already exists for this date.`,
+					`${formValues.category.toUpperCase()} already exists for this date.`,
 					"warning",
 				);
 				return;
@@ -114,10 +140,10 @@ export default function IncomeForm({
 			const payload: TransactionInput = {
 				type: "income",
 				amount: numericAmount,
-				category,
-				note: note || null,
+				category: formValues.category,
+				note: formValues.note || null,
 				date: formattedDate,
-				paymentType,
+				paymentType: formValues.paymentType,
 				supplierId: null,
 				imagePath: null,
 			};
@@ -126,16 +152,15 @@ export default function IncomeForm({
 				await updateTransaction(editingTransaction.id, payload);
 				onSaveSuccess();
 				show("Transaction Updated", "success");
+				resetDirty();
+				setIsFormDirty(false);
 				navigation.goBack();
 			} else {
 				await addTransaction(payload);
 				show("Transaction Saved", "success");
-
-				setAmount("");
-				setCategory("");
-				setNote("");
-				setPaymentType("cash");
 				onSaveSuccess();
+				resetDirty();
+				setIsFormDirty(false);
 			}
 		} catch (error) {
 			console.log(error);
@@ -151,17 +176,17 @@ export default function IncomeForm({
 				style={styles.input}
 				onPress={() => setShowDatePicker(true)}
 			>
-				<Text>{formatDate(selectedDate)}</Text>
+				<Text>{formatDate(formValues.date)}</Text>
 			</TouchableOpacity>
 
 			{showDatePicker && (
 				<DateTimePicker
-					value={selectedDate}
+					value={formValues.date}
 					mode="date"
 					display={Platform.OS === "ios" ? "spinner" : "default"}
 					onChange={(event, date) => {
 						setShowDatePicker(false);
-						if (date) setSelectedDate(date);
+						if (date) handleChange("date", date);
 					}}
 				/>
 			)}
@@ -172,8 +197,8 @@ export default function IncomeForm({
 				style={styles.amountInput}
 				keyboardType="numeric"
 				placeholder="₹ 0.00"
-				value={amount}
-				onChangeText={setAmount}
+				value={formValues.amount}
+				onChangeText={(val) => handleChange("amount", val)}
 				placeholderTextColor={theme.colors.textSecondary}
 			/>
 
@@ -181,11 +206,10 @@ export default function IncomeForm({
 			<Text style={styles.label}>Category</Text>
 			<View style={styles.pickerWrapper}>
 				<Picker
-					selectedValue={category}
-					onValueChange={(value) => setCategory(value)}
+					selectedValue={formValues.category}
+					onValueChange={(value) => handleChange("category", value)}
 					style={{
 						color: theme.colors.textPrimary,
-						backgroundColor: theme.colors.card,
 					}}
 					dropdownIconColor={theme.colors.textPrimary}
 				>
@@ -204,15 +228,18 @@ export default function IncomeForm({
 						key={p}
 						style={[
 							styles.paymentButton,
-							paymentType === p && styles.paymentActive,
+							formValues.paymentType === p && styles.paymentActive,
 						]}
-						onPress={() => setPaymentType(p)}
+						onPress={() => handleChange("paymentType", p)}
 					>
 						<Text
 							style={[
 								styles.paymentText,
 								{
-									color: paymentType === p ? "#fff" : theme.colors.textPrimary,
+									color:
+										formValues.paymentType === p
+											? "#fff"
+											: theme.colors.textPrimary,
 								},
 							]}
 						>
@@ -227,8 +254,8 @@ export default function IncomeForm({
 			<TextInput
 				style={[styles.input, { height: 80 }]}
 				placeholder="Optional note"
-				value={note}
-				onChangeText={setNote}
+				value={formValues.note}
+				onChangeText={(val) => handleChange("note", val)}
 				placeholderTextColor={theme.colors.textSecondary}
 				multiline
 			/>

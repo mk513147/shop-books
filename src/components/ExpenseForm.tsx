@@ -36,6 +36,7 @@ import {
 } from "src/types/transaction";
 
 import { useToast } from "@context/ToastContext";
+import { useFormDirty } from "src/hooks/useFormDirty";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, "AddEntry">;
 
@@ -48,31 +49,61 @@ type Props = {
 	editingTransaction: any;
 	isEditMode: boolean;
 	onSaveSuccess: () => void;
+	setIsFormDirty: (value: boolean) => void;
 };
 
 export default function ExpenseForm({
 	editingTransaction,
 	isEditMode,
 	onSaveSuccess,
+	setIsFormDirty,
 }: Props) {
 	const navigation = useNavigation<NavigationProp>();
 	const { show } = useToast();
-	const [amount, setAmount] = useState("");
-	const [category, setCategory] = useState("");
-	const [supplier, setSupplier] = useState("");
+
 	const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-	const [paymentType, setPaymentType] = useState<PaymentType>("cash");
-	const [note, setNote] = useState("");
-	const [images, setImages] = useState<string[]>([]);
-	const [selectedDate, setSelectedDate] = useState(new Date());
 	const [showDatePicker, setShowDatePicker] = useState(false);
 
-	const formatDate = (date: Date) => {
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, "0");
-		const day = String(date.getDate()).padStart(2, "0");
-		return `${year}-${month}-${day}`;
+	const initialValues = {
+		amount: editingTransaction?.amount?.toString() ?? "",
+		category: editingTransaction?.category ?? "",
+		supplier: editingTransaction?.supplierName ?? "",
+		paymentType: editingTransaction?.paymentType ?? "cash",
+		note: editingTransaction?.note ?? "",
+		date: editingTransaction?.date
+			? new Date(editingTransaction.date)
+			: new Date(),
+		images: editingTransaction?.imagePath
+			? JSON.parse(editingTransaction.imagePath)
+			: [],
 	};
+
+	const [formValues, setFormValues] = useState(initialValues);
+
+	const { isDirty, resetDirty } = useFormDirty(formValues);
+
+	useEffect(() => {
+		setIsFormDirty(isDirty);
+	}, [isDirty]);
+
+	useEffect(() => {
+		if (!editingTransaction) return;
+
+		const updatedValues = {
+			amount: editingTransaction.amount?.toString() ?? "",
+			category: editingTransaction.category ?? "",
+			supplier: editingTransaction.supplierName ?? "",
+			paymentType: editingTransaction.paymentType ?? "cash",
+			note: editingTransaction.note ?? "",
+			date: new Date(editingTransaction.date),
+			images: editingTransaction.imagePath
+				? JSON.parse(editingTransaction.imagePath)
+				: [],
+		};
+
+		setFormValues(updatedValues);
+		resetDirty(updatedValues);
+	}, [editingTransaction]);
 
 	useEffect(() => {
 		const loadSuppliers = async () => {
@@ -82,29 +113,27 @@ export default function ExpenseForm({
 		loadSuppliers();
 	}, []);
 
-	useEffect(() => {
-		if (editingTransaction?.type === "expense") {
-			setAmount(String(editingTransaction.amount));
-			setCategory(editingTransaction.category ?? "");
-			setSupplier(editingTransaction.supplierName ?? "");
-			setPaymentType(editingTransaction.paymentType ?? "cash");
-			setNote(editingTransaction.note ?? "");
-			setSelectedDate(new Date(editingTransaction.date));
+	const handleChange = (key: keyof typeof formValues, value: any) => {
+		setFormValues((prev) => ({
+			...prev,
+			[key]: value,
+		}));
+	};
 
-			if (editingTransaction.imagePath) {
-				setImages(JSON.parse(editingTransaction.imagePath));
-			}
-		}
-	}, [editingTransaction]);
+	const formatDate = (date: Date) => {
+		const y = date.getFullYear();
+		const m = String(date.getMonth() + 1).padStart(2, "0");
+		const d = String(date.getDate()).padStart(2, "0");
+		return `${y}-${m}-${d}`;
+	};
 
 	const pickImage = async () => {
-		if (images.length >= 7) {
+		if (formValues.images.length >= 7) {
 			show("Maximum 7 images allowed", "info");
 			return;
 		}
 
 		const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
 		if (!permission.granted) {
 			show("Permission required", "warning");
 			return;
@@ -114,7 +143,7 @@ export default function ExpenseForm({
 			mediaTypes: ["images"],
 			quality: 0.7,
 			allowsMultipleSelection: true,
-			selectionLimit: 7 - images.length,
+			selectionLimit: 7 - formValues.images.length,
 		});
 
 		if (!result.canceled) {
@@ -124,7 +153,7 @@ export default function ExpenseForm({
 				await billsDir.create({ intermediates: true });
 			}
 
-			const newImagePaths: string[] = [];
+			const newPaths: string[] = [];
 
 			for (const asset of result.assets) {
 				const fileName = `bill_${Date.now()}_${Math.random()}.jpg`;
@@ -132,22 +161,31 @@ export default function ExpenseForm({
 				const sourceFile = new File(asset.uri);
 
 				await sourceFile.copy(newFile);
-
-				newImagePaths.push(newFile.uri);
+				newPaths.push(newFile.uri);
 			}
 
-			setImages((prev) => [...prev, ...newImagePaths]);
+			handleChange("images", [...formValues.images, ...newPaths]);
 		}
+	};
+
+	const removeImage = async (index: number) => {
+		const file = new File(formValues.images[index]);
+		await file.delete();
+
+		handleChange(
+			"images",
+			formValues.images.filter((image: string, i: number) => i !== index),
+		);
 	};
 
 	const handleSave = async () => {
 		try {
-			if (!amount || !category || !supplier) {
+			if (!formValues.amount || !formValues.category || !formValues.supplier) {
 				show("Amount, Category and Supplier are required", "warning");
 				return;
 			}
 
-			const numericAmount = Number(amount.trim());
+			const numericAmount = Number(formValues.amount.trim());
 
 			if (
 				!Number.isFinite(numericAmount) ||
@@ -158,28 +196,27 @@ export default function ExpenseForm({
 				return;
 			}
 
-			const formattedDate = formatDate(selectedDate);
+			const formattedDate = formatDate(formValues.date);
 
 			if (!isEditMode) {
 				const count = await getDailyTransactionCount(formattedDate, "expense");
-
 				if (count >= 12) {
 					show("Maximum 12 expense entries allowed per day.", "warning");
 					return;
 				}
 			}
 
-			const supplierId = await getOrCreateSupplier(supplier);
+			const supplierId = await getOrCreateSupplier(formValues.supplier);
 
-			const existingSupplier = await checkExpenseSupplierSameDay(
+			const existing = await checkExpenseSupplierSameDay(
 				formattedDate,
 				supplierId,
 				editingTransaction?.id,
 			);
 
-			if (existingSupplier) {
+			if (existing) {
 				show(
-					`${supplier.toUpperCase()} already exists for this date.`,
+					`${formValues.supplier.toUpperCase()} already exists for this date.`,
 					"warning",
 				);
 				return;
@@ -188,29 +225,41 @@ export default function ExpenseForm({
 			const payload: TransactionInput = {
 				type: "expense",
 				amount: numericAmount,
-				category,
-				note: note || null,
+				category: formValues.category,
+				note: formValues.note || null,
 				date: formattedDate,
-				paymentType,
+				paymentType: formValues.paymentType,
 				supplierId,
-				imagePath: images.length > 0 ? JSON.stringify(images) : null,
+				imagePath:
+					formValues.images.length > 0
+						? JSON.stringify(formValues.images)
+						: null,
 			};
 
 			if (isEditMode) {
 				await updateTransaction(editingTransaction.id, payload);
-				onSaveSuccess();
 				show("Transaction Updated", "success");
+				onSaveSuccess();
+				resetDirty();
+				setIsFormDirty(false);
 				navigation.goBack();
 			} else {
 				await addTransaction(payload);
 				show("Transaction Saved", "success");
 
-				setAmount("");
-				setCategory("");
-				setSupplier("");
-				setNote("");
-				setPaymentType("cash");
-				setImages([]);
+				const cleared = {
+					amount: "",
+					category: "",
+					supplier: "",
+					paymentType: "cash",
+					note: "",
+					date: new Date(),
+					images: [],
+				};
+
+				setFormValues(cleared);
+				resetDirty(cleared);
+				setIsFormDirty(false);
 				onSaveSuccess();
 			}
 		} catch (error) {
@@ -221,44 +270,45 @@ export default function ExpenseForm({
 
 	return (
 		<>
-			{/* DATE */}
 			<Text style={styles.label}>Date</Text>
 			<TouchableOpacity
 				style={styles.input}
 				onPress={() => setShowDatePicker(true)}
 			>
-				<Text>{formatDate(selectedDate)}</Text>
+				<Text>{formatDate(formValues.date)}</Text>
 			</TouchableOpacity>
 
 			{showDatePicker && (
 				<DateTimePicker
-					value={selectedDate}
+					value={formValues.date}
 					mode="date"
 					display={Platform.OS === "ios" ? "spinner" : "default"}
-					onChange={(event, date) => {
+					onChange={(e, date) => {
 						setShowDatePicker(false);
-						if (date) setSelectedDate(date);
+						if (date) handleChange("date", date);
 					}}
 				/>
 			)}
 
-			{/* AMOUNT */}
 			<Text style={styles.label}>Amount</Text>
 			<TextInput
 				style={styles.amountInput}
 				keyboardType="numeric"
 				placeholder="₹ 0.00"
-				value={amount}
-				onChangeText={setAmount}
+				value={formValues.amount}
+				onChangeText={(val) => handleChange("amount", val)}
 				placeholderTextColor={theme.colors.textSecondary}
 			/>
 
-			{/* CATEGORY */}
 			<Text style={styles.label}>Category</Text>
 			<View style={styles.pickerWrapper}>
 				<Picker
-					selectedValue={category}
-					onValueChange={(value) => setCategory(value)}
+					selectedValue={formValues.category}
+					onValueChange={(val) => handleChange("category", val)}
+					style={{
+						color: theme.colors.textPrimary,
+					}}
+					dropdownIconColor={theme.colors.textPrimary}
 				>
 					<Picker.Item label="Select Category" value="" />
 					{expenseCategories.map((cat) => (
@@ -267,12 +317,15 @@ export default function ExpenseForm({
 				</Picker>
 			</View>
 
-			{/* SUPPLIER */}
 			<Text style={styles.label}>Supplier</Text>
 			<View style={styles.pickerWrapper}>
 				<Picker
-					selectedValue={supplier}
-					onValueChange={(value) => setSupplier(value)}
+					selectedValue={formValues.supplier}
+					onValueChange={(val) => handleChange("supplier", val)}
+					style={{
+						color: theme.colors.textPrimary,
+					}}
+					dropdownIconColor={theme.colors.textPrimary}
 				>
 					<Picker.Item label="Select Supplier" value="" />
 					{suppliers.map((sup) => (
@@ -281,7 +334,6 @@ export default function ExpenseForm({
 				</Picker>
 			</View>
 
-			{/* PAYMENT */}
 			<Text style={styles.label}>Payment Type</Text>
 			<View style={styles.paymentRow}>
 				{PAYMENT_OPTIONS.map((p) => (
@@ -289,15 +341,18 @@ export default function ExpenseForm({
 						key={p}
 						style={[
 							styles.paymentButton,
-							paymentType === p && styles.paymentActive,
+							formValues.paymentType === p && styles.paymentActive,
 						]}
-						onPress={() => setPaymentType(p)}
+						onPress={() => handleChange("paymentType", p)}
 					>
 						<Text
 							style={[
 								styles.paymentText,
 								{
-									color: paymentType === p ? "#fff" : theme.colors.textPrimary,
+									color:
+										formValues.paymentType === p
+											? "#fff"
+											: theme.colors.textPrimary,
 								},
 							]}
 						>
@@ -307,35 +362,30 @@ export default function ExpenseForm({
 				))}
 			</View>
 
-			{/* NOTE */}
 			<Text style={styles.label}>Note</Text>
 			<TextInput
 				style={[styles.input, { height: 80 }]}
-				value={note}
-				onChangeText={setNote}
+				placeholder="Optional note"
+				value={formValues.note}
+				onChangeText={(val) => handleChange("note", val)}
+				placeholderTextColor={theme.colors.textSecondary}
 				multiline
 			/>
 
-			{/* IMAGE PICKER */}
 			<TouchableOpacity style={styles.imageButton} onPress={pickImage}>
 				<Ionicons name="camera-outline" size={20} color="#fff" />
 				<Text style={styles.imageButtonText}>
-					Add Bill Images ({images.length}/7)
+					Add Bill Images ({formValues.images.length}/7)
 				</Text>
 			</TouchableOpacity>
 
 			<View style={styles.grid}>
-				{images.map((img, index) => (
+				{formValues.images.map((img: string, index: number) => (
 					<View key={index} style={styles.imageBox}>
 						<Image source={{ uri: img }} style={styles.previewImage} />
-
 						<TouchableOpacity
 							style={styles.removeImageButton}
-							onPress={async () => {
-								const file = new File(img);
-								await file.delete();
-								setImages((prev) => prev.filter((_, i) => i !== index));
-							}}
+							onPress={() => removeImage(index)}
 						>
 							<Ionicons name="close" size={14} color="#fff" />
 						</TouchableOpacity>
@@ -343,7 +393,6 @@ export default function ExpenseForm({
 				))}
 			</View>
 
-			{/* SAVE */}
 			<TouchableOpacity style={styles.saveButton} onPress={handleSave}>
 				<Text style={styles.saveButtonText}>
 					{isEditMode ? "Update Entry" : "Save Entry"}

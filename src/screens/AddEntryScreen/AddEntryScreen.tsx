@@ -1,7 +1,13 @@
-import React, { useState, useCallback } from "react";
-import { View, Text, TouchableOpacity, ScrollView } from "react-native";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import {
+	View,
+	Text,
+	TouchableOpacity,
+	ScrollView,
+	KeyboardAvoidingView,
+	Platform,
+} from "react-native";
 import { useRoute, RouteProp, useFocusEffect } from "@react-navigation/native";
-import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import { styles } from "@screens/AddEntryScreen/AddEntry.styles";
 import { theme } from "@theme";
@@ -13,7 +19,8 @@ import DraggableBottomSheet from "@components/DraggableBottomSheet";
 
 import { getTransactionsByDate } from "@database/transactionService";
 import ConfirmDiscardModal from "@components/ConfirmDiscardModal";
-import AppToast from "@components/AppToast";
+import { useNavigation } from "@react-navigation/native";
+import { useToast } from "@context/ToastContext";
 
 type RouteProps = RouteProp<RootStackParamList, "AddEntry">;
 
@@ -21,10 +28,19 @@ export default function AddEntryScreen() {
 	const route = useRoute<RouteProps>();
 	const editingTransaction = route.params?.transaction ?? null;
 	const isEditMode = !!editingTransaction;
+	const navigation = useNavigation();
+	const { show } = useToast();
+
+	const [isFormDirty, setIsFormDirty] = useState(false);
+	const blockedActionRef = useRef<any>(null);
 
 	const [type, setType] = useState<"income" | "expense">(
 		editingTransaction?.type ?? "income",
 	);
+
+	const [discardAction, setDiscardAction] = useState<
+		"navigation" | "type" | null
+	>(null);
 
 	const [dailyTransactions, setDailyTransactions] = useState<any[]>([]);
 	const [selectedDate, setSelectedDate] = useState(
@@ -35,9 +51,6 @@ export default function AddEntryScreen() {
 		null,
 	);
 	const [showDiscardModal, setShowDiscardModal] = useState(false);
-
-	const [toastMessage, setToastMessage] = useState("");
-	const [showToast, setShowToast] = useState(false);
 
 	const formatDate = (date: Date) => {
 		const year = date.getFullYear();
@@ -54,7 +67,26 @@ export default function AddEntryScreen() {
 
 	useFocusEffect(
 		useCallback(() => {
-			loadDailyTransactions();
+			let isActive = true;
+
+			const load = async () => {
+				try {
+					const formattedDate = formatDate(selectedDate);
+					const data = await getTransactionsByDate(formattedDate);
+
+					if (isActive) {
+						setDailyTransactions(data);
+					}
+				} catch (e) {
+					console.error("Load transactions error:", e);
+				}
+			};
+
+			load();
+
+			return () => {
+				isActive = false;
+			};
 		}, [selectedDate]),
 	);
 
@@ -75,31 +107,69 @@ export default function AddEntryScreen() {
 	const handleTypeChange = (newType: "income" | "expense") => {
 		if (newType === type) return;
 
+		if (!isFormDirty) {
+			setType(newType);
+			return;
+		}
+
 		setPendingType(newType);
+		setDiscardAction("type");
 		setShowDiscardModal(true);
 	};
-
 	const confirmDiscard = () => {
-		setShowDiscardModal(false);
+		if (discardAction === "navigation" && blockedActionRef.current) {
+			setShowDiscardModal(false);
+			setIsFormDirty(false);
 
-		if (pendingType) {
+			show("Changes discarded", "info");
+
+			navigation.dispatch(blockedActionRef.current);
+			blockedActionRef.current = null;
+		}
+
+		if (discardAction === "type" && pendingType) {
+			setShowDiscardModal(false);
+			setIsFormDirty(false);
+
 			setType(pendingType);
 			setPendingType(null);
-		}
-	};
 
+			show("Switched entry type", "info");
+		}
+
+		setDiscardAction(null);
+	};
 	const cancelDiscard = () => {
 		setShowDiscardModal(false);
+		setDiscardAction(null);
 		setPendingType(null);
 	};
 
+	useEffect(() => {
+		const unsubscribe = navigation.addListener("beforeRemove", (e) => {
+			if (!isFormDirty) return;
+
+			e.preventDefault();
+
+			blockedActionRef.current = e.data.action;
+			setDiscardAction("navigation");
+			setShowDiscardModal(true);
+		});
+
+		return unsubscribe;
+	}, [navigation, isFormDirty]);
+
 	return (
 		<View style={styles.container}>
-			<View style={styles.formSection}>
+			<KeyboardAvoidingView
+				style={styles.formSection}
+				behavior={Platform.OS === "ios" ? "padding" : "height"}
+				keyboardVerticalOffset={80}
+			>
 				<ScrollView
 					showsVerticalScrollIndicator={false}
 					keyboardShouldPersistTaps="handled"
-					contentContainerStyle={{ paddingBottom: 90 }}
+					contentContainerStyle={{ paddingBottom: 60 }}
 				>
 					{/* TOGGLE */}
 					<View style={styles.toggleContainer}>
@@ -150,16 +220,18 @@ export default function AddEntryScreen() {
 							editingTransaction={editingTransaction}
 							isEditMode={isEditMode}
 							onSaveSuccess={loadDailyTransactions}
+							setIsFormDirty={setIsFormDirty}
 						/>
 					) : (
 						<ExpenseForm
 							editingTransaction={editingTransaction}
 							isEditMode={isEditMode}
 							onSaveSuccess={loadDailyTransactions}
+							setIsFormDirty={setIsFormDirty}
 						/>
 					)}
 				</ScrollView>
-			</View>
+			</KeyboardAvoidingView>
 
 			{/* SUMMARY */}
 			<DraggableBottomSheet>
