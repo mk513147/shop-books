@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Environment files: only .env.example files are committed
+.env
+.env.*
+!.env.example
+
+# Test output
+web/playwright-report/
+web/test-results/
+web/dev-dist/
+*.tsbuildinfo
