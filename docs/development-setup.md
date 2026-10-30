@@ -30,7 +30,13 @@ Edit them:
 - `.env.development` → `DATABASE_URL=postgresql://shop_books_app:<password>@localhost:5432/shop_books_dev`
 - `.env.test` → `DATABASE_URL=postgresql://shop_books_app:<password>@localhost:5432/shop_books_test` (name **must** end in `_test`)
 
-`FRONTEND_URL=http://localhost:5173` is correct for development. Real environment variables override file values. `SESSION_SECRET` is unused until Stage 2.
+In **both** files set `SESSION_SECRET` to a different random value (required; the server will not start without it):
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+`FRONTEND_URL=http://localhost:5173` is correct for development (add `,http://localhost:4173` if you also use `npm --prefix web run preview`). Leave `SESSION_COOKIE_SAMESITE=lax`. Real environment variables override file values.
 
 The web app needs no configuration in development (Vite proxies `/api` to `localhost:3000`). Optional overrides: `web/.env.example`.
 
@@ -49,7 +55,13 @@ Prepare the test database once:
 $env:NODE_ENV = "test"; npm run db:migrate; Remove-Item Env:NODE_ENV
 ```
 
-(The integration tests also apply migrations themselves, idempotently.)
+(The integration tests also apply migrations themselves, idempotently. The auth integration tests **truncate** `users`, `sessions` and `auth_events` in the test database; never point `.env.test` at real data.)
+
+Create the owner account in the development database (once; run it in a real terminal so the password is hidden):
+
+```powershell
+npm run owner:create
+```
 
 ## 4. Run
 
@@ -58,11 +70,7 @@ npm run dev:server     # API on http://localhost:3000   (check /api/v1/health)
 npm run dev:web        # Web on http://localhost:5173
 ```
 
-The web app shows the login screen. To preview the empty application shell during development only:
-
-```powershell
-$env:VITE_PREVIEW_SHELL = "true"; npm run dev:web
-```
+Open http://localhost:5173 and sign in as the owner. Add managers under **Users**; each gets a temporary password that must be changed at first sign-in.
 
 ## 5. Test
 
@@ -88,6 +96,10 @@ npm --prefix web run preview   # serve the built web app on http://localhost:417
 
 | Symptom | Cause / fix |
 |---|---|
+| `Invalid configuration: SESSION_SECRET: …` on start | Set a random value of at least 32 characters (see step 2). |
+| Sign-in or any save fails with "Request origin is not allowed" | The page's origin is not in `FRONTEND_URL` (e.g. using the preview port 4173). Add it, comma-separated. |
+| "Security check failed. Reload the page" | CSRF token is stale (e.g. `SESSION_SECRET` changed or the session was replaced in another tab). Reload. |
+| Locked out of the only owner account | Wait for the lock to expire (max 4 h). There is no self-service reset, and an owner recovery command does not exist yet (open decision, see [testing-plan.md](testing-plan.md#open-items)). |
 | `Invalid configuration: DATABASE_URL: …` on start | Missing/invalid variable. Check `.env.development` exists at the repo root. |
 | `…when NODE_ENV=test the database name must end in "_test"` | `.env.test` points at the wrong database. Use a dedicated `*_test` database. |
 | `password authentication failed` / `ECONNREFUSED` | Wrong credentials, PostgreSQL not running (check the `postgresql-x64-*` service), or wrong port. |

@@ -26,7 +26,14 @@ export interface AppConfig extends DatabaseConfig {
   logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
   trustProxy: boolean;
   appVersion: string | undefined;
-  sessionSecret: string | undefined;
+  /** Server-side secret used to derive per-session CSRF tokens (HMAC). */
+  sessionSecret: string;
+  cookie: {
+    /** `__Host-` prefixed in production (requires Secure, Path=/ and no Domain). */
+    name: string;
+    secure: boolean;
+    sameSite: 'lax' | 'strict' | 'none';
+  };
 }
 
 const PLACEHOLDER_PATTERN = /change[_-]?me|placeholder|your[_-]/i;
@@ -63,7 +70,8 @@ const appSchema = z.object({
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional(),
   TRUST_PROXY: booleanString.default(false),
   APP_VERSION: z.string().trim().optional(),
-  SESSION_SECRET: z.string().optional(),
+  SESSION_SECRET: z.string({ error: 'SESSION_SECRET is required' }).min(1, 'SESSION_SECRET is required'),
+  SESSION_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 });
 
 const databaseSchema = z.object(databaseShape);
@@ -135,11 +143,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const secret = data.SESSION_SECRET;
-  if (secret !== undefined) {
-    if (secret.length < 32) issues.push('SESSION_SECRET: must be at least 32 characters when set');
-    else if (PLACEHOLDER_PATTERN.test(secret)) {
-      issues.push('SESSION_SECRET: looks like a placeholder; generate a random value');
-    }
+  if (secret.length < 32) issues.push('SESSION_SECRET: must be at least 32 characters');
+  else if (PLACEHOLDER_PATTERN.test(secret)) {
+    issues.push('SESSION_SECRET: looks like a placeholder; generate a random value');
+  }
+
+  const secureCookie = data.NODE_ENV === 'production';
+  if (data.SESSION_COOKIE_SAMESITE === 'none' && !secureCookie) {
+    issues.push('SESSION_COOKIE_SAMESITE: "none" is only allowed in production (it requires Secure cookies)');
   }
 
   if (issues.length > 0) throw new ConfigError(issues);
@@ -155,5 +166,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trustProxy: data.TRUST_PROXY,
     appVersion: data.APP_VERSION || undefined,
     sessionSecret: secret,
+    cookie: {
+      name: secureCookie ? '__Host-sb_session' : 'sb_session',
+      secure: secureCookie,
+      sameSite: data.SESSION_COOKIE_SAMESITE,
+    },
   };
 }

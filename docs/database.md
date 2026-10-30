@@ -82,6 +82,27 @@ Behaviour:
 
 | Version | Purpose |
 |---|---|
-| `0001_initial_infrastructure` | `citext` extension and the shared `set_updated_at()` trigger function. **No financial tables.** |
+| `0001_initial_infrastructure` | `citext` extension and the shared `set_updated_at()` trigger function. |
+| `0002_auth` | `users`, `sessions`, `auth_events` (Stage 2). **No financial tables.** |
 
-The financial schema is intentionally not part of Stage 1.
+### `0002_auth` tables
+
+**`users`**: `id uuid` PK; `email citext` UNIQUE (case-insensitive) with a format check; `name` (1–100 chars); `role` (`owner` \| `manager`); `password_hash` (must be an Argon2id PHC string; there is no plain-password column); `must_change_password`; `is_active`; lockout state (`failed_login_count`, `lockout_count`, `locked_until`); `last_login_at`, `password_changed_at`, `created_by`, `created_at`, `updated_at` (trigger). Constraints worth knowing:
+- `users_single_owner`: unique partial index, so the database itself refuses a second owner, even under concurrent inserts.
+- `users_owner_active`: the owner row can never be inactive, so there is always an active owner.
+
+**`sessions`**: `id uuid` PK; `user_id` → `users` (cascade); `token_hash bytea` UNIQUE, exactly 32 bytes (SHA-256 of the cookie token; the token itself is never stored); `created_at`, `last_seen_at` (idle timeout), `absolute_expires_at`; `revoked_at` + `revoked_reason` (both set or both null; reason from a fixed list); `ip inet`, `user_agent`. Partial index on live sessions per user.
+
+**`auth_events`**: append-only access log: `event_type` (fixed list), `user_id`, `actor_user_id`, `email_attempted`, `ip`, `user_agent`, `details jsonb`, `created_at`. Indexed per user and for per-IP failure counting. Never contains passwords, hashes or tokens. *(Retention policy not decided yet; see testing plan / open decisions.)*
+
+The financial schema is intentionally not part of Stages 1–2.
+
+## Creating the owner account
+
+After migrating, create the single owner once (interactive; the password is not echoed):
+
+```powershell
+npm run owner:create
+```
+
+It refuses to run against an unmigrated database and refuses if an owner already exists. Against production, build first and use `$env:NODE_ENV="production"; npm --prefix server run owner:create:built`.

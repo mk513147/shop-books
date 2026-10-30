@@ -50,6 +50,9 @@ export default defineConfig({
     // Same-origin API calls in development: no CORS configuration needed.
     proxy: { '/api': { target: 'http://localhost:3000', changeOrigin: true } },
   },
+  preview: {
+    proxy: { '/api': { target: 'http://localhost:3000', changeOrigin: true } },
+  },
   build: {
     sourcemap: false,
   },

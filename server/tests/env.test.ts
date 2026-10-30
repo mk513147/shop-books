@@ -5,6 +5,7 @@ const valid = {
   NODE_ENV: 'development',
   DATABASE_URL: 'postgresql://user:s3cretpw@localhost:5432/shop_books_dev',
   FRONTEND_URL: 'http://localhost:5173',
+  SESSION_SECRET: 'k'.repeat(40),
 };
 
 function messageOf(env: NodeJS.ProcessEnv): string {
@@ -30,6 +31,7 @@ describe('environment validation', () => {
     const message = messageOf({ NODE_ENV: 'development' });
     expect(message).toContain('DATABASE_URL');
     expect(message).toContain('FRONTEND_URL');
+    expect(message).toContain('SESSION_SECRET');
   });
 
   it('treats empty strings as missing', () => {
@@ -70,6 +72,14 @@ describe('environment validation', () => {
       'placeholder',
     );
     expect(loadConfig({ ...valid, SESSION_SECRET: 'x'.repeat(48) }).sessionSecret).toHaveLength(48);
+  });
+
+  it('derives cookie settings from the environment', () => {
+    expect(loadConfig(valid).cookie).toEqual({ name: 'sb_session', secure: false, sameSite: 'lax' });
+    const prod = loadConfig({ ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com' });
+    expect(prod.cookie).toEqual({ name: '__Host-sb_session', secure: true, sameSite: 'lax' });
+    expect(messageOf({ ...valid, SESSION_COOKIE_SAMESITE: 'none' })).toContain('SESSION_COOKIE_SAMESITE');
+    expect(messageOf({ ...valid, SESSION_COOKIE_SAMESITE: 'sideways' })).toContain('SESSION_COOKIE_SAMESITE');
   });
 
   describe('database isolation', () => {

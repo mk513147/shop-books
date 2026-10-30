@@ -16,9 +16,12 @@
     "db:status": "tsx src/database/cli.ts status",
     "db:migrate": "tsx src/database/cli.ts migrate",
     "db:status:built": "node dist/database/cli.js status",
-    "db:migrate:built": "node dist/database/cli.js migrate"
+    "db:migrate:built": "node dist/database/cli.js migrate",
+    "owner:create": "tsx src/cli/createOwner.ts",
+    "owner:create:built": "node dist/cli/createOwner.js"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
     "cors": "^2.8.6",
     "express": "^5.3.0",
     "helmet": "^8.3.0",

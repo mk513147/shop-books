@@ -28,10 +28,10 @@ describe('GET /api/v1/health', () => {
 });
 
 describe('unknown routes', () => {
-  it('return a consistent JSON 404 with a request id', async () => {
+  it('under /api are denied by default (401) before any 404 can reveal what exists', async () => {
     const res = await request(appWith('up')).get('/api/v1/does-not-exist');
-    expect(res.status).toBe(404);
-    expect(res.body.error).toMatchObject({ code: 'NOT_FOUND' });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatchObject({ code: 'UNAUTHENTICATED' });
     expect(res.body.error.requestId).toBe(res.headers['x-request-id']);
   });
 

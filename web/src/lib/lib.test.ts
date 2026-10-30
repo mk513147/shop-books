@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, apiRequest } from './api-client';
-import { isShellPreviewEnabled } from './env';
+import { ApiError, apiRequest, setCsrfToken, setUnauthorizedHandler } from './api-client';
 import { formatInr } from './money';
 
 describe('formatInr', () => {
@@ -24,46 +23,63 @@ describe('formatInr', () => {
   });
 });
 
-describe('isShellPreviewEnabled', () => {
-  it('is true only for development builds with the flag set', () => {
-    expect(isShellPreviewEnabled({ DEV: true, VITE_PREVIEW_SHELL: 'true' })).toBe(true);
-    expect(isShellPreviewEnabled({ DEV: true })).toBe(false);
-    expect(isShellPreviewEnabled({ DEV: false, VITE_PREVIEW_SHELL: 'true' })).toBe(false);
-  });
-});
-
 describe('apiRequest', () => {
+  function lastCall(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls.at(-1) as unknown as [string, RequestInit];
+  }
+
   it('parses successful JSON responses and sends credentials', async () => {
     const fetchMock = vi.fn(async () => Response.json({ hello: 'world' }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(apiRequest('/ping')).resolves.toEqual({ hello: 'world' });
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = lastCall(fetchMock);
     expect(url).toBe('/api/v1/ping');
     expect(init.credentials).toBe('include');
+    expect(init.body).toBeUndefined();
   });
 
-  it('serialises json bodies with a content type', async () => {
+  it('sends a JSON body and the CSRF header on state-changing requests only', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(apiRequest('/things', { method: 'POST', json: { a: 1 } })).resolves.toBeUndefined();
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(init.body).toBe('{"a":1}');
+    setCsrfToken('csrf-123');
+
+    await apiRequest('/auth/logout', { method: 'POST' });
+    let [, init] = lastCall(fetchMock);
+    expect(init.body).toBe('{}');
     expect((init.headers as Headers).get('Content-Type')).toBe('application/json');
+    expect((init.headers as Headers).get('X-CSRF-Token')).toBe('csrf-123');
+
+    await apiRequest('/things', { method: 'PATCH', json: { a: 1 } });
+    [, init] = lastCall(fetchMock);
+    expect(init.body).toBe('{"a":1}');
+
+    await apiRequest('/things');
+    [, init] = lastCall(fetchMock);
+    expect((init.headers as Headers).get('X-CSRF-Token')).toBeNull();
+    setCsrfToken(null);
   });
 
   it("maps the server's error envelope to ApiError", async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        Response.json(
-          { error: { code: 'NOT_FOUND', message: 'Nope', requestId: 'req-1' } },
-          { status: 404 },
-        ),
+        Response.json({ error: { code: 'NOT_FOUND', message: 'Nope', requestId: 'req-1' } }, { status: 404 }),
       ),
     );
     const err = await apiRequest('/x').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err).toMatchObject({ status: 404, code: 'NOT_FOUND', message: 'Nope', requestId: 'req-1' });
+  });
+
+  it('reports an ended session on 401, except for the sign-in request itself', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { code: 'UNAUTHENTICATED' } }, { status: 401 })));
+    await expect(apiRequest('/users')).rejects.toMatchObject({ status: 401 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    await expect(apiRequest('/auth/login', { method: 'POST', json: {} })).rejects.toMatchObject({ status: 401 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    setUnauthorizedHandler(null);
   });
 
   it('handles non-JSON error bodies and network failures', async () => {

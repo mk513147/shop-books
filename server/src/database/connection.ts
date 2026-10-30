@@ -7,6 +7,9 @@ export interface Queryable {
   query: pg.Pool['query'];
 }
 
+/** What the application needs from the pool: queries plus dedicated clients for transactions. */
+export type Database = Pick<pg.Pool, 'query' | 'connect'>;
+
 const PG_TYPE_DATE = 1082;
 
 let parsersConfigured = false;

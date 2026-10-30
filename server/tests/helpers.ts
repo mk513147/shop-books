@@ -2,7 +2,7 @@ import pg from 'pg';
 import { pino } from 'pino';
 import type { AppConfig } from '../src/config/env.js';
 import { loadDatabaseConfig } from '../src/config/env.js';
-import { configureTypeParsers, type Queryable } from '../src/database/connection.js';
+import { configureTypeParsers, type Database } from '../src/database/connection.js';
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -14,7 +14,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     logLevel: 'silent',
     trustProxy: false,
     appVersion: '1.2.3-test',
-    sessionSecret: undefined,
+    sessionSecret: 'test-secret-'.padEnd(48, 'x'),
+    cookie: { name: 'sb_session', secure: false, sameSite: 'lax' },
     ...overrides,
   };
 }
@@ -22,13 +23,19 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 export const silentLogger = pino({ level: 'silent' });
 
 /** A database stand-in for tests that do not need PostgreSQL. */
-export function fakeDb(behaviour: 'up' | 'down'): Queryable {
+export function fakeDb(behaviour: 'up' | 'down'): Database {
   const query = (async () => {
     if (behaviour === 'down') throw new Error('connect ECONNREFUSED secret-host:5432');
-    return { rows: [{ ok: 1 }], rowCount: 1 };
-  }) as unknown as Queryable['query'];
-  return { query };
+    return { rows: [], rowCount: 0 };
+  }) as unknown as Database['query'];
+  const connect = (async () => {
+    throw new Error('fakeDb does not support transactions');
+  }) as unknown as Database['connect'];
+  return { query, connect };
 }
+
+/** Headers a browser on the configured frontend origin would send for a state-changing request. */
+export const BROWSER_HEADERS = { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' };
 
 /**
  * Connects to the dedicated test database (from .env.test or the environment) if one is reachable.

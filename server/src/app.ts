@@ -4,14 +4,14 @@ import helmet from 'helmet';
 import type { Logger } from 'pino';
 import { pinoHttp } from 'pino-http';
 import type { AppConfig } from './config/env.js';
-import type { Queryable } from './database/connection.js';
+import type { Database } from './database/connection.js';
 import { createErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { requestId } from './middleware/requestId.js';
 import { createApiRouter } from './routes/index.js';
 
 export interface AppDeps {
   config: AppConfig;
-  db: Queryable;
+  db: Database;
   logger: Logger;
 }
 
@@ -51,7 +51,7 @@ export function createApp({ config, db, logger }: AppDeps): Express {
   );
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
-  app.use('/api/v1', createApiRouter({ db, appVersion: config.appVersion }));
+  app.use('/api/v1', createApiRouter({ db, config }));
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));
