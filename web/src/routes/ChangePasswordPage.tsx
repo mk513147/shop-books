@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { errorMessage } from '@/components/states';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AuthLayout } from '@/components/layout/AuthLayout';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/features/auth/auth-context';
@@ -40,17 +40,14 @@ export function ChangePasswordPage() {
   } = useForm<Values>({ resolver: zodResolver(schema) });
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Change password</CardTitle>
-          <CardDescription>
-            {forced
-              ? 'You signed in with a temporary password. Choose your own password to continue.'
-              : 'Changing your password signs you out on every other device.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+    <AuthLayout
+      title="Change password"
+      description={
+        forced
+          ? 'You signed in with a temporary password. Choose your own password to continue.'
+          : 'Changing your password signs you out on every other device.'
+      }
+    >
           <form
             noValidate
             className="space-y-4"
@@ -92,11 +89,11 @@ export function ChangePasswordPage() {
               />
             </Field>
             {formError && (
-              <p role="alert" className="rounded-md bg-destructive/5 p-3 text-sm text-destructive">
+              <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
                 {formError}
               </p>
             )}
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? 'Saving…' : 'Change password'}
             </Button>
             {!forced && (
@@ -105,8 +102,6 @@ export function ChangePasswordPage() {
               </Link>
             )}
           </form>
-        </CardContent>
-      </Card>
-    </main>
+    </AuthLayout>
   );
 }

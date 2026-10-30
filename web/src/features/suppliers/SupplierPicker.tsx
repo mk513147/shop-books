@@ -1,0 +1,175 @@
+import { ChevronsUpDown, Plus, Search, Truck, X } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
+import { Dialog } from '@/components/ui/dialog';
+import { controlClass } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import type { SupplierRef } from '@/types/api';
+import { useSuppliers } from './suppliers-api';
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
+interface SupplierPickerProps {
+  id: string;
+  value: SupplierRef | null;
+  onChange: (supplier: SupplierRef | null) => void;
+  /** Opens the "Add supplier" form, prefilled with what was typed. */
+  onAddSupplier: (typedName: string) => void;
+  invalid?: boolean;
+  describedBy?: string;
+}
+
+type Option = { kind: 'none' } | { kind: 'supplier'; supplier: SupplierRef & { phone: string | null } } | { kind: 'add' };
+
+/**
+ * Searchable supplier selector backed by GET /suppliers (active only). Opens as a sheet on phones
+ * and a dialog on desktop, so it works the same with touch, mouse and keyboard.
+ */
+export function SupplierPicker({ id, value, onChange, onAddSupplier, invalid, describedBy }: SupplierPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const q = useDebounced(query.trim(), 200);
+  const list = useSuppliers({ q, status: 'active', pageSize: 20 }, open);
+  const listId = useId();
+
+  const options: Option[] = [
+    { kind: 'none' },
+    ...(list.data?.items ?? []).map((s) => ({ kind: 'supplier' as const, supplier: s })),
+    { kind: 'add' },
+  ];
+
+  useEffect(() => setActive(0), [q]);
+
+  function choose(option: Option) {
+    if (option.kind === 'add') {
+      setOpen(false);
+      onAddSupplier(query.trim());
+      return;
+    }
+    onChange(option.kind === 'none' ? null : { id: option.supplier.id, name: option.supplier.name, isActive: true });
+    setOpen(false);
+  }
+
+  const optionId = (i: number) => `${listId}-opt-${i}`;
+
+  return (
+    <>
+      <div className="relative">
+        <button
+          id={id}
+          type="button"
+          aria-haspopup="dialog"
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          onClick={() => {
+            setQuery('');
+            setOpen(true);
+          }}
+          className={cn(controlClass, 'flex h-11 items-center gap-2 pr-10 text-left md:h-10')}
+        >
+          <Truck className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className={cn('min-w-0 flex-1 truncate', !value && 'text-muted-foreground')}>
+            {value ? value.name : 'No supplier'}
+            {value && !value.isActive && <span className="text-muted-foreground"> (archived)</span>}
+          </span>
+          {!value && <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            aria-label="Remove supplier"
+            className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+
+      <Dialog open={open} title="Choose supplier" onClose={() => setOpen(false)} size="sm" className="md:h-[min(36rem,85dvh)]">
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              autoFocus
+              type="search"
+              role="combobox"
+              aria-label="Search suppliers"
+              aria-expanded="true"
+              aria-controls={listId}
+              aria-activedescendant={optionId(active)}
+              autoComplete="off"
+              enterKeyHint="search"
+              placeholder="Search by name or phone"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setActive((a) => Math.min(a + 1, options.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setActive((a) => Math.max(a - 1, 0));
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const option = options[active];
+                  if (option) choose(option);
+                }
+              }}
+              className={cn(controlClass, 'h-11 pl-9 md:h-10')}
+            />
+          </div>
+
+          <ul id={listId} role="listbox" aria-label="Suppliers" className="-mx-1 space-y-0.5">
+            {options.map((option, i) => {
+              const selected =
+                (option.kind === 'none' && value === null) || (option.kind === 'supplier' && option.supplier.id === value?.id);
+              return (
+                <li
+                  key={option.kind === 'supplier' ? option.supplier.id : option.kind}
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => choose(option)}
+                  onMouseMove={() => setActive(i)}
+                  className={cn(
+                    'flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm',
+                    i === active && 'bg-accent',
+                    selected && 'font-medium text-primary-soft-foreground',
+                    option.kind === 'add' && 'mt-1 border-t pt-3 text-primary',
+                  )}
+                >
+                  {option.kind === 'none' && <span className="text-muted-foreground">No supplier</span>}
+                  {option.kind === 'supplier' && (
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{option.supplier.name}</span>
+                      {option.supplier.phone && <span className="block text-xs text-muted-foreground">{option.supplier.phone}</span>}
+                    </span>
+                  )}
+                  {option.kind === 'add' && (
+                    <>
+                      <Plus className="size-4" aria-hidden="true" />
+                      <span className="truncate">{query.trim() ? `Add supplier “${query.trim()}”` : 'Add a new supplier'}</span>
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {list.isFetching && <p className="text-xs text-muted-foreground">Searching…</p>}
+          {list.isError && <p className="text-sm text-destructive">Could not load suppliers. Check the connection and try again.</p>}
+          {list.isSuccess && list.data.items.length === 0 && (
+            <p className="text-sm text-muted-foreground">{q ? `No active supplier matches “${q}”.` : 'No suppliers yet.'}</p>
+          )}
+        </div>
+      </Dialog>
+    </>
+  );
+}

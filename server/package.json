@@ -20,7 +20,9 @@
     "owner:create": "tsx src/cli/createOwner.ts",
     "owner:create:built": "node dist/cli/createOwner.js",
     "owner:reset-password": "tsx src/cli/resetOwnerPassword.ts",
-    "owner:reset-password:built": "node dist/cli/resetOwnerPassword.js"
+    "owner:reset-password:built": "node dist/cli/resetOwnerPassword.js",
+    "suppliers:backfill-report": "tsx src/cli/supplierBackfillReport.ts",
+    "suppliers:backfill-report:built": "node dist/cli/supplierBackfillReport.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

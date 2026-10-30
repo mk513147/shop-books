@@ -1,10 +1,10 @@
-import { Router, type Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import type { Database } from '../../database/connection.js';
-import { getAuth } from '../../middleware/auth.js';
+import { getActor } from '../../middleware/auth.js';
 import { requestContext } from '../../middleware/requestGuards.js';
 import { NotFoundError } from '../../utils/errors.js';
-import { type Actor, createManager, listUsers, resetPassword, revokeSessionsForUser, updateUser } from './users.service.js';
+import { createManager, listUsers, resetPassword, revokeSessionsForUser, updateUser } from './users.service.js';
 
 const nameSchema = z.string().trim().min(1, 'Name is required').max(100);
 
@@ -19,11 +19,6 @@ const updateUserSchema = z
   .refine((v) => v.name !== undefined || v.isActive !== undefined, 'Nothing to update');
 
 const idSchema = z.uuid();
-
-function actorOf(res: Response): Actor {
-  const auth = getAuth(res);
-  return { userId: auth.user.id, sessionId: auth.sessionId };
-}
 
 function parseId(raw: string | undefined): string {
   const parsed = idSchema.safeParse(raw);
@@ -41,25 +36,25 @@ export function createUsersRouter({ db }: { db: Database }): Router {
 
   router.post('/', async (req, res) => {
     const body = createUserSchema.parse(req.body);
-    const result = await createManager(db, body, actorOf(res), requestContext(req));
+    const result = await createManager(db, body, getActor(res), requestContext(req));
     res.setHeader('Cache-Control', 'no-store');
     res.status(201).json(result);
   });
 
   router.patch('/:id', async (req, res) => {
     const body = updateUserSchema.parse(req.body);
-    const user = await updateUser(db, parseId(req.params.id), body, actorOf(res), requestContext(req));
+    const user = await updateUser(db, parseId(req.params.id), body, getActor(res), requestContext(req));
     res.json({ user });
   });
 
   router.post('/:id/reset-password', async (req, res) => {
-    const result = await resetPassword(db, parseId(req.params.id), actorOf(res), requestContext(req));
+    const result = await resetPassword(db, parseId(req.params.id), getActor(res), requestContext(req));
     res.setHeader('Cache-Control', 'no-store');
     res.json(result);
   });
 
   router.post('/:id/revoke-sessions', async (req, res) => {
-    const revoked = await revokeSessionsForUser(db, parseId(req.params.id), actorOf(res), requestContext(req));
+    const revoked = await revokeSessionsForUser(db, parseId(req.params.id), getActor(res), requestContext(req));
     res.json({ revoked });
   });
 

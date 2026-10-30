@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
+import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { errorProps, Field } from '@/components/ui/field';
@@ -32,12 +33,12 @@ interface TemporaryPassword {
 function TemporaryPasswordNotice({ value, onDismiss }: { value: TemporaryPassword; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div role="status" className="space-y-3 rounded-md border border-primary/30 bg-primary/5 p-4 text-sm">
+    <div role="status" className="space-y-3 rounded-xl border border-primary/25 bg-primary-soft p-4 text-sm">
       <p>
         Temporary password for <strong>{value.name}</strong>. Give it to them privately; they must change it when
         they first sign in. <strong>It will not be shown again.</strong>
       </p>
-      <code className="block select-all break-all rounded bg-card px-3 py-2 font-mono text-base">{value.password}</code>
+      <code className="block select-all break-all rounded-lg border bg-card px-3 py-2 font-mono text-base">{value.password}</code>
       <div className="flex gap-2">
         <Button
           size="sm"
@@ -68,7 +69,7 @@ function CreateUserForm({ onCreated }: { onCreated: (value: TemporaryPassword) =
   return (
     <form
       noValidate
-      className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+      className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end"
       onSubmit={handleSubmit(async (values) => {
         const result = await createUser.mutateAsync(values).catch(() => null);
         if (result) {
@@ -87,7 +88,7 @@ function CreateUserForm({ onCreated }: { onCreated: (value: TemporaryPassword) =
         {createUser.isPending ? 'Adding…' : 'Add manager'}
       </Button>
       {createUser.isError && (
-        <p role="alert" className="text-sm text-destructive sm:col-span-3">
+        <p role="alert" className="text-sm text-destructive md:col-span-3">
           {errorMessage(createUser.error)}
         </p>
       )}
@@ -192,8 +193,8 @@ export function UsersPage() {
   const [temporary, setTemporary] = useState<TemporaryPassword | null>(null);
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Users</h1>
+    <Page width="narrow">
+      <PageHeader title="Users" description="Owner only: manager accounts, password resets and sign-outs." />
 
       {temporary && <TemporaryPasswordNotice value={temporary} onDismiss={() => setTemporary(null)} />}
 
@@ -225,6 +226,6 @@ export function UsersPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }

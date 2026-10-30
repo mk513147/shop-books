@@ -1,15 +1,10 @@
 import type { Database, Queryable } from '../../database/connection.js';
+import type { Actor } from '../../middleware/auth.js';
 import { withSessionTransaction } from '../auth/sessionTransaction.js';
 import { AppError, NotFoundError } from '../../utils/errors.js';
 import { recordAuthEvent, type RequestContext } from '../auth/auth.events.js';
 import { generateTemporaryPassword, hashPassword } from '../auth/password.js';
 import { revokeUserSessions, type Role } from '../auth/sessions.js';
-
-/** The signed-in owner performing an action (from the validated session, never the request body). */
-export interface Actor {
-  userId: string;
-  sessionId: string;
-}
 
 export interface UserSummary {
   id: string;

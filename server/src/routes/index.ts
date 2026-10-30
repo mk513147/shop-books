@@ -4,7 +4,10 @@ import type { Database } from '../database/connection.js';
 import { requireAuth, requireCsrf, requirePasswordCurrent, requireRole } from '../middleware/auth.js';
 import { requireJson, verifyOrigin } from '../middleware/requestGuards.js';
 import { createAuthRouter, createLoginHandler } from '../modules/auth/auth.routes.js';
+import { createCategoriesRouter } from '../modules/categories/categories.routes.js';
+import { createExpensesRouter } from '../modules/expenses/expenses.routes.js';
 import { createHealthRouter } from '../modules/health/health.routes.js';
+import { createSuppliersRouter } from '../modules/suppliers/suppliers.routes.js';
 import { createUsersRouter } from '../modules/users/users.routes.js';
 
 export interface RouteDeps {
@@ -39,7 +42,10 @@ export function createApiRouter({ db, config }: RouteDeps): Router {
   router.use(requirePasswordCurrent);
 
   router.use('/users', requireRole('owner'), createUsersRouter({ db }));
-  // Future modules (managers and owner): router.use('/expenses', ...), etc.
+  // Financial modules: owner AND managers (managers are not read-only).
+  router.use('/categories', createCategoriesRouter({ db }));
+  router.use('/expenses', createExpensesRouter({ db }));
+  router.use('/suppliers', createSuppliersRouter({ db }));
 
   return router;
 }

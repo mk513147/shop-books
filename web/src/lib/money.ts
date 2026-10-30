@@ -5,6 +5,18 @@
  */
 const DECIMAL = /^(-?)(\d+)(?:\.(\d{1,2}))?$/;
 
+/** Accepted input for amounts: up to 12 digits, optional 1–2 decimals (mirrors the server). */
+export const MONEY_INPUT = /^(0|[1-9]\d{0,11})(\.\d{1,2})?$/;
+
+/**
+ * Exact comparison helper for form validation only: "1250.5" -> 125050n (paise, BigInt).
+ * Never use Number() for money.
+ */
+export function toPaise(amount: string): bigint {
+  const [whole = '0', fraction = ''] = amount.trim().split('.');
+  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0').slice(0, 2));
+}
+
 /** Formats a decimal string as INR with Indian digit grouping, e.g. "1234567.5" -> "₹12,34,567.50". */
 export function formatInr(amount: string): string {
   const match = DECIMAL.exec(amount.trim());

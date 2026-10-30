@@ -1,16 +1,14 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Construction } from 'lucide-react';
+import { Page, PageHeader } from '@/components/layout/PageHeader';
+import { EmptyState } from '@/components/states';
 
 export function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">{title}</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle>Not built yet</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">This module is planned for a later stage.</CardContent>
-      </Card>
-    </div>
+    <Page width="narrow">
+      <PageHeader title={title} />
+      <EmptyState icon={Construction} title="Not built yet">
+        {description}. This module is planned for a later stage.
+      </EmptyState>
+    </Page>
   );
 }

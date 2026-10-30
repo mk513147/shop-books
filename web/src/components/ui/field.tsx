@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 import { Label } from './label';
 
 /** Label + control + inline error, wired for screen readers via `<id>-error`. */
@@ -7,16 +8,18 @@ export function Field({
   label,
   error,
   hint,
+  className,
   children,
 }: {
   id: string;
   label: string;
   error?: string | undefined;
-  hint?: string;
+  hint?: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-1.5', className)}>
       <Label htmlFor={id}>{label}</Label>
       {children}
       {hint && !error && <p className="text-xs text-muted-foreground">{hint}</p>}

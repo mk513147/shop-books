@@ -83,7 +83,9 @@ Behaviour:
 | Version | Purpose |
 |---|---|
 | `0001_initial_infrastructure` | `citext` extension and the shared `set_updated_at()` trigger function. |
-| `0002_auth` | `users`, `sessions`, `auth_events` (Stage 2). **No financial tables.** |
+| `0002_auth` | `users`, `sessions`, `auth_events` (Stage 2). |
+| `0003_expenses` | `expense_categories`, `expenses`, `financial_audit_events` (Stage 3A). |
+| `0004_suppliers` | `suppliers`, `supplier_categories`, `expenses.supplier_id` + backfill from typed names, `supplier_backfill_log`, audit extensions, `idempotency_keys` (Stage 3A enhancement). |
 
 ### `0002_auth` tables
 
@@ -95,7 +97,68 @@ Behaviour:
 
 **`auth_events`**: append-only access log: `event_type` (fixed list), `user_id`, `actor_user_id`, `email_attempted`, `ip`, `user_agent`, `details jsonb`, `created_at`. Indexed per user and for per-IP failure counting. Never contains passwords, hashes or tokens. *(Retention policy not decided yet; see testing plan / open decisions.)*
 
-The financial schema is intentionally not part of Stages 1–2.
+### `0003_expenses` tables
+
+**`expense_categories`**: `id uuid` PK; `name` (1–80, trimmed); optional `description` (≤ 500); `is_active`; `created_at/by`, `updated_at/by`.
+- `expense_categories_active_name_unique`: unique on `lower(name)` **among active categories only**, so names are case-insensitively unique, and an archived name can be reused.
+- Global: not tied to suppliers. Never deleted while referenced (`expenses.category_id` is `ON DELETE RESTRICT`); archive instead.
+
+**`expenses`**:
+
+| Column | Notes |
+|---|---|
+| `id` | `uuid` PK |
+| `expense_date` | `DATE` (calendar date, Asia/Kolkata business day), 2000-01-01 – 2100-12-31; the API also rejects future dates |
+| `supplier_name` → **`legacy_supplier_name`** (renamed in 0004) | free text typed before suppliers existed (≤ 120); read-only history, never written by the application after 0004 |
+| `supplier_id` (0004) | nullable → `suppliers`, `RESTRICT`; the supplier of new and edited expenses |
+| `category_id` | → `expense_categories`, `RESTRICT` |
+| `description` | 1–500 |
+| `amount` | `NUMERIC(14,2)`, `> 0` |
+| `amount_paid` | `NUMERIC(14,2)`, `>= 0`, `<= amount` (CHECK) |
+| `payment_mode` | `cash`/`upi`/`bank_transfer`/`card`/`cheque`/`other`; **required when `amount_paid > 0`**, may be NULL for an unpaid (credit) expense |
+| `invoice_reference` | optional (≤ 100) |
+| `version` | optimistic-concurrency counter, `+1` on every change |
+| `created_*`, `updated_*` | who/when |
+| `voided_at`, `voided_by`, `void_reason` | all NULL (active) or all set (voided); reason 1–500 |
+
+- **Outstanding is not stored**: always `amount - amount_paid`, computed in SQL.
+- **No deletes**: a `BEFORE DELETE` trigger rejects deleting expenses; void instead.
+- No document/bill columns (documents will be a separate table).
+- Indexes: date (+created_at), category, created_by, and a partial index on active rows by date.
+- **Suppliers**: added by `0004` (below).
+- **Future supplier payments**: `amount_paid` is the simplified "paid at purchase" amount. Supplier payments and allocations will be separate tables; when introduced, outstanding becomes `amount - amount_paid - allocated payments`, and existing rows keep their meaning (no rewrite of history needed).
+
+**`financial_audit_events`**: append-only history of financial changes (separate from `auth_events`).
+- `entity_type` (`expense`, `expense_category`), `entity_id`, `action` (`create`, `update`, `void`, `restore`, `archive`, `reactivate`), `actor_user_id`, `occurred_at`, `reason` (required for void/restore, otherwise NULL), `before_values` (NULL only for create), `after_values` (JSONB snapshots of business fields only: never secrets).
+- **Append-only at the database level**: a trigger rejects every `UPDATE` and `DELETE`. (`TRUNCATE` is a DBA-only operation outside the application and is used by the test suite to reset the test database.)
+- Written by the application in the **same transaction** as the change it records.
+
+### `0004_suppliers`
+
+**`suppliers`**: `id`, `name` (1–120, trimmed, single spaces), `phone` (optional, digits/space/`+-()`, 6–20), `address` (≤ 300), `notes` (≤ 1000), `is_active`, `version` (optimistic concurrency), `created_*`, `updated_*` (trigger).
+- `suppliers_active_name_unique`: unique on `lower(name)` among **active** suppliers.
+- Never deleted while referenced (`expenses.supplier_id … RESTRICT`); archive instead.
+- Multiple contacts per supplier later: a `supplier_contacts` table; `phone` stays the primary number.
+
+**`supplier_categories`**: many-to-many suggestions. `PRIMARY KEY (supplier_id, category_id)` (no duplicates), `created_at`, `created_by`; both FKs `RESTRICT`; index on `category_id`. Categories remain global records. Rows are added/removed by the API (each change is audited); removing a link never changes expenses.
+
+**`expenses`**: `supplier_name` renamed to `legacy_supplier_name`; new nullable `supplier_id` with index.
+
+**Backfill of existing expenses** (runs inside the migration's transaction):
+1. Each typed name is normalised to *trim + collapse whitespace*; names whose normalised form is equal **ignoring case** are treated as one supplier. Nothing looser is merged (`Sharma Traders.` ≠ `Sharma Traders`, `A.K. Traders` ≠ `AK Traders`); those become separate suppliers for the owner to review.
+2. One supplier per group: its name is the most-used spelling (ties → earliest recorded); `created_by` is the user who first recorded that name.
+3. Every expense with a typed name gets `supplier_id`. The trigger that sets `updated_at` is disabled for this update, so `updated_at`/`version` are unchanged (linking is not a user edit). The typed text stays in `legacy_supplier_name`.
+4. `supplier_backfill_log` records every distinct typed name → supplier, expense count and rule (`exact` / `normalised`).
+5. The migration **aborts and rolls back** if any expense with a typed name is left without a supplier.
+6. Each created supplier gets one `import` audit event (actor NULL, "System (data migration)").
+
+Review the result with `npm run suppliers:backfill-report` (read-only): mappings, unlinked count (must be 0), and active suppliers whose names differ only in punctuation/spacing/case (possible duplicates, *not* merged). To merge two duplicates: edit their expenses to the supplier you keep, then archive the other.
+
+**`financial_audit_events`** (altered): `entity_type` adds `supplier`; `action` adds `link_category`, `unlink_category`, `import`; `actor_user_id` is nullable **only** for `import` (`financial_audit_actor_valid`); `before_values` is NULL for `create` and `import`. Existing rows are untouched; still append-only.
+
+**`idempotency_keys`**: `PRIMARY KEY (user_id, operation, key)`; `operation` (`expense.create`), `key` (16–100 of `A-Za-z0-9_-`), `request_hash` (SHA-256 of the normalised body), `response_status`, `response_body` (jsonb), `resource_id`, `created_at` (indexed). Only successful creations are stored, in the same transaction as the expense. Retention: [maintenance.md](maintenance.md).
+
+Supplier payments, ledgers and customer schemas are not implemented.
 
 ## Creating the owner account
 

@@ -2,7 +2,7 @@
 
 A private, shared expense-management application for one physical shop, used by an owner and a few managers through a responsive website or an installable PWA.
 
-> **Status: Stage 2 – authentication and access control.** Implemented: the Stage 1 foundation (React/Vite PWA shell, Express API, PostgreSQL + migration runner, test tooling) plus owner bootstrap, sign-in with server-side sessions, CSRF protection, lockout and rate limiting, owner-only user management and the first-login password change. **No financial features exist yet.** See [Roadmap](#roadmap).
+> **Status: Stage 3A + supplier enhancement.** Implemented: the Stage 1 foundation, Stage 2 authentication and access control, expense categories, expense entry/listing/editing/voiding with server-side search, filters and pagination, optimistic concurrency, an append-only financial audit history, **suppliers** (with category suggestions and a migration of previously typed supplier names), **server-side idempotent expense creation**, and a **mobile-first design system** across all screens. **Not yet implemented:** bill photos/documents, supplier payments/ledgers, customers, dashboard figures, reports, Excel export and e-mail. See [Roadmap](#roadmap).
 
 ## Conventions
 
@@ -33,19 +33,19 @@ shop-books/
 │   └── src/
 │       ├── app/             providers, routes, navigation, error boundary
 │       ├── components/      ui/ (shadcn-style), layout/, shared states
-│       ├── features/        feature modules (auth, users, system health)
+│       ├── features/        feature modules (auth, users, categories, expenses, suppliers, audit, system health)
 │       ├── lib/             api-client, money formatting, helpers
 │       ├── routes/          page components
-│       ├── styles/          Tailwind entry + theme tokens
+│       ├── styles/          Tailwind entry + design tokens (see docs/architecture.md → Design system)
 │       └── types/           API types
 ├── server/                  Express API
 │   ├── scripts/             build helpers
 │   ├── src/
-│   │   ├── cli/             owner bootstrap command
+│   │   ├── cli/             owner bootstrap/recovery, supplier backfill report
 │   │   ├── config/          env validation, constants, .env loading
 │   │   ├── database/        pool, transactions, migration runner + CLI, migrations/
 │   │   ├── middleware/      request id, errors, origin/JSON guards, auth/CSRF/role
-│   │   ├── modules/         feature modules (health, auth, users)
+│   │   ├── modules/         feature modules (health, auth, users, categories, expenses, suppliers, idempotency, audit)
 │   │   ├── routes/          /api/v1 router
 │   │   ├── utils/           errors, logger
 │   │   ├── app.ts           Express app factory
@@ -82,6 +82,7 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 | `npm run db:status` / `npm run db:migrate` | Migration status / apply |
 | `npm run owner:create` | One-time creation of the owner account |
 | `npm run owner:reset-password` | Owner account recovery (server shell only, interactive) |
+| `npm run suppliers:backfill-report` | Read-only report of how migration 0004 turned typed supplier names into suppliers (and possible duplicates) |
 
 ## Documentation
 
@@ -94,7 +95,10 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 ## Roadmap
 
 1. Stage 1 – foundation. **Done.**
-2. **Stage 2 – authentication and access control.** Done (this stage).
-3. Later – categories, suppliers, expenses with optional bill photos, supplier payments, customer ledger, financial audit history, dashboard, Excel export, monthly e-mail reports.
+2. Stage 2 – authentication and access control. **Done.**
+3. **Stage 3A – expense categories and expense management** (incl. financial audit history). Done.
+   - Enhancement: suppliers + category suggestions, supplier-name migration, idempotent creation, mobile-first redesign. Done (awaiting owner testing).
+4. Stage 3B – optional bill photographs/documents for expenses.
+5. Later – supplier payments and ledgers, customer ledger, dashboard, Excel export, monthly e-mail reports.
 
-Nothing beyond Stage 2 is implemented.
+Nothing beyond Stage 3A is implemented.

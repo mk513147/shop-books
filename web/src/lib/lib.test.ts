@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError, apiRequest, setCsrfToken, setUnauthorizedHandler } from './api-client';
+import { newIdempotencyKey } from './ids';
 import { formatInr } from './money';
 
 describe('formatInr', () => {
@@ -88,5 +89,25 @@ describe('apiRequest', () => {
 
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))));
     await expect(apiRequest('/x')).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
+  });
+});
+
+describe('newIdempotencyKey', () => {
+  const SERVER_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
+
+  it('produces distinct keys the server accepts', () => {
+    const a = newIdempotencyKey();
+    expect(a).toMatch(SERVER_PATTERN);
+    expect(newIdempotencyKey()).not.toBe(a);
+  });
+
+  it('works without crypto.randomUUID (plain-HTTP LAN testing)', () => {
+    const original = crypto.randomUUID;
+    Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });
+    try {
+      expect(newIdempotencyKey()).toMatch(/^[0-9a-f]{32}$/);
+    } finally {
+      Object.defineProperty(crypto, 'randomUUID', { value: original, configurable: true });
+    }
   });
 });

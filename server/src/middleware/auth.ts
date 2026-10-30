@@ -14,6 +14,17 @@ export function getAuth(res: Response): SessionContext {
   return auth;
 }
 
+/** The signed-in user performing a write, from the validated session (never the request body). */
+export interface Actor {
+  userId: string;
+  sessionId: string;
+}
+
+export function getActor(res: Response): Actor {
+  const auth = getAuth(res);
+  return { userId: auth.user.id, sessionId: auth.sessionId };
+}
+
 /**
  * Deny-by-default gate: mounted once in the API router, everything registered after it requires
  * a valid server-side session. Identity and role are loaded from the database on every request.

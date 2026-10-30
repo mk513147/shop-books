@@ -33,8 +33,8 @@ export function RequireRole({ role }: { role: Role }) {
   const { user } = useAuth();
   if (user?.role !== role) {
     return (
-      <div role="alert" className="space-y-2">
-        <h1 className="text-2xl font-semibold">Not available</h1>
+      <div role="alert" className="mx-auto max-w-2xl space-y-2">
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Not available</h1>
         <p className="text-sm text-muted-foreground">Only the owner can open this page.</p>
       </div>
     );

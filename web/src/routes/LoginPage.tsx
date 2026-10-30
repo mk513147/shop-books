@@ -5,7 +5,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { errorMessage, LoadingState } from '@/components/states';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AuthLayout } from '@/components/layout/AuthLayout';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/features/auth/auth-context';
@@ -41,13 +41,7 @@ export function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Shop-Books</CardTitle>
-          <CardDescription>Sign in to continue. Access is limited to authorised shop staff.</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <AuthLayout title="Sign in to Shop-Books" description="Access is limited to authorised shop staff.">
           <form
             noValidate
             className="space-y-4"
@@ -75,17 +69,15 @@ export function LoginPage() {
               />
             </Field>
             {formError && (
-              <p role="alert" className="rounded-md bg-destructive/5 p-3 text-sm text-destructive">
+              <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
                 {formError}
               </p>
             )}
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
             <p className="text-xs text-muted-foreground">Forgotten your password? Ask the shop owner to reset it.</p>
           </form>
-        </CardContent>
-      </Card>
-    </main>
+    </AuthLayout>
   );
 }
