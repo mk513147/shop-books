@@ -18,7 +18,9 @@
     "db:status:built": "node dist/database/cli.js status",
     "db:migrate:built": "node dist/database/cli.js migrate",
     "owner:create": "tsx src/cli/createOwner.ts",
-    "owner:create:built": "node dist/cli/createOwner.js"
+    "owner:create:built": "node dist/cli/createOwner.js",
+    "owner:reset-password": "tsx src/cli/resetOwnerPassword.ts",
+    "owner:reset-password:built": "node dist/cli/resetOwnerPassword.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

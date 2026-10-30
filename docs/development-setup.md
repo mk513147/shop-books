@@ -99,7 +99,7 @@ npm --prefix web run preview   # serve the built web app on http://localhost:417
 | `Invalid configuration: SESSION_SECRET: …` on start | Set a random value of at least 32 characters (see step 2). |
 | Sign-in or any save fails with "Request origin is not allowed" | The page's origin is not in `FRONTEND_URL` (e.g. using the preview port 4173). Add it, comma-separated. |
 | "Security check failed. Reload the page" | CSRF token is stale (e.g. `SESSION_SECRET` changed or the session was replaced in another tab). Reload. |
-| Locked out of the only owner account | Wait for the lock to expire (max 4 h). There is no self-service reset, and an owner recovery command does not exist yet (open decision, see [testing-plan.md](testing-plan.md#open-items)). |
+| Owner forgot the password / locked out | On the server: `npm run owner:reset-password` (see [maintenance.md](maintenance.md#owner-account-recovery)). |
 | `Invalid configuration: DATABASE_URL: …` on start | Missing/invalid variable. Check `.env.development` exists at the repo root. |
 | `…when NODE_ENV=test the database name must end in "_test"` | `.env.test` points at the wrong database. Use a dedicated `*_test` database. |
 | `password authentication failed` / `ECONNREFUSED` | Wrong credentials, PostgreSQL not running (check the `postgresql-x64-*` service), or wrong port. |

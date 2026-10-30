@@ -15,7 +15,7 @@ Existing coverage worth knowing:
 - `server/tests/env.test.ts`: configuration validation, database isolation, cookie settings.
 - `server/tests/app.test.ts`: health, deny-by-default 401, headers, CORS, body limits, error handler.
 - `server/tests/migrator.unit.test.ts`, `database.integration.test.ts`: migration runner, advisory lock, environment guard.
-- `server/tests/auth.critical.integration.test.ts`: **Stage 2 critical paths only**: public surface, generic login errors, cookie attributes, token hashing, Origin/JSON/CSRF enforcement, idle and absolute expiry, manager lifecycle (temporary password, forced change, role denial, deactivation, owner reset), single-owner constraint, concurrent lockout, per-IP 429.
+- `server/tests/auth.critical.integration.test.ts`: **Stage 2 critical paths only**: public surface, generic login errors, cookie attributes, token hashing, Origin/JSON/CSRF enforcement, idle and absolute expiry, manager lifecycle (temporary password, forced change, role denial, deactivation, owner reset), single-owner constraint, concurrent lockout, per-IP 429, session + CSRF rotation on password change, racing revocation, session-bound writes, owner recovery logic.
 - `web/src/app/App.test.tsx`: login flow, forced password change, owner-only screen.
 
 Note: the auth integration tests **truncate** `users`, `sessions` and `auth_events` in the test database.
@@ -95,11 +95,24 @@ Note: the auth integration tests **truncate** `users`, `sessions` and `auth_even
 - [ ] Graceful shutdown on the production host (SIGTERM drains requests and closes the pool).
 - [ ] Running against the owner's own PostgreSQL instance (only disposable instances used so far).
 
+### Owner recovery (`npm run owner:reset-password`)
+- [ ] Interactive TTY run end to end (hidden input, confirmation, success message). *(Stage 2 verified the refusal of non-interactive input and the underlying `resetOwnerPassword()` logic, not an interactive session.)*
+- [ ] Refuses: unmigrated database, no owner, more than one owner (simulate by dropping the index in a throwaway DB), e-mail of a manager, unknown e-mail.
+- [ ] Afterwards: all owner sessions revoked, lockout cleared, `must_change_password = true`, `password_reset` event with `via = "cli"`, no password/hash in output.
+
+### Session-bound writes
+- [ ] Every state-changing service uses `withSessionTransaction` (static check / route inventory), including all future financial modules.
+- [ ] Race: a write in flight when its session is revoked either commits before the revocation or is refused with 401 (verified once for the helper in Stage 2; repeat per module).
+
+### Retention cleanup (when implemented; policy in [maintenance.md](maintenance.md))
+- [ ] Sessions ended more than 90 days ago are deleted; ended less than 90 days ago are kept.
+- [ ] **Active sessions are never deleted**, including the boundary cases just inside the 12-hour idle and 7-day absolute limits.
+- [ ] `auth_events` older than 12 months deleted, newer kept.
+- [ ] Batching: large volumes processed in bounded batches; interrupting and re-running converges (idempotent).
+
 ## Open items
 
 Decisions or features that affect testing and are not yet implemented:
 
-- **Owner account recovery.** If the only owner forgets the password, there is currently no recovery path (no self-service reset by design). A server-side CLI such as `owner:reset-password` (requires shell access to the server) is the likely answer.
 - **Ownership transfer.** The schema allows exactly one owner, and roles cannot be changed through the API. Transferring ownership would need a dedicated, audited procedure.
-- **`auth_events` retention.** Grows forever; a retention period needs to be chosen.
-- **Expired session cleanup.** Expired/revoked `sessions` rows are kept; a periodic purge job is needed eventually.
+- **Retention cleanup job.** Policy approved ([maintenance.md](maintenance.md)); the scheduled job is not implemented yet.

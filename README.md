@@ -81,6 +81,7 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 | `npm run test:e2e` | Playwright end-to-end tests (builds and serves the web app) |
 | `npm run db:status` / `npm run db:migrate` | Migration status / apply |
 | `npm run owner:create` | One-time creation of the owner account |
+| `npm run owner:reset-password` | Owner account recovery (server shell only, interactive) |
 
 ## Documentation
 
@@ -88,6 +89,7 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 - [Database and migrations](docs/database.md)
 - [Development setup and troubleshooting](docs/development-setup.md)
 - [Testing plan](docs/testing-plan.md): tests deferred to the final test phase
+- [Maintenance](docs/maintenance.md): owner recovery, data-retention policy
 
 ## Roadmap
 

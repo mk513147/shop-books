@@ -5,6 +5,7 @@ import { withTransaction } from '../../database/transaction.js';
 import { ValidationError } from '../../utils/errors.js';
 import { recordAuthEvent, type RequestContext } from './auth.events.js';
 import { hashPassword, verifyAgainstDummy, verifyPassword } from './password.js';
+import { withSessionTransaction } from './sessionTransaction.js';
 import { createSession, revokeUserSessions, type AuthenticatedUser, type NewSession, type Role } from './sessions.js';
 
 interface UserAuthRow {
@@ -143,6 +144,7 @@ export type ChangePasswordResult =
 export async function changePassword(
   db: Database,
   userId: string,
+  sessionId: string,
   currentPassword: string,
   newPassword: string,
   ctx: RequestContext,
@@ -152,7 +154,8 @@ export async function changePassword(
   }
   const newHash = await hashPassword(newPassword);
 
-  return withTransaction(db, async (client) => {
+  // The requesting session must still be live when the change commits (see sessionTransaction.ts).
+  return withSessionTransaction(db, sessionId, async (client) => {
     const { rows } = await client.query<UserAuthRow>(
       `${SELECT_USER_FOR_UPDATE} WHERE id = $1 AND is_active FOR UPDATE`,
       [userId],

@@ -76,7 +76,14 @@ export function createAuthRouter({ db, config }: AuthRouteDeps): Router {
   router.post('/change-password', async (req, res) => {
     const body = changePasswordSchema.parse(req.body);
     const auth = getAuth(res);
-    const result = await changePassword(db, auth.user.id, body.currentPassword, body.newPassword, requestContext(req));
+    const result = await changePassword(
+      db,
+      auth.user.id,
+      auth.sessionId,
+      body.currentPassword,
+      body.newPassword,
+      requestContext(req),
+    );
     if (!result.ok) {
       throw new AppError(400, 'INVALID_CURRENT_PASSWORD', 'The current password is incorrect');
     }

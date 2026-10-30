@@ -7,7 +7,10 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { runMigrations } from '../src/database/migrator.js';
+import { resetOwnerPassword } from '../src/modules/auth/ownerRecovery.js';
 import { hashPassword } from '../src/modules/auth/password.js';
+import { withSessionTransaction } from '../src/modules/auth/sessionTransaction.js';
+import { revokeSession } from '../src/modules/auth/sessions.js';
 import { BROWSER_HEADERS, connectTestDatabase, silentLogger, testConfig } from './helpers.js';
 
 const pool = await connectTestDatabase();
@@ -188,6 +191,119 @@ describe.skipIf(!pool)('authentication and access control (critical paths)', () 
     // Correct password is refused while locked, with the same generic answer.
     const correct = await request(app).post('/api/v1/auth/login').set(BROWSER_HEADERS).send({ email, password });
     expect(correct.status).toBe(401);
+  });
+
+  describe('session rotation, revocation and owner recovery (Stage 2 finalization)', () => {
+    const EMAIL = 'rotate@example.test';
+    const FIRST = 'rotate-password-111';
+    const SECOND = 'rotate-password-222';
+    const cookieOf = (res: request.Response) => /sb_session=([^;]+)/.exec(String(res.headers['set-cookie']))?.[1];
+    const withCookie = (token: string) => ({ ...BROWSER_HEADERS, Cookie: `sb_session=${token}` });
+
+    beforeAll(async () => {
+      await db.query(`INSERT INTO users (email, name, role, password_hash) VALUES ($1, 'Rotate', 'manager', $2)`, [
+        EMAIL,
+        await hashPassword(FIRST),
+      ]);
+    });
+
+    it('password change rotates the session and CSRF token; old ones are rejected on the next request', async () => {
+      const a = await signIn(EMAIL, FIRST);
+      const other = await signIn(EMAIL, FIRST); // a second device
+      const oldToken = cookieOf(a.res)!;
+
+      const changed = await a.agent
+        .post('/api/v1/auth/change-password')
+        .set({ ...BROWSER_HEADERS, 'X-CSRF-Token': a.csrf })
+        .send({ currentPassword: FIRST, newPassword: SECOND });
+      expect(changed.status).toBe(200);
+      const newToken = cookieOf(changed)!;
+      const newCsrf = changed.body.csrfToken as string;
+      expect(newToken).toBeDefined();
+      expect(newToken).not.toBe(oldToken);
+      expect(newCsrf).not.toBe(a.csrf);
+
+      // Old cookie and the other device: dead on their very next request.
+      expect((await request(app).get('/api/v1/auth/me').set(withCookie(oldToken))).status).toBe(401);
+      expect((await other.agent.get('/api/v1/auth/me')).status).toBe(401);
+
+      // New session + OLD CSRF token: rejected. New session + new token: accepted.
+      const staleCsrf = await request(app).post('/api/v1/auth/logout').set({ ...withCookie(newToken), 'X-CSRF-Token': a.csrf }).send({});
+      expect(staleCsrf.status).toBe(403);
+      expect(staleCsrf.body.error.code).toBe('CSRF_REJECTED');
+      expect((await request(app).get('/api/v1/auth/me').set(withCookie(newToken))).body.csrfToken).toBe(newCsrf);
+      const ok = await request(app).post('/api/v1/auth/logout').set({ ...withCookie(newToken), 'X-CSRF-Token': newCsrf }).send({});
+      expect(ok.status).toBe(204);
+    });
+
+    it('requests racing a revocation: none succeed once the revocation has committed', async () => {
+      const s = await signIn(EMAIL, SECOND);
+      const revoke = db.query(`UPDATE sessions SET revoked_at = now(), revoked_reason = 'logout' WHERE user_id = (SELECT id FROM users WHERE email = $1) AND revoked_at IS NULL`, [EMAIL]);
+      const racing = Promise.all(Array.from({ length: 10 }, () => s.agent.get('/api/v1/auth/me')));
+      await revoke;
+      await racing; // individual in-flight reads may finish either way
+      const after = await Promise.all(Array.from({ length: 10 }, () => s.agent.get('/api/v1/auth/me')));
+      expect(after.every((r) => r.status === 401)).toBe(true);
+    });
+
+    it('an in-flight write either commits before the revocation or is refused (never after it)', async () => {
+      const s = await signIn(EMAIL, SECOND);
+      const sessionId = (
+        await db.query<{ id: string }>(
+          `SELECT id FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = $1) AND revoked_at IS NULL`,
+          [EMAIL],
+        )
+      ).rows[0]!.id;
+      expect(s.res.status).toBe(200);
+
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let locked!: () => void;
+      const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+      const write = withSessionTransaction(db, sessionId, async () => {
+        locked();
+        await gate;
+        return 'committed';
+      });
+      await lockTaken;
+
+      let revokedAt = 0;
+      const revoke = revokeSession(db, sessionId, 'logout').then(() => (revokedAt = Date.now()));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(revokedAt).toBe(0); // revocation waits for the in-flight write
+      release();
+      await expect(write).resolves.toBe('committed');
+      await revoke;
+      expect(revokedAt).toBeGreaterThan(0);
+      // Any later write on that session is refused.
+      await expect(withSessionTransaction(db, sessionId, async () => 'x')).rejects.toMatchObject({ status: 401 });
+    });
+
+    it('owner recovery: refuses a wrong email; otherwise resets, revokes sessions, forces a change and logs it', async () => {
+      const owner = await signIn(OWNER.email, OWNER.password);
+      expect(owner.res.status).toBe(200);
+
+      expect(await resetOwnerPassword(db, 'not-the-owner@example.test', 'recovered-password-1')).toEqual({
+        ok: false,
+        reason: 'email_mismatch',
+      });
+      expect((await owner.agent.get('/api/v1/auth/me')).status).toBe(200); // nothing changed
+
+      const result = await resetOwnerPassword(db, OWNER.email.toUpperCase(), 'recovered-password-1');
+      expect(result).toMatchObject({ ok: true });
+      expect((await owner.agent.get('/api/v1/auth/me')).status).toBe(401);
+      expect((await signIn(OWNER.email, OWNER.password)).res.status).toBe(401);
+      const recovered = await signIn(OWNER.email, 'recovered-password-1');
+      expect(recovered.res.body.user).toMatchObject({ role: 'owner', mustChangePassword: true });
+
+      const event = await db.query(
+        `SELECT details FROM auth_events WHERE event_type = 'password_reset' AND user_agent = 'owner:reset-password CLI'`,
+      );
+      expect(event.rows[0].details).toMatchObject({ via: 'cli' });
+      expect(JSON.stringify(event.rows)).not.toMatch(/recovered-password|argon2/);
+      const owners = await db.query(`SELECT count(*)::int AS n FROM users WHERE role = 'owner'`);
+      expect(owners.rows[0].n).toBe(1);
+    });
   });
 
   it('rate-limits an IP after repeated failures (429)', async () => {

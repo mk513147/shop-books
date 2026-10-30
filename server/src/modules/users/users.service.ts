@@ -1,9 +1,15 @@
 import type { Database, Queryable } from '../../database/connection.js';
-import { withTransaction } from '../../database/transaction.js';
+import { withSessionTransaction } from '../auth/sessionTransaction.js';
 import { AppError, NotFoundError } from '../../utils/errors.js';
 import { recordAuthEvent, type RequestContext } from '../auth/auth.events.js';
 import { generateTemporaryPassword, hashPassword } from '../auth/password.js';
 import { revokeUserSessions, type Role } from '../auth/sessions.js';
+
+/** The signed-in owner performing an action (from the validated session, never the request body). */
+export interface Actor {
+  userId: string;
+  sessionId: string;
+}
 
 export interface UserSummary {
   id: string;
@@ -66,21 +72,21 @@ export async function listUsers(db: Database): Promise<UserSummary[]> {
 export async function createManager(
   db: Database,
   input: { email: string; name: string },
-  actorId: string,
+  actor: Actor,
   ctx: RequestContext,
 ): Promise<{ user: UserSummary; temporaryPassword: string }> {
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await hashPassword(temporaryPassword);
   try {
-    return await withTransaction(db, async (client) => {
+    return await withSessionTransaction(db, actor.sessionId, async (client) => {
       const result = await client.query<UserRow>(
         `INSERT INTO users (email, name, role, password_hash, must_change_password, created_by)
          VALUES ($1, $2, 'manager', $3, true, $4)
          RETURNING ${USER_COLUMNS}`,
-        [input.email, input.name, passwordHash, actorId],
+        [input.email, input.name, passwordHash, actor.userId],
       );
       const user = toSummary(result.rows[0]!);
-      await recordAuthEvent(client, ctx, { type: 'user_created', userId: user.id, actorUserId: actorId });
+      await recordAuthEvent(client, ctx, { type: 'user_created', userId: user.id, actorUserId: actor.userId });
       return { user, temporaryPassword };
     });
   } catch (err) {
@@ -102,10 +108,10 @@ export async function updateUser(
   db: Database,
   id: string,
   changes: { name?: string | undefined; isActive?: boolean | undefined },
-  actorId: string,
+  actor: Actor,
   ctx: RequestContext,
 ): Promise<UserSummary> {
-  return withTransaction(db, async (client) => {
+  return withSessionTransaction(db, actor.sessionId, async (client) => {
     const current = await lockUser(client, id);
     if (changes.isActive === false && current.role === 'owner') {
       throw new AppError(409, 'OWNER_CANNOT_BE_DEACTIVATED', 'The owner account cannot be deactivated');
@@ -122,7 +128,7 @@ export async function updateUser(
     const updated = result.rows[0]!;
 
     if (changes.name !== undefined && changes.name !== current.name) {
-      await recordAuthEvent(client, ctx, { type: 'user_updated', userId: id, actorUserId: actorId });
+      await recordAuthEvent(client, ctx, { type: 'user_updated', userId: id, actorUserId: actor.userId });
     }
     if (current.is_active && !updated.is_active) {
       // Deactivation takes effect immediately: every existing session is revoked.
@@ -130,11 +136,11 @@ export async function updateUser(
       await recordAuthEvent(client, ctx, {
         type: 'user_deactivated',
         userId: id,
-        actorUserId: actorId,
+        actorUserId: actor.userId,
         details: { revoked },
       });
     } else if (!current.is_active && updated.is_active) {
-      await recordAuthEvent(client, ctx, { type: 'user_activated', userId: id, actorUserId: actorId });
+      await recordAuthEvent(client, ctx, { type: 'user_activated', userId: id, actorUserId: actor.userId });
     }
     return toSummary(updated);
   });
@@ -144,15 +150,15 @@ export async function updateUser(
 export async function resetPassword(
   db: Database,
   id: string,
-  actorId: string,
+  actor: Actor,
   ctx: RequestContext,
 ): Promise<{ user: UserSummary; temporaryPassword: string }> {
-  if (id === actorId) {
+  if (id === actor.userId) {
     throw new AppError(400, 'USE_CHANGE_PASSWORD', 'Use "Change password" to change your own password');
   }
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await hashPassword(temporaryPassword);
-  return withTransaction(db, async (client) => {
+  return withSessionTransaction(db, actor.sessionId, async (client) => {
     await lockUser(client, id);
     const result = await client.query<UserRow>(
       `UPDATE users
@@ -163,7 +169,7 @@ export async function resetPassword(
       [id, passwordHash],
     );
     const revoked = await revokeUserSessions(client, id, 'password_reset');
-    await recordAuthEvent(client, ctx, { type: 'password_reset', userId: id, actorUserId: actorId, details: { revoked } });
+    await recordAuthEvent(client, ctx, { type: 'password_reset', userId: id, actorUserId: actor.userId, details: { revoked } });
     return { user: toSummary(result.rows[0]!), temporaryPassword };
   });
 }
@@ -171,13 +177,13 @@ export async function resetPassword(
 export async function revokeSessionsForUser(
   db: Database,
   id: string,
-  actorId: string,
+  actor: Actor,
   ctx: RequestContext,
 ): Promise<number> {
-  return withTransaction(db, async (client) => {
+  return withSessionTransaction(db, actor.sessionId, async (client) => {
     await lockUser(client, id);
     const revoked = await revokeUserSessions(client, id, 'revoked_by_owner');
-    await recordAuthEvent(client, ctx, { type: 'sessions_revoked', userId: id, actorUserId: actorId, details: { revoked } });
+    await recordAuthEvent(client, ctx, { type: 'sessions_revoked', userId: id, actorUserId: actor.userId, details: { revoked } });
     return revoked;
   });
 }

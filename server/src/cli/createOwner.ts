@@ -1,33 +1,18 @@
-import { z } from 'zod';
-import { ConfigError, loadDatabaseConfig } from '../config/env.js';
+import { loadDatabaseConfig } from '../config/env.js';
 import { loadEnvFiles } from '../config/loadEnvFiles.js';
 import { createPool } from '../database/connection.js';
 import { getMigrationStatus } from '../database/migrator.js';
 import { withTransaction } from '../database/transaction.js';
 import { recordAuthEvent } from '../modules/auth/auth.events.js';
-import { hashPassword, passwordSchema } from '../modules/auth/password.js';
+import { hashPassword } from '../modules/auth/password.js';
 import { Prompter } from './prompt.js';
+import { askNewPassword, askValid, emailSchema, nameSchema, reportCliError, UserFacingError } from './shared.js';
 
 /**
  * One-time owner bootstrap:  npm run owner:create
  * Prompts for e-mail, name and password (password never echoed, never logged, never stored in
  * plain text). Refuses if an owner already exists. There are no default credentials.
  */
-
-const emailSchema = z.string().trim().toLowerCase().pipe(z.email('Enter a valid email address').max(254));
-const nameSchema = z.string().trim().min(1, 'Name is required').max(100);
-
-class UserFacingError extends Error {}
-
-async function askValid<T>(prompter: Prompter, question: string, schema: z.ZodType<T>, hidden = false): Promise<T> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const parsed = schema.safeParse(await prompter.ask(question, hidden));
-    if (parsed.success) return parsed.data;
-    console.error(`  ${parsed.error.issues[0]?.message ?? 'Invalid value'}`);
-  }
-  throw new UserFacingError('Too many invalid answers.');
-}
-
 async function main(): Promise<void> {
   loadEnvFiles();
   const config = loadDatabaseConfig();
@@ -46,17 +31,7 @@ async function main(): Promise<void> {
     console.log(`Create the Shop-Books owner account (environment: ${config.nodeEnv})`);
     const email = await askValid(prompter, 'Owner email: ', emailSchema);
     const name = await askValid(prompter, 'Owner name: ', nameSchema);
-    let password: string | null = null;
-    for (let attempt = 0; attempt < 3 && password === null; attempt++) {
-      const first = await askValid(prompter, 'Password (hidden, min 12 characters): ', passwordSchema, true);
-      const second = await prompter.ask('Repeat password: ', true);
-      if (first === second) password = first;
-      else console.error('  Passwords do not match.');
-    }
-    if (password === null) throw new UserFacingError('Passwords did not match.');
-
-    const passwordHash = await hashPassword(password);
-    password = null;
+    const passwordHash = await hashPassword(await askNewPassword(prompter));
 
     await withTransaction(pool, async (client) => {
       // Re-checked inside the transaction; the users_single_owner unique index is the final guard.
@@ -79,10 +54,4 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
-  const code = (err as { code?: string }).code;
-  if (err instanceof UserFacingError || err instanceof ConfigError) console.error(err.message);
-  else if (code === '23505') console.error('Could not create the owner: an owner or this email already exists.');
-  else console.error('Owner creation failed:', err instanceof Error ? err.message : 'unknown error');
-  process.exitCode = 1;
-});
+main().catch((err: unknown) => reportCliError('Owner creation', err));
