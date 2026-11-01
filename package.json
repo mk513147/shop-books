@@ -18,6 +18,7 @@
     "db:migrate": "npm --prefix server run db:migrate",
     "owner:create": "npm --prefix server run owner:create",
     "owner:reset-password": "npm --prefix server run owner:reset-password",
-    "suppliers:backfill-report": "npm --prefix server run suppliers:backfill-report"
+    "suppliers:backfill-report": "npm --prefix server run suppliers:backfill-report",
+    "documents:reconcile": "npm --prefix server run documents:reconcile --"
   }
 }

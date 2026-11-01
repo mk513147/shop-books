@@ -19,6 +19,14 @@ function messageOf(env: NodeJS.ProcessEnv): string {
 }
 
 describe('environment validation', () => {
+  it('document storage: defaults outside production, explicit absolute directory required in production', () => {
+    expect(loadConfig(valid).documentStorage.directory).toMatch(/storage[\\/]documents$/);
+    const prod = { ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com' };
+    expect(messageOf(prod)).toContain('DOCUMENT_STORAGE_DIR: required in production');
+    expect(messageOf({ ...prod, DOCUMENT_STORAGE_DIR: 'relative/dir' })).toContain('must be an absolute path');
+    expect(messageOf({ ...valid, DOCUMENT_STORAGE_DRIVER: 's3' })).toContain('DOCUMENT_STORAGE_DRIVER');
+  });
+
   it('accepts a valid configuration and applies defaults', () => {
     const config = loadConfig(valid);
     expect(config.port).toBe(3000);
@@ -59,7 +67,7 @@ describe('environment validation', () => {
   });
 
   it('requires https origins in production (localhost excepted)', () => {
-    const prod = { ...valid, NODE_ENV: 'production' };
+    const prod = { ...valid, NODE_ENV: 'production', DOCUMENT_STORAGE_DIR: '/srv/shop-books/documents' };
     expect(messageOf({ ...prod, FRONTEND_URL: 'http://books.example.com' })).toContain('https');
     expect(loadConfig({ ...prod, FRONTEND_URL: 'https://books.example.com' }).nodeEnv).toBe('production');
   });
@@ -76,7 +84,12 @@ describe('environment validation', () => {
 
   it('derives cookie settings from the environment', () => {
     expect(loadConfig(valid).cookie).toEqual({ name: 'sb_session', secure: false, sameSite: 'lax' });
-    const prod = loadConfig({ ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com' });
+    const prod = loadConfig({
+      ...valid,
+      NODE_ENV: 'production',
+      FRONTEND_URL: 'https://books.example.com',
+      DOCUMENT_STORAGE_DIR: '/srv/shop-books/documents',
+    });
     expect(prod.cookie).toEqual({ name: '__Host-sb_session', secure: true, sameSite: 'lax' });
     expect(messageOf({ ...valid, SESSION_COOKIE_SAMESITE: 'none' })).toContain('SESSION_COOKIE_SAMESITE');
     expect(messageOf({ ...valid, SESSION_COOKIE_SAMESITE: 'sideways' })).toContain('SESSION_COOKIE_SAMESITE');

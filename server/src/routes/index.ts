@@ -5,14 +5,24 @@ import { requireAuth, requireCsrf, requirePasswordCurrent, requireRole } from '.
 import { requireJson, verifyOrigin } from '../middleware/requestGuards.js';
 import { createAuthRouter, createLoginHandler } from '../modules/auth/auth.routes.js';
 import { createCategoriesRouter } from '../modules/categories/categories.routes.js';
+import { createCustomersRouter } from '../modules/customers/customers.routes.js';
+import { createExportsRouter } from '../modules/exports/exports.routes.js';
 import { createExpensesRouter } from '../modules/expenses/expenses.routes.js';
+import type { DocumentStorage } from '../modules/documents/storage.js';
+import type { EmailSender } from '../modules/email/email.js';
+import { createMonthlyReportsRouter } from '../modules/monthlyReports/monthlyReports.routes.js';
 import { createHealthRouter } from '../modules/health/health.routes.js';
+import { createReportsRouter } from '../modules/reports/reports.routes.js';
+import { createSupplierPaymentsRouter } from '../modules/supplierPayments/supplierPayments.routes.js';
 import { createSuppliersRouter } from '../modules/suppliers/suppliers.routes.js';
 import { createUsersRouter } from '../modules/users/users.routes.js';
 
 export interface RouteDeps {
   db: Database;
   config: AppConfig;
+  storage: DocumentStorage;
+  emailSender: EmailSender;
+  onReportQueued?: (() => void) | undefined;
 }
 
 /**
@@ -25,8 +35,14 @@ export interface RouteDeps {
  *   5. requirePasswordCurrent                        <- everything below needs a non-temporary password
  *   6. feature modules (owner-only ones add requireRole('owner'))
  */
-export function createApiRouter({ db, config }: RouteDeps): Router {
+export function createApiRouter({ db, config, storage, emailSender, onReportQueued }: RouteDeps): Router {
   const router = Router();
+
+  // API responses (financial data, private documents) must never be stored by browsers or proxies.
+  router.use((_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
 
   router.use(verifyOrigin(config.frontendOrigins));
   router.use(requireJson);
@@ -42,10 +58,26 @@ export function createApiRouter({ db, config }: RouteDeps): Router {
   router.use(requirePasswordCurrent);
 
   router.use('/users', requireRole('owner'), createUsersRouter({ db }));
+  router.use(
+    '/monthly-reports',
+    requireRole('owner'),
+    createMonthlyReportsRouter({
+      db,
+      sender: emailSender,
+      shopName: config.shopName,
+      from: config.email.from,
+      schedulerEnabled: config.reportScheduler.enabled,
+      onQueued: onReportQueued,
+    }),
+  );
   // Financial modules: owner AND managers (managers are not read-only).
   router.use('/categories', createCategoriesRouter({ db }));
-  router.use('/expenses', createExpensesRouter({ db }));
+  router.use('/expenses', createExpensesRouter({ db, storage }));
   router.use('/suppliers', createSuppliersRouter({ db }));
+  router.use('/supplier-payments', createSupplierPaymentsRouter({ db }));
+  router.use('/customers', createCustomersRouter({ db }));
+  router.use('/reports', createReportsRouter({ db }));
+  router.use('/exports', createExportsRouter({ db, shopName: config.shopName }));
 
   return router;
 }

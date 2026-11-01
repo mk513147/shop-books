@@ -86,6 +86,11 @@ Behaviour:
 | `0002_auth` | `users`, `sessions`, `auth_events` (Stage 2). |
 | `0003_expenses` | `expense_categories`, `expenses`, `financial_audit_events` (Stage 3A). |
 | `0004_suppliers` | `suppliers`, `supplier_categories`, `expenses.supplier_id` + backfill from typed names, `supplier_backfill_log`, audit extensions, `idempotency_keys` (Stage 3A enhancement). |
+| `0005_expense_documents` | `expense_documents` (bill photo/PDF metadata), audit actions `document_add`/`document_remove` (Stage 3B). |
+| `0006_supplier_payments` | `supplier_payments`, `supplier_payment_allocations`, view `supplier_balances`, integrity triggers, audit + idempotency extensions (Stage 3C). |
+| `0007_customers` | `customers`, `customer_transactions`, view `customer_balances`, ledger triggers, audit + idempotency extensions (Stage 3D). |
+| `0008_reporting_indexes` | four indexes for the dashboard and reports (Stage 4). |
+| `0009_monthly_reports` | `report_settings`, `report_recipients`, `report_jobs`, `report_deliveries`, `report_delivery_attempts`, audit extensions (Stage 5). |
 
 ### `0002_auth` tables
 
@@ -121,12 +126,12 @@ Behaviour:
 | `created_*`, `updated_*` | who/when |
 | `voided_at`, `voided_by`, `void_reason` | all NULL (active) or all set (voided); reason 1–500 |
 
-- **Outstanding is not stored**: always `amount - amount_paid`, computed in SQL.
+- **Outstanding is not stored**: computed in SQL as `amount - amount_paid - active supplier-payment allocations` (allocations since 0006; before any are recorded this equals `amount - amount_paid`).
 - **No deletes**: a `BEFORE DELETE` trigger rejects deleting expenses; void instead.
 - No document/bill columns (documents will be a separate table).
 - Indexes: date (+created_at), category, created_by, and a partial index on active rows by date.
 - **Suppliers**: added by `0004` (below).
-- **Future supplier payments**: `amount_paid` is the simplified "paid at purchase" amount. Supplier payments and allocations will be separate tables; when introduced, outstanding becomes `amount - amount_paid - allocated payments`, and existing rows keep their meaning (no rewrite of history needed).
+- **Supplier payments** (0006): `amount_paid` remains the "paid at purchase" amount. Later payments live in `supplier_payments` and settle bills through `supplier_payment_allocations`; existing rows keep their meaning (no rewrite of history).
 
 **`financial_audit_events`**: append-only history of financial changes (separate from `auth_events`).
 - `entity_type` (`expense`, `expense_category`), `entity_id`, `action` (`create`, `update`, `void`, `restore`, `archive`, `reactivate`), `actor_user_id`, `occurred_at`, `reason` (required for void/restore, otherwise NULL), `before_values` (NULL only for create), `after_values` (JSONB snapshots of business fields only: never secrets).
@@ -158,7 +163,87 @@ Review the result with `npm run suppliers:backfill-report` (read-only): mappings
 
 **`idempotency_keys`**: `PRIMARY KEY (user_id, operation, key)`; `operation` (`expense.create`), `key` (16–100 of `A-Za-z0-9_-`), `request_hash` (SHA-256 of the normalised body), `response_status`, `response_body` (jsonb), `resource_id`, `created_at` (indexed). Only successful creations are stored, in the same transaction as the expense. Retention: [maintenance.md](maintenance.md).
 
-Supplier payments, ledgers and customer schemas are not implemented.
+### `0005_expense_documents` (Stage 3B)
+
+Purely additive: creates one table and widens two audit CHECK constraints. **No existing row is read or changed**, so it is safe on a database with data; the only lock taken on existing tables is the brief `ALTER TABLE financial_audit_events` constraint swap (validated against existing rows, which all satisfy the wider rule). Rollback before any document was uploaded: `DROP TABLE expense_documents; DROP FUNCTION prevent_expense_document_delete(), enforce_expense_document_limit();`, restore the two 0004 constraints, delete the `schema_migrations` row. After documents exist, roll forward instead (fix with a new migration).
+
+**`expense_documents`**: metadata only; the bytes live in document storage ([architecture.md → Bill documents](architecture.md#bill-documents-stage-3b)).
+
+| Column | Notes |
+|---|---|
+| `id` | `uuid` PK |
+| `expense_id` | → `expenses`, `RESTRICT`; indexed with `created_at` |
+| `original_filename` | display only: trimmed, 1–255 chars, no control characters or slashes |
+| `storage_key` | server-generated, UNIQUE, `^[a-z0-9]+(/[a-z0-9]+)*$` |
+| `mime_type` | detected from content: `image/jpeg`, `image/png`, `image/webp`, `application/pdf` |
+| `size_bytes` | 1 – 10 485 760 (10 MB) |
+| `sha256` | 32 bytes; integrity check and duplicate detection |
+| `status` | `active` | `removed` |
+| `uploaded_by`, `created_at` | who/when |
+| `removed_at`, `removed_by`, `remove_reason` | all NULL while active; all set (reason 1–500) once removed |
+
+- `expense_documents_active_sha_unique`: the same file (SHA-256) can be active only once per expense.
+- `expense_documents_no_delete` trigger: rows are never deleted (remove = status change).
+- `expense_documents_limit` trigger: at most 10 **active** documents per expense (backstop; the application checks it under a lock on the expense row).
+- `financial_audit_events`: actions `document_add` and `document_remove` (recorded on `entity_type = 'expense'`); `reason` is required for `document_remove` as for void/restore.
+
+### `0006_supplier_payments` (Stage 3C)
+
+Additive; **no existing row is changed**. It adds a `BEFORE UPDATE` trigger on `expenses` (`expenses_guard_allocations`) that only acts when an expense has active allocations, so existing expenses behave exactly as before until payments are allocated to them. Existing expenses keep their meaning: payable = `amount − amount_paid` until allocations exist. Constraint swaps on `financial_audit_events` and `idempotency_keys` are validated against existing rows (all satisfy the wider rules). Rollback is only safe before any payment is recorded: drop the trigger `expenses_guard_allocations`, the view, both tables and the functions `prevent_financial_delete`, `guard_supplier_payment_update`, `guard_allocation_update`, `check_allocation_insert`, `check_payment_reversal`, `guard_allocated_expense`; restore the 0005 audit and 0004 idempotency constraints; delete the `schema_migrations` row. Afterwards, roll forward.
+
+**`supplier_payments`**: `id`, `supplier_id` (→ suppliers, RESTRICT), `payment_date` (2000–2100; API: not in the future), `amount` NUMERIC(14,2) > 0, `payment_mode` (same six modes as expenses, required), `reference` (≤ 100), `notes` (≤ 1000), `version`, `created_*`, `updated_*` (trigger), `reversed_at/by`, `reversal_reason` (all NULL or all set, reason 1–500). Indexes: (supplier, date), (date).
+- `supplier_payments_guard_update`: amount and supplier immutable; reversal final.
+- `supplier_payments_check_reversal` (deferred constraint trigger): a reversed payment cannot keep active allocations.
+- `supplier_payments_no_delete`.
+
+**`supplier_payment_allocations`**: `id`, `payment_id` (→ payments), `expense_id` (→ expenses), `amount` > 0, `created_at/by`, `released_at/by`, `release_reason` (all NULL or all set). Indexes: (payment, created_at); partial (expense) where active.
+- `supplier_payment_allocations_check_insert`: payment not reversed, expense not voided, same supplier, Σ active per payment ≤ payment amount, Σ active per expense ≤ `amount − amount_paid`.
+- `supplier_payment_allocations_guard_update`: the only permitted change is releasing once.
+- `supplier_payment_allocations_no_delete`.
+
+**`expenses_guard_allocations`** (on `expenses`): with active allocations, an expense cannot be voided, change supplier, or have `amount − amount_paid` below the allocated total.
+
+**View `supplier_balances`**: per supplier `total_bills`, `paid_at_purchase`, `total_payments`, `allocated`, `payable`, `unallocated`, `bill_count`, `payment_count` (active rows only). Derived on every read; nothing to rebuild.
+
+**`financial_audit_events`**: entity `supplier_payment`; actions `reverse`, `allocate`, `release_allocation` (reason required for `reverse` and `release_allocation`).
+**`idempotency_keys.operation`**: adds `supplier_payment.create`, `supplier_payment.allocate`.
+
+### `0007_customers` (Stage 3D)
+
+Additive; no existing row is changed (only the audit entity list and idempotency operation list are widened). Depends on `prevent_financial_delete()` from 0006, so **0006 must be applied first** (the runner enforces order). Rollback before any customer exists: drop the view, both tables and `guard_customer_txn_update`, `check_customer_ledger`; restore the 0006 audit/idempotency constraints; delete the `schema_migrations` row. Afterwards, roll forward.
+
+**`customers`**: `id`, `name` (1–120, trimmed, single spaces; may repeat), `phone` (optional, same format as suppliers), `phone_key` (generated: last 10 digits), `address` (≤ 300), `notes` (≤ 1000), `is_active`, `version`, `created_*`, `updated_*` (trigger). `customers_active_phone_unique` (one active customer per phone key); index on `lower(name)`; `customers_no_delete`.
+
+**`customer_transactions`**: `id`, `customer_id` (→ customers), `txn_type` (`due`, `due_payment`, `advance`, `advance_refund`), `txn_date` (2000–2100; API: not in the future), `amount` NUMERIC(14,2) > 0, `payment_mode` (NULL exactly for `due`), `due_id` (→ customer_transactions; set exactly for `due_payment`), `description` (required for `due`, ≤ 500), `reference` (≤ 100), `notes` (≤ 1000), `version`, `created_*`, `updated_*`, `reversed_at/by`, `reversal_reason` (all NULL or all set). Indexes: (customer, date, created_at); (due_id).
+- `customer_transactions_guard_update`: recorded values immutable; the only change is a single, final reversal.
+- `customer_transactions_check_ledger` (deferred constraint trigger, at commit): a due payment settles a due of the same customer that is not reversed; Σ active payments per due ≤ due amount; a reversed due keeps no active payments; active advances − active refunds ≥ 0.
+- `customer_transactions_no_delete`.
+
+**View `customer_balances`**: per customer `total_dues`, `due_payments`, `due_balance`, `total_advances`, `refunds`, `advance_balance`, `transaction_count` (active rows only). No cached balance exists, so nothing needs rebuilding.
+
+**`financial_audit_events`**: entities `customer`, `customer_transaction`. **`idempotency_keys.operation`**: adds `customer_transaction.create`.
+
+### Migration order and verification
+
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009`. 0005–0009 were applied (via `runMigrations`, the same code as `npm run db:migrate`) to the **test** database `shop_books_test` by the integration tests, which also exercise every trigger above. An upgrade test (`server/tests/migrations.upgrade.integration.test.ts`) builds a 0004 database **with data** (suppliers, paid/unpaid/voided expenses, audit rows, idempotency keys) in a throw-away schema, applies 0005–0009 and checks that every existing row of `expenses`, `suppliers`, `financial_audit_events` and `idempotency_keys` is byte-for-byte unchanged, that `supplier_balances` equals `amount − amount_paid` over active bills, that existing expenses stay editable/voidable, and that re-running is a no-op. They have **not** been applied to the development database (it is still at 0004) nor to any production database. Before production: back up, apply to a **copy** of the real database first, then run `npm run db:status`, `npm run documents:reconcile`, and spot-check supplier payables (`SELECT * FROM supplier_balances`), which should equal `amount − amount_paid` per supplier until payments are recorded.
+
+### `0008_reporting_indexes` (Stage 4)
+
+Indexes only; no data or constraint changes: `expenses_created_at_idx`, `supplier_payments_created_at_idx`, `customer_txn_created_at_idx` (`created_at DESC`, for the "recently recorded" feed) and `customer_txn_active_date_idx` (`(txn_date, txn_type) WHERE reversed_at IS NULL`, for period activity across customers). Plain `CREATE INDEX` (the runner uses a transaction), which briefly blocks writes to those tables while building — negligible at shop scale. Rollback: drop the four indexes.
+
+### `0009_monthly_reports` (Stage 5)
+
+Additive; existing rows unchanged except the audit entity/action CHECK lists (validated against existing rows). Inserts the single default `report_settings` row (**disabled**). Rollback before any report was sent: drop the five tables and `guard_report_delivery_update()`, restore the 0007 audit constraints, delete the `schema_migrations` row.
+
+| Table | Purpose and constraints |
+|---|---|
+| `report_settings` | one row (`id = true`): `enabled` (default false), `delivery_day` 1–28, `delivery_time` (whole minutes, Asia/Kolkata), `include_excel`, `version`, `updated_at/by` |
+| `report_recipients` | `email citext` (format check, ≤ 254), `name`, `is_active`, `version`, `created/updated_*`; `report_recipients_active_email_unique` (one ACTIVE row per address, case-insensitive); never deleted (deactivate) |
+| `report_jobs` | one per reporting month: `period_start` **UNIQUE** (first of month), `period_end` (last day; CHECKed), `scheduled_for`, `trigger` (`schedule`/`manual`; manual ⇔ `created_by`), `include_excel` snapshot |
+| `report_deliveries` | one per job + recipient (**UNIQUE `(job_id, recipient_email)`**): `status` (`pending`, `processing`, `sent`, `simulated`, `retry_scheduled`, `failed`), `attempt_count`, `next_attempt_at`, `locked_at` (set ⇔ processing), `last_attempt_at`, `sent_at` (set ⇔ sent/simulated), `provider`, `provider_message_id`, `last_error` (≤ 1000). Index on due rows. Trigger: `sent`/`simulated` are final; job and recipient are fixed |
+| `report_delivery_attempts` | append-only (trigger) log: `attempt_number` (UNIQUE per delivery), `started_at`, `finished_at`, `outcome` (`sent`, `simulated`, `retryable_failure`, `failed`, `interrupted`), provider reference, error. Never contains message content |
+
+`financial_audit_events`: entities `report_settings` (fixed id `00000000-0000-0000-0000-000000000001`), `report_recipient`, `report_job`, `report_delivery`; action `retry`.
 
 ## Creating the owner account
 
@@ -169,3 +254,4 @@ npm run owner:create
 ```
 
 It refuses to run against an unmigrated database and refuses if an owner already exists. Against production, build first and use `$env:NODE_ENV="production"; npm --prefix server run owner:create:built`.
+

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus, ReceiptText, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Paperclip, Plus, ReceiptText, Search, SlidersHorizontal } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
@@ -291,7 +291,10 @@ export function ExpensesPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{e.description}</p>
+                      <p className="flex items-center gap-1 font-medium">
+                        <span className="truncate">{e.description}</span>
+                        {e.documentCount > 0 && <Paperclip className="size-3.5 shrink-0 text-muted-foreground" aria-label={`${e.documentCount} document(s)`} />}
+                      </p>
                       <p className="truncate text-sm text-muted-foreground">{e.supplier?.name ?? e.category.name}</p>
                     </div>
                     <div className="shrink-0 text-right">
@@ -339,6 +342,12 @@ export function ExpensesPage() {
                       <Link to={`/expenses/${e.id}`} className="line-clamp-2 font-medium hover:underline" onClick={(ev) => ev.stopPropagation()}>
                         {e.description}
                       </Link>
+                      {e.documentCount > 0 && (
+                        <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Paperclip className="size-3" aria-hidden="true" /> {e.documentCount}
+                          <span className="sr-only">document(s)</span>
+                        </span>
+                      )}
                       {e.status === 'voided' && <Badge tone="danger" className="mt-1">Voided</Badge>}
                     </td>
                     <td className="px-4 py-3">{e.supplier?.name ?? '—'}</td>

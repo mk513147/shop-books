@@ -1,4 +1,4 @@
-import { BookOpen, LayoutDashboard, ReceiptText, Tags, Truck, UserCog, Users, type LucideIcon } from 'lucide-react';
+import { BookOpen, LayoutDashboard, ReceiptText, Tags, Truck, UserCog, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Role } from '@/types/api';
 
 export interface NavItem {
@@ -21,9 +21,10 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, mobileTab: true, mobileLabel: 'Home' },
   { to: '/expenses', label: 'Expenses', icon: ReceiptText, mobileTab: true },
   { to: '/suppliers', label: 'Suppliers', icon: Truck, mobileTab: true },
+  { to: '/supplier-payments', label: 'Supplier payments', icon: Wallet },
   { to: '/categories', label: 'Categories', icon: Tags },
-  { to: '/customers', label: 'Customers', icon: Users, stage: 'Customer advances and dues', placeholder: true },
-  { to: '/reports', label: 'Reports', icon: BookOpen, stage: 'Reports and Excel export', placeholder: true },
+  { to: '/customers', label: 'Customers', icon: Users },
+  { to: '/reports', label: 'Reports', icon: BookOpen },
   { to: '/users', label: 'Users', icon: UserCog, role: 'owner' },
 ];
 

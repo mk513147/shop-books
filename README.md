@@ -2,14 +2,15 @@
 
 A private, shared expense-management application for one physical shop, used by an owner and a few managers through a responsive website or an installable PWA.
 
-> **Status: Stage 3A + supplier enhancement.** Implemented: the Stage 1 foundation, Stage 2 authentication and access control, expense categories, expense entry/listing/editing/voiding with server-side search, filters and pagination, optimistic concurrency, an append-only financial audit history, **suppliers** (with category suggestions and a migration of previously typed supplier names), **server-side idempotent expense creation**, and a **mobile-first design system** across all screens. **Not yet implemented:** bill photos/documents, supplier payments/ledgers, customers, dashboard figures, reports, Excel export and e-mail. See [Roadmap](#roadmap).
+> **Status: Stages 1–5 implemented (Stages 3B–5 awaiting the owner's manual testing).** Expenses with bill documents, suppliers with payments and ledgers, customers with independent due/advance balances, a **dashboard and financial reports**, **Excel exports** of every report and ledger, and **automatic monthly e-mail reports** run by a PostgreSQL-backed scheduler. **Not production-ready for e-mail:** no real e-mail provider adapter exists yet (`EMAIL_PROVIDER=none` records deliveries as failed; the development `outbox` writes files only). See [docs/project-status.md](docs/project-status.md).
 
 ## Conventions
 
 - Currency: INR (₹), two decimal places. Money is `NUMERIC(14,2)` in the database and a **decimal string** in API responses (never a JS float).
 - Timezone: timestamps are `TIMESTAMPTZ`; calendar dates are `DATE`; reporting uses **Asia/Kolkata**.
 - Financial year: January – December.
-- Bill photographs (later stage) are **optional**; JPEG, PNG, WebP and PDF, max 10 MB each.
+- Bill photographs/documents are **optional**; JPEG, PNG, WebP and PDF, max 10 MB each, at most 10 per expense, stored privately outside the database (`DOCUMENT_STORAGE_DIR`).
+- Supplier payments are not expenses; balances (supplier payable, customer due, customer advance) are always derived from transactions. Customer due and advance are never netted.
 
 ## Technology
 
@@ -17,11 +18,11 @@ A private, shared expense-management application for one physical shop, used by 
 |---|---|
 | Web | React, Vite, TypeScript (strict), Tailwind CSS v4, shadcn/ui-style components, TanStack Query, React Hook Form, Zod, React Router |
 | PWA | vite-plugin-pwa (Workbox `generateSW`, static assets only) |
-| API | Node.js, Express 5, TypeScript (strict), Zod, helmet, cors, pino, Argon2id (`@node-rs/argon2`) |
+| API | Node.js, Express 5, TypeScript (strict), Zod, helmet, cors, pino, Argon2id (`@node-rs/argon2`), ExcelJS |
 | Database | PostgreSQL via `pg`, handwritten SQL migrations (no ORM) |
 | Tests | Vitest, React Testing Library, Supertest, Playwright |
 
-Hosting, e-mail and object-storage providers are **not yet chosen**; the code is deployment-agnostic.
+Hosting, e-mail and object-storage providers are **not yet chosen**; the code is deployment-agnostic. Bill documents use a provider-independent storage interface with a local-directory adapter today.
 
 ## Repository structure
 
@@ -33,7 +34,7 @@ shop-books/
 │   └── src/
 │       ├── app/             providers, routes, navigation, error boundary
 │       ├── components/      ui/ (shadcn-style), layout/, shared states
-│       ├── features/        feature modules (auth, users, categories, expenses, suppliers, audit, system health)
+│       ├── features/        feature modules (auth, users, categories, expenses, documents, suppliers, supplierPayments, customers, reports, exports, audit, system health)
 │       ├── lib/             api-client, money formatting, helpers
 │       ├── routes/          page components
 │       ├── styles/          Tailwind entry + design tokens (see docs/architecture.md → Design system)
@@ -45,7 +46,7 @@ shop-books/
 │   │   ├── config/          env validation, constants, .env loading
 │   │   ├── database/        pool, transactions, migration runner + CLI, migrations/
 │   │   ├── middleware/      request id, errors, origin/JSON guards, auth/CSRF/role
-│   │   ├── modules/         feature modules (health, auth, users, categories, expenses, suppliers, idempotency, audit)
+│   │   ├── modules/         feature modules (health, auth, users, categories, expenses, documents, suppliers, supplierPayments, customers, reports, exports, email, monthlyReports, idempotency, audit)
 │   │   ├── routes/          /api/v1 router
 │   │   ├── utils/           errors, logger
 │   │   ├── app.ts           Express app factory
@@ -83,6 +84,8 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 | `npm run owner:create` | One-time creation of the owner account |
 | `npm run owner:reset-password` | Owner account recovery (server shell only, interactive) |
 | `npm run suppliers:backfill-report` | Read-only report of how migration 0004 turned typed supplier names into suppliers (and possible duplicates) |
+| (automatic) | Monthly e-mail reports are sent by the API process itself; configure them in the app under Reports → Monthly e-mail (owner) |
+| `npm run documents:reconcile` | Check bill-document metadata against storage (`-- --verify`, `-- --delete-orphans`); see [maintenance](docs/maintenance.md) |
 
 ## Documentation
 
@@ -90,7 +93,8 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 - [Database and migrations](docs/database.md)
 - [Development setup and troubleshooting](docs/development-setup.md)
 - [Testing plan](docs/testing-plan.md): tests deferred to the final test phase
-- [Maintenance](docs/maintenance.md): owner recovery, data-retention policy
+- [Maintenance](docs/maintenance.md): owner recovery, data-retention policy, document backup and reconciliation
+- [Project status](docs/project-status.md): implemented features, verification and open items per stage
 
 ## Roadmap
 
@@ -98,7 +102,8 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 2. Stage 2 – authentication and access control. **Done.**
 3. **Stage 3A – expense categories and expense management** (incl. financial audit history). Done.
    - Enhancement: suppliers + category suggestions, supplier-name migration, idempotent creation, mobile-first redesign. Done (awaiting owner testing).
-4. Stage 3B – optional bill photographs/documents for expenses.
-5. Later – supplier payments and ledgers, customer ledger, dashboard, Excel export, monthly e-mail reports.
-
-Nothing beyond Stage 3A is implemented.
+4. Stage 3B – optional bill photographs/documents for expenses. Implemented (awaiting owner testing).
+5. Stage 3C – supplier payments, allocations and supplier ledger. Implemented (awaiting owner testing).
+6. Stage 3D – customers, dues, advances and customer ledger. Implemented (awaiting owner testing).
+7. Stage 4 – dashboard and financial reports. Implemented (awaiting owner testing).
+8. Stage 5 – Excel export and automated monthly e-mail reports. Implemented (awaiting owner testing); a real e-mail provider adapter and its credentials are still required for delivery.

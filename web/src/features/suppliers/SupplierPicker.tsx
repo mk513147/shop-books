@@ -19,8 +19,10 @@ interface SupplierPickerProps {
   id: string;
   value: SupplierRef | null;
   onChange: (supplier: SupplierRef | null) => void;
-  /** Opens the "Add supplier" form, prefilled with what was typed. */
-  onAddSupplier: (typedName: string) => void;
+  /** Opens the "Add supplier" form, prefilled with what was typed. Omit to hide that option. */
+  onAddSupplier?: (typedName: string) => void;
+  /** Label of the "no supplier" option; null hides it (a supplier is required). */
+  noneLabel?: string | null;
   invalid?: boolean;
   describedBy?: string;
 }
@@ -31,7 +33,7 @@ type Option = { kind: 'none' } | { kind: 'supplier'; supplier: SupplierRef & { p
  * Searchable supplier selector backed by GET /suppliers (active only). Opens as a sheet on phones
  * and a dialog on desktop, so it works the same with touch, mouse and keyboard.
  */
-export function SupplierPicker({ id, value, onChange, onAddSupplier, invalid, describedBy }: SupplierPickerProps) {
+export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel = 'No supplier', invalid, describedBy }: SupplierPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -40,9 +42,9 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, invalid, de
   const listId = useId();
 
   const options: Option[] = [
-    { kind: 'none' },
+    ...(noneLabel !== null ? [{ kind: 'none' as const }] : []),
     ...(list.data?.items ?? []).map((s) => ({ kind: 'supplier' as const, supplier: s })),
-    { kind: 'add' },
+    ...(onAddSupplier ? [{ kind: 'add' as const }] : []),
   ];
 
   useEffect(() => setActive(0), [q]);
@@ -50,7 +52,7 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, invalid, de
   function choose(option: Option) {
     if (option.kind === 'add') {
       setOpen(false);
-      onAddSupplier(query.trim());
+      onAddSupplier?.(query.trim());
       return;
     }
     onChange(option.kind === 'none' ? null : { id: option.supplier.id, name: option.supplier.name, isActive: true });
@@ -76,12 +78,12 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, invalid, de
         >
           <Truck className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className={cn('min-w-0 flex-1 truncate', !value && 'text-muted-foreground')}>
-            {value ? value.name : 'No supplier'}
+            {value ? value.name : (noneLabel ?? 'Choose a supplier')}
             {value && !value.isActive && <span className="text-muted-foreground"> (archived)</span>}
           </span>
-          {!value && <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+          {(!value || noneLabel === null) && <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
         </button>
-        {value && (
+        {value && noneLabel !== null && (
           <button
             type="button"
             onClick={() => onChange(null)}
@@ -146,7 +148,7 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, invalid, de
                     option.kind === 'add' && 'mt-1 border-t pt-3 text-primary',
                   )}
                 >
-                  {option.kind === 'none' && <span className="text-muted-foreground">No supplier</span>}
+                  {option.kind === 'none' && <span className="text-muted-foreground">{noneLabel}</span>}
                   {option.kind === 'supplier' && (
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{option.supplier.name}</span>

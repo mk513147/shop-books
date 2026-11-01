@@ -25,7 +25,9 @@ export interface Expense {
   /** Money: decimal strings, e.g. "1250.00". */
   amount: string;
   amountPaid: string;
-  /** Derived: amount - amountPaid (never stored). */
+  /** Derived: active supplier-payment allocations settling this bill (Stage 3C). */
+  allocatedPayments: string;
+  /** Derived: amount - amountPaid - allocatedPayments (never stored). */
   outstanding: string;
   paymentMode: PaymentMode | null;
   invoiceReference: string | null;
@@ -38,6 +40,8 @@ export interface Expense {
   voidedAt: string | null;
   voidedBy: PersonRef | null;
   voidReason: string | null;
+  /** Active bill documents attached (Stage 3B). */
+  documentCount: number;
 }
 
 interface ExpenseRow {
@@ -50,6 +54,7 @@ interface ExpenseRow {
   description: string;
   amount: string;
   amount_paid: string;
+  allocated: string;
   outstanding: string;
   payment_mode: PaymentMode | null;
   invoice_reference: string | null;
@@ -67,23 +72,30 @@ interface ExpenseRow {
   updated_by_name: string;
   voided_by_id: string | null;
   voided_by_name: string | null;
+  document_count: number;
 }
+
+/** Active supplier-payment allocations of expense `e` (correlated subquery). */
+const ALLOCATED_SQL = `SELECT COALESCE(sum(a.amount), 0)::numeric(14,2) AS allocated
+    FROM supplier_payment_allocations a WHERE a.expense_id = e.id AND a.released_at IS NULL`;
 
 const SELECT_EXPENSE = `
   SELECT e.id, e.expense_date, e.legacy_supplier_name, e.description, e.amount, e.amount_paid,
-         (e.amount - e.amount_paid) AS outstanding, e.payment_mode, e.invoice_reference, e.version,
+         al.allocated, (e.amount - e.amount_paid - al.allocated)::numeric(14,2) AS outstanding, e.payment_mode, e.invoice_reference, e.version,
          e.created_at, e.updated_at, e.voided_at, e.void_reason,
          c.id AS category_id, c.name AS category_name, c.is_active AS category_active,
          s.id AS supplier_id, s.name AS supplier_name, s.is_active AS supplier_active,
          cu.id AS created_by_id, cu.name AS created_by_name,
          uu.id AS updated_by_id, uu.name AS updated_by_name,
-         vu.id AS voided_by_id, vu.name AS voided_by_name
+         vu.id AS voided_by_id, vu.name AS voided_by_name,
+         (SELECT count(*)::int FROM expense_documents d WHERE d.expense_id = e.id AND d.status = 'active') AS document_count
     FROM expenses e
     JOIN expense_categories c ON c.id = e.category_id
     LEFT JOIN suppliers s ON s.id = e.supplier_id
     JOIN users cu ON cu.id = e.created_by
     JOIN users uu ON uu.id = e.updated_by
-    LEFT JOIN users vu ON vu.id = e.voided_by`;
+    LEFT JOIN users vu ON vu.id = e.voided_by
+    CROSS JOIN LATERAL (${ALLOCATED_SQL}) al`;
 
 function toExpense(row: ExpenseRow): Expense {
   return {
@@ -97,6 +109,7 @@ function toExpense(row: ExpenseRow): Expense {
     description: row.description,
     amount: row.amount,
     amountPaid: row.amount_paid,
+    allocatedPayments: row.allocated,
     outstanding: row.outstanding,
     paymentMode: row.payment_mode,
     invoiceReference: row.invoice_reference,
@@ -109,6 +122,7 @@ function toExpense(row: ExpenseRow): Expense {
     voidedAt: row.voided_at?.toISOString() ?? null,
     voidedBy: row.voided_by_id ? { id: row.voided_by_id, name: row.voided_by_name ?? '' } : null,
     voidReason: row.void_reason,
+    documentCount: row.document_count,
   };
 }
 
@@ -131,7 +145,8 @@ function snapshot(row: ExpenseRow): AuditSnapshot {
 }
 
 async function selectExpense(client: Queryable, id: string, lock = false): Promise<ExpenseRow> {
-  const result = await client.query<ExpenseRow>(`${SELECT_EXPENSE} WHERE e.id = $1 ${lock ? 'FOR UPDATE OF e' : ''}`, [id]);
+  if (lock) await client.query(`SELECT 1 FROM expenses WHERE id = $1 FOR UPDATE`, [id]);
+  const result = await client.query<ExpenseRow>(`${SELECT_EXPENSE} WHERE e.id = $1`, [id]);
   const row = result.rows[0];
   if (!row) throw new NotFoundError('Expense not found');
   return row;
@@ -163,6 +178,30 @@ function validateFinancials(input: ExpenseInput, current?: ExpenseRow): void {
     issues.push({ path: 'expenseDate', message: 'The expense date is too far in the past' });
   }
   if (issues.length > 0) throw new ValidationError(issues);
+}
+
+/**
+ * Supplier payments allocated to this bill must stay valid (the database re-checks this too):
+ * the supplier cannot change, and amount - amount paid at purchase must still cover the allocations.
+ */
+function assertAllocationsKept(input: ExpenseInput, current: ExpenseRow): void {
+  const allocated = toPaise(current.allocated);
+  if (allocated === 0n) return;
+  if (input.supplierId !== current.supplier_id) {
+    throw new AppError(
+      409,
+      'EXPENSE_HAS_ALLOCATIONS',
+      `Supplier payments (₹${current.allocated}) are allocated to this bill, so its supplier cannot change. Release those allocations first.`,
+    );
+  }
+  if (toPaise(input.amount) - toPaise(input.amountPaid) < allocated) {
+    throw new ValidationError([
+      {
+        path: toPaise(input.amount) !== toPaise(current.amount) ? 'amount' : 'amountPaid',
+        message: `Supplier payments of ₹${current.allocated} are allocated to this bill: the amount minus the amount paid at purchase cannot be less than that.`,
+      },
+    ]);
+  }
 }
 
 /** New expenses (and category changes) may only use an ACTIVE category. Share-locks it meanwhile. */
@@ -286,6 +325,7 @@ export async function updateExpense(
   return withSessionTransaction(db, actor.sessionId, async (client) => {
     const current = await lockForChange(client, id, expectedVersion, false);
     validateFinancials(input, current);
+    assertAllocationsKept(input, current);
     if (input.categoryId !== current.category_id) await assertCategoryUsable(client, input.categoryId);
     // An archived supplier may stay on an existing expense, but cannot be newly chosen.
     if (input.supplierId && input.supplierId !== current.supplier_id) await assertSupplierUsable(client, input.supplierId);
@@ -337,6 +377,13 @@ export async function updateExpense(
 export async function voidExpense(db: Database, id: string, reason: string, expectedVersion: number, actor: Actor): Promise<Expense> {
   return withSessionTransaction(db, actor.sessionId, async (client) => {
     const current = await lockForChange(client, id, expectedVersion, false);
+    if (toPaise(current.allocated) > 0n) {
+      throw new AppError(
+        409,
+        'EXPENSE_HAS_ALLOCATIONS',
+        `Supplier payments (₹${current.allocated}) are allocated to this bill. Release those allocations on the payment before voiding it.`,
+      );
+    }
     await client.query(
       `UPDATE expenses
           SET voided_at = now(), voided_by = $2, void_reason = $3, updated_by = $2, version = version + 1
@@ -439,8 +486,8 @@ export async function listExpenses(db: Queryable, query: ExpenseListQuery): Prom
             count(*) FILTER (WHERE e.voided_at IS NULL)::int AS active_count,
             COALESCE(sum(e.amount) FILTER (WHERE e.voided_at IS NULL), 0)::numeric(20,2) AS amount,
             COALESCE(sum(e.amount_paid) FILTER (WHERE e.voided_at IS NULL), 0)::numeric(20,2) AS paid,
-            COALESCE(sum(e.amount - e.amount_paid) FILTER (WHERE e.voided_at IS NULL), 0)::numeric(20,2) AS outstanding
-       FROM expenses e LEFT JOIN suppliers s ON s.id = e.supplier_id ${whereSql}`,
+            COALESCE(sum(e.amount - e.amount_paid - al.allocated) FILTER (WHERE e.voided_at IS NULL), 0)::numeric(20,2) AS outstanding
+       FROM expenses e LEFT JOIN suppliers s ON s.id = e.supplier_id CROSS JOIN LATERAL (${ALLOCATED_SQL}) al ${whereSql}`,
     filterParams,
   );
 

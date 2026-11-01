@@ -24,6 +24,9 @@ export interface Supplier {
   /** Linked categories (suggestions only), including archived ones, sorted by name. */
   categories: CategoryRef[];
   expenseCount: number;
+  /** Derived (Stage 3C): still owed on active bills, and payments not yet allocated to bills. */
+  payable: string;
+  unallocated: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +41,8 @@ interface SupplierRow {
   version: number;
   categories: CategoryRef[];
   expense_count: number;
+  payable: string;
+  unallocated: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -46,7 +51,9 @@ const SUPPLIER_COLUMNS = `s.id, s.name, s.phone, s.address, s.notes, s.is_active
   COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name, 'isActive', c.is_active) ORDER BY lower(c.name))
               FROM supplier_categories sc JOIN expense_categories c ON c.id = sc.category_id
              WHERE sc.supplier_id = s.id), '[]'::json) AS categories,
-  (SELECT count(*)::int FROM expenses e WHERE e.supplier_id = s.id) AS expense_count`;
+  (SELECT count(*)::int FROM expenses e WHERE e.supplier_id = s.id) AS expense_count,
+  (SELECT b.payable FROM supplier_balances b WHERE b.supplier_id = s.id) AS payable,
+  (SELECT b.unallocated FROM supplier_balances b WHERE b.supplier_id = s.id) AS unallocated`;
 
 function toSupplier(row: SupplierRow): Supplier {
   return {
@@ -59,6 +66,8 @@ function toSupplier(row: SupplierRow): Supplier {
     version: row.version,
     categories: row.categories,
     expenseCount: row.expense_count,
+    payable: row.payable,
+    unallocated: row.unallocated,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -101,6 +110,9 @@ export async function listSuppliers(db: Queryable, query: SupplierListQuery): Pr
   const where: string[] = [];
   if (query.status === 'active') where.push('s.is_active');
   if (query.status === 'archived') where.push('NOT s.is_active');
+  if (query.balance === 'payable') {
+    where.push('EXISTS (SELECT 1 FROM supplier_balances b WHERE b.supplier_id = s.id AND b.payable > 0)');
+  }
   let prefixOrder = '';
   if (query.q) {
     const pattern = bind(containsPattern(query.q));

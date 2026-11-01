@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { Database } from '../../database/connection.js';
 import { getActor } from '../../middleware/auth.js';
 import { NotFoundError } from '../../utils/errors.js';
+import { createDocumentsRouter } from '../documents/documents.routes.js';
+import type { DocumentStorage } from '../documents/storage.js';
 import { parseIdempotencyKey } from '../idempotency/idempotency.js';
 import { expenseInputSchema, expenseUpdateSchema, listQuerySchema, reasonSchema } from './expenses.schemas.js';
 import {
@@ -23,8 +25,11 @@ function parseId(raw: string | undefined): string {
 }
 
 /** Expenses: owner and managers alike (mounted below requirePasswordCurrent). */
-export function createExpensesRouter({ db }: { db: Database }): Router {
+export function createExpensesRouter({ db, storage }: { db: Database; storage: DocumentStorage }): Router {
   const router = Router();
+
+  // Bill photographs / PDFs (Stage 3B).
+  router.use('/:expenseId/documents', createDocumentsRouter({ db, storage }));
 
   router.get('/', async (req, res) => {
     res.json(await listExpenses(db, listQuerySchema.parse(req.query)));

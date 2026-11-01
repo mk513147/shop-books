@@ -7,17 +7,32 @@ import type { AppConfig } from './config/env.js';
 import type { Database } from './database/connection.js';
 import { createErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { requestId } from './middleware/requestId.js';
+import { createDocumentStorage, type DocumentStorage } from './modules/documents/storage.js';
+import { createEmailSender, type EmailSender } from './modules/email/email.js';
 import { createApiRouter } from './routes/index.js';
 
 export interface AppDeps {
   config: AppConfig;
   db: Database;
   logger: Logger;
+  /** Private bill-document storage; built from config.documentStorage when not supplied (tests inject one). */
+  storage?: DocumentStorage;
+  /** Outgoing e-mail; built from config.email when not supplied (tests inject a recording sender). */
+  emailSender?: EmailSender;
+  /** Called when monthly-report work was queued (the server process passes scheduler.nudge). */
+  onReportQueued?: () => void;
 }
 
 export const JSON_BODY_LIMIT = '100kb';
 
-export function createApp({ config, db, logger }: AppDeps): Express {
+export function createApp({
+  config,
+  db,
+  logger,
+  storage = createDocumentStorage(config.documentStorage),
+  emailSender = createEmailSender(config.email),
+  onReportQueued,
+}: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', 1);
@@ -51,7 +66,7 @@ export function createApp({ config, db, logger }: AppDeps): Express {
   );
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
-  app.use('/api/v1', createApiRouter({ db, config }));
+  app.use('/api/v1', createApiRouter({ db, config, storage, emailSender, onReportQueued }));
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));

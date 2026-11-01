@@ -18,6 +18,10 @@ Existing coverage worth knowing:
 - `server/tests/auth.critical.integration.test.ts`: **Stage 2 critical paths only**: public surface, generic login errors, cookie attributes, token hashing, Origin/JSON/CSRF enforcement, idle and absolute expiry, manager lifecycle (temporary password, forced change, role denial, deactivation, owner reset), single-owner constraint, concurrent lockout, per-IP 429, session + CSRF rotation on password change, racing revocation, session-bound writes, owner recovery logic.
 - `server/tests/expenses.critical.integration.test.ts`: **Stage 3A critical paths only**: auth required, category uniqueness, expense without a photo, money as exact strings, derived outstanding, field-level validation (incl. number-typed money rejected), edit with version + 409 + "below paid" rule + before/after history, void/restore with reasons and totals exclusion, archived-category rules, server-side search/pagination/limits, DB refusal of expense delete and audit modification.
 - `server/tests/suppliers.critical.integration.test.ts`: **supplier enhancement critical paths only**: supplier create with linked categories, name normalisation + case-insensitive uniqueness, phone validation, auth required; link/unlink with audit and version bump, archived category refused, stale PATCH 409, expenses untouched by link removal; archived supplier refused for new expenses but kept on edits; free-text `supplierName` rejected; supplier search and `supplierId` filter; idempotency (replay with normalised-equal body, `Idempotent-Replayed`, 409 on different body, 5 concurrent requests → one expense, per-user scope, failed request stores nothing, malformed key 400); **0004 backfill** in an isolated schema (conservative merge, every named expense linked, typed names/`updated_at`/`version` preserved, report + possible duplicates, `import` audit rows).
+- `server/tests/documents.critical.integration.test.ts`: **Stage 3B critical paths only** (10 tests): type detection and filename sanitising; auth/CSRF/binary-route restriction; all four types; private streaming headers and byte-exact download; disguised/malformed/empty/oversized/mismatched files; exactly 10 MB accepted; duplicate upload; 10-per-expense limit under 12 concurrent uploads; no cross-expense access; removal with reason, owner-only removed files, history, DB refuses delete; voided-expense rules; failed DB write leaves no file; reconciliation finds orphans and missing files.
+- `server/tests/supplierPayments.critical.integration.test.ts`: **Stage 3C critical paths only** (10 tests): payment is not an expense; partial, multi-bill and later allocation; limits; other supplier / voided / zero refused (API and DB trigger); 3 concurrent allocations → 1 succeeds; allocated bills cannot be voided, moved or reduced; release; reversal (once, version, releases allocations, DB guards); metadata edits; idempotent creation; ledger reconciliation and summary.
+- `server/tests/customers.critical.integration.test.ts`: **Stage 3D critical paths only** (11 tests): customer CRUD, phone duplicates, archive/reactivate; ₹5,000 due + ₹2,000 advance never netted; refund ≤ advance; partial and multiple due payments; validation; 5 concurrent refunds → 1 and 4 concurrent payments → 1; reversal rules (due with payments, refunded advance, once, version) and DB backstops; archived customers; no IDOR; idempotency; ledger reconciliation and summary.
+- `server/tests/migrations.upgrade.integration.test.ts`: 0005–0007 applied on top of a 0004 database **with data**: existing rows unchanged, derived supplier balances correct, existing expenses still editable, re-run is a no-op.
 - `web/src/app/App.test.tsx`: login flow, forced password change, owner-only screen.
 - `web/src/lib/lib.test.ts`: also the idempotency-key generator (incl. the non-secure-context fallback).
 
@@ -25,7 +29,9 @@ The supplier enhancement was walked through once in Edge (desktop 1280 px and iP
 
 Stage 3A was also walked through once in a real browser (Edge) against the real API with a throwaway script (27 checks: categories, add/validate/edit/stale-edit/void/restore, history, filters, sort, archived categories, phone layout). That flow should become a permanent Playwright spec (below).
 
-Note: the auth, expenses and suppliers integration tests **truncate** `users` (cascading to every table that references it) in the test database. The suppliers test also creates and drops a throw-away schema.
+Stages 3B–3D were walked through once in Edge (headless; desktop 1280 px and phone 375 px) against the real API on the **test** database with a throwaway script: **34 checks, 33 passed**; the remaining check only flagged expected HTTP status messages in the console (the login page's `/auth/me` 401 and the deliberately rejected upload's 400) — no JavaScript errors. Covered: expense with a real photo (preview, upload, thumbnail through the authenticated API, 401 without a session, `no-store`), disguised file rejected with a message, removal with reason and history; supplier summary, supplier page, record payment with "Fill oldest bills first", payable reduced, ledger rows; customer creation, ₹5,000 due + ₹2,000 advance shown separately, refund above advance blocked, refund confirmation, due payment, customer ledger; no horizontal overflow on 11 new or changed pages at 375 px; refund sheet fits the phone screen. One layout issue found on the first run (a customer action label running to the screen edge at 375 px) was fixed and re-checked in the final run (no clipped buttons or links).
+
+Note: the auth, expenses, suppliers, documents, supplier-payments and customers integration tests **truncate** `users` (cascading to every table that references it) in the test database. The suppliers test also creates and drops a throw-away schema.
 
 ## Deferred tests: final test phase
 
@@ -174,6 +180,47 @@ Note: the auth, expenses and suppliers integration tests **truncate** `users` (c
 - [ ] **Active sessions are never deleted**, including the boundary cases just inside the 12-hour idle and 7-day absolute limits.
 - [ ] `auth_events` older than 12 months deleted, newer kept.
 - [ ] Batching: large volumes processed in bounded batches; interrupting and re-running converges (idempotent).
+
+### Bill documents (Stage 3B)
+- [ ] Real devices: Android Chrome and iOS Safari file pickers, **Take photo** (camera capture, HEIC → JPEG), large real photos (5–10 MB) over a slow mobile connection; progress bar accuracy.
+- [ ] Inline viewing of PDFs and images in each browser (new tab); download file names with non-ASCII characters.
+- [ ] Malicious inputs: polyglot files (valid JPEG header + HTML/JS payload), PDFs with JavaScript, SVG renamed to .png, truncated files, 10 MB + 1 byte, file names with `../`, NUL, RTL-override characters, 300+ characters.
+- [ ] Concurrency: parallel uploads from two users to one expense around the limit; upload racing a void.
+- [ ] Failure injection: storage write failure (read-only directory, disk full), DB failure after the storage write, process killed mid-upload → reconciliation reports orphans/strays; `--delete-orphans` respects the grace period and never deletes referenced files.
+- [ ] Retry after a partial failure in the expense form: same idempotency key, no duplicate expense, only failed files re-sent.
+- [ ] Service worker: no document or API response ever appears in Cache Storage (DevTools).
+- [ ] Rate limit: 61st upload within 10 minutes → 429 with `Retry-After`.
+- [ ] Backup/restore drill: DB dump + folder copy restored elsewhere; reconciliation reports 0 missing.
+
+### Supplier payments and ledger (Stage 3C)
+- [ ] Allocation matrix: exact remaining amounts, ₹0.01 left, 100 bills in one request, bill of another supplier, bill without supplier, bill voided between loading the form and saving.
+- [ ] Concurrency: allocation vs expense edit/void on the same bill; release vs allocate; reverse vs allocate on the same payment; two reversals at once.
+- [ ] Ledger: ordering of same-day entries, brought-forward with `from`, type/status filters, 2,000-row truncation, archived supplier, supplier with only payments (negative net balance).
+- [ ] Reconciliation job (SQL): for every supplier, `supplier_balances` equals a recomputation from raw rows; Σ allocations per bill ≤ payable; no allocation on a voided bill or reversed payment.
+- [ ] UI: allocation editor at 320 px, keyboard-only use, screen-reader announcement of totals, allocate dialog double tap (idempotent).
+- [ ] Expense form when editing a bill with allocations: outstanding display and refusal messages.
+
+### Customers and customer ledger (Stage 3D)
+- [ ] Validation matrix for every entry type (missing/extra fields, payment-mode rules, description rules, dates around IST midnight).
+- [ ] Phone duplicate rule: country code, leading zero, spaces/dashes, fewer than 10 digits, reactivation conflicts.
+- [ ] Reversal chains: payment → due, refund → advance; the wrong order is refused with clear messages.
+- [ ] Concurrency: refund vs advance reversal; payment vs due reversal; many customers in parallel (no cross-customer blocking).
+- [ ] Reconciliation job (SQL): `customer_balances` equals a recomputation; no negative advance; Σ payments per due ≤ due.
+- [ ] UI: the two balances are never shown as one net number anywhere; refund confirmation; dialogs with the phone keyboard open; screen-reader labels for ± effects.
+
+### Consolidated final test plan (all stages)
+
+| Layer | Scope |
+|---|---|
+| Unit (Vitest) | money parsing/formatting (server + web), date rules, document type detection and filename sanitising, allocation editor helpers (`draftProblems`, `draftToAllocations`), idempotency hashing |
+| PostgreSQL integration | every migration on an empty DB **and** on a copy of real data at 0004; every CHECK/trigger via direct SQL attempts; views vs raw recomputation; append-only audit |
+| API (Supertest) | route inventory (everything authenticated except health/login), owner vs manager matrix, unknown fields rejected everywhere, error envelopes never leaking SQL, idempotency for all creation operations |
+| Financial reconciliation | expense totals, supplier balances and customer balances recomputed independently after randomised operation sequences (property-based) |
+| Concurrency | the races listed per stage, repeated (e.g. 50×) to catch flakiness |
+| File security | malicious file corpus, path traversal, IDOR on document ids, cache headers, storage permissions |
+| Browser (Playwright) | turn the walkthroughs (3A: 27 checks, supplier enhancement: 42, 3B–3D: 33) into permanent specs; desktop + phone profiles |
+| PWA / mobile | installability, offline shell, no runtime caching, safe areas, keyboard overlap, real Android/iOS devices |
+| Accessibility | keyboard-only flows, focus management in sheets, contrast of warning/primary text, screen-reader pass |
 
 ## Open items
 

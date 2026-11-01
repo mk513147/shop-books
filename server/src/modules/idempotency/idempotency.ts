@@ -5,7 +5,21 @@ import type { Actor } from '../../middleware/auth.js';
 import { AppError } from '../../utils/errors.js';
 import { withSessionTransaction } from '../auth/sessionTransaction.js';
 
-export type IdempotentOperation = 'expense.create';
+export type IdempotentOperation =
+  | 'expense.create'
+  | 'supplier_payment.create'
+  | 'supplier_payment.allocate'
+  | 'customer_transaction.create';
+
+const REUSED_MESSAGES: Record<IdempotentOperation, string> = {
+  'expense.create':
+    'This form was already used to save a different expense. Check the expenses list before adding it again.',
+  'supplier_payment.create':
+    'This form was already used to record a different payment. Check the payments list before recording it again.',
+  'supplier_payment.allocate': 'This allocation form was already used with different amounts. Reload the payment and try again.',
+  'customer_transaction.create':
+    'This form was already used to record a different entry. Check the customer ledger before recording it again.',
+};
 
 const KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;
 
@@ -51,13 +65,9 @@ async function findStored(client: Queryable, actor: Actor, operation: Idempotent
   return result.rows[0];
 }
 
-function replay<T>(row: StoredRow, requestHash: Buffer): IdempotentResult<T> {
+function replay<T>(row: StoredRow, requestHash: Buffer, operation: IdempotentOperation): IdempotentResult<T> {
   if (!row.request_hash.equals(requestHash)) {
-    throw new AppError(
-      409,
-      'IDEMPOTENCY_KEY_REUSED',
-      'This form was already used to save a different expense. Check the expenses list before adding it again.',
-    );
+    throw new AppError(409, 'IDEMPOTENCY_KEY_REUSED', REUSED_MESSAGES[operation]);
   }
   return { status: row.response_status, body: row.response_body as T, replayed: true };
 }
@@ -83,7 +93,7 @@ export async function runIdempotent<T>(
   try {
     return await withSessionTransaction(db, actor.sessionId, async (client) => {
       const existing = await findStored(client, actor, operation, key);
-      if (existing) return replay<T>(existing, requestHash);
+      if (existing) return replay<T>(existing, requestHash, operation);
 
       const result = await work(client);
       const stored = await client.query(
@@ -101,6 +111,6 @@ export async function runIdempotent<T>(
     if (!(err instanceof ConcurrentDuplicate)) throw err;
     const winner = await findStored(db, actor, operation, key);
     if (!winner) throw new AppError(409, 'IDEMPOTENCY_CONFLICT', 'Please try again.');
-    return replay<T>(winner, requestHash);
+    return replay<T>(winner, requestHash, operation);
   }
 }

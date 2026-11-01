@@ -22,11 +22,14 @@
     "owner:reset-password": "tsx src/cli/resetOwnerPassword.ts",
     "owner:reset-password:built": "node dist/cli/resetOwnerPassword.js",
     "suppliers:backfill-report": "tsx src/cli/supplierBackfillReport.ts",
-    "suppliers:backfill-report:built": "node dist/cli/supplierBackfillReport.js"
+    "suppliers:backfill-report:built": "node dist/cli/supplierBackfillReport.js",
+    "documents:reconcile": "tsx src/cli/documentsReconcile.ts",
+    "documents:reconcile:built": "node dist/cli/documentsReconcile.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
     "cors": "^2.8.6",
+    "exceljs": "4.4.0",
     "express": "^5.3.0",
     "helmet": "^8.3.0",
     "pg": "^8.23.1",

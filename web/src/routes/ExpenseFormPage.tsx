@@ -24,10 +24,8 @@ export function NewExpensePage() {
           categories={categories.data}
           submitLabel="Save expense"
           cancelTo="/expenses"
-          onSubmit={async (input) => {
-            const expense = await create.mutateAsync({ ...input, idempotencyKey });
-            navigate(`/expenses/${expense.id}`, { state: { notice: 'Expense saved.' } });
-          }}
+          onSubmit={(input) => create.mutateAsync({ ...input, idempotencyKey })}
+          onDone={(expense, notice) => navigate(`/expenses/${expense.id}`, { state: { notice } })}
         />
       )}
     </Page>
@@ -62,10 +60,8 @@ export function EditExpensePage() {
         categories={categories.data}
         submitLabel="Save changes"
         cancelTo={`/expenses/${current.id}`}
-        onSubmit={async (input, baseVersion) => {
-          await update.mutateAsync({ id: current.id, version: baseVersion ?? current.version, ...input });
-          navigate(`/expenses/${current.id}`, { state: { notice: 'Changes saved.' } });
-        }}
+        onSubmit={(input, baseVersion) => update.mutateAsync({ id: current.id, version: baseVersion ?? current.version, ...input })}
+        onDone={(expense, notice) => navigate(`/expenses/${expense.id}`, { state: { notice } })}
       />
     </Page>
   );

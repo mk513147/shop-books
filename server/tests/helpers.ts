@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import pg from 'pg';
 import { pino } from 'pino';
 import type { AppConfig } from '../src/config/env.js';
@@ -15,6 +17,10 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     trustProxy: false,
     appVersion: '1.2.3-test',
     sessionSecret: 'test-secret-'.padEnd(48, 'x'),
+    documentStorage: { driver: 'local', directory: path.join(tmpdir(), 'shop-books-test-documents') },
+    shopName: 'Test Shop',
+    email: { provider: 'outbox', from: 'Test Shop <reports@example.test>', outboxDirectory: path.join(tmpdir(), 'shop-books-test-outbox') },
+    reportScheduler: { enabled: false, intervalMs: 60_000 },
     cookie: { name: 'sb_session', secure: false, sameSite: 'lax' },
     ...overrides,
   };

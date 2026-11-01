@@ -5,6 +5,7 @@ import type { AuditHistoryEntry, Supplier, SupplierInput, SupplierListResponse }
 export interface SupplierListParams {
   q?: string;
   status?: 'active' | 'archived' | 'all';
+  balance?: 'all' | 'payable';
   page?: number;
   pageSize?: number;
 }

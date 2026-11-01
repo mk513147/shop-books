@@ -10,6 +10,8 @@ import { Card } from '@/components/ui/card';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { DocumentPicker, usePendingFiles } from '@/features/documents/DocumentPicker';
+import { MAX_DOCUMENTS_PER_EXPENSE } from '@/features/documents/limits';
 import { SupplierFormDialog } from '@/features/suppliers/SupplierForm';
 import { SupplierPicker } from '@/features/suppliers/SupplierPicker';
 import { useLinkSupplierCategory, useSupplier } from '@/features/suppliers/suppliers-api';
@@ -114,11 +116,26 @@ interface ExpenseFormProps {
    * arrived since. Sending it keeps optimistic concurrency honest: a stale form keeps getting 409
    * until the user reloads, instead of silently overwriting someone else's change.
    */
-  onSubmit: (input: ExpenseInput, baseVersion: number | undefined) => Promise<unknown>;
+  onSubmit: (input: ExpenseInput, baseVersion: number | undefined) => Promise<Expense>;
+  /**
+   * Called once the expense is saved AND every selected file is uploaded (or the user chose to
+   * continue without the failed ones). Files are uploaded only after the expense itself was saved.
+   */
+  onDone: (expense: Expense, notice: string) => void;
 }
 
-export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubmit }: ExpenseFormProps) {
+export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubmit, onDone }: ExpenseFormProps) {
   const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
+  const pending = usePendingFiles();
+  // Set once the expense is saved but some files failed to upload: the form then offers a retry.
+  const [saved, setSaved] = useState<Expense | null>(null);
+  const savedNotice = initial ? 'Changes saved.' : 'Expense saved.';
+
+  async function finishUploads(expense: Expense) {
+    const failed = await pending.uploadAll(expense.id);
+    if (failed === 0) onDone(expense, pending.files.length > 0 ? `${savedNotice} Documents uploaded.` : savedNotice);
+    else setSaved(expense);
+  }
   const inFlight = useRef(false);
   const baseVersion = useRef(initial?.version);
   const [supplier, setSupplier] = useState<SupplierRef | null>(initial?.supplier ?? null);
@@ -141,7 +158,10 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   const categoryId = watch('categoryId');
   const amountValid = MONEY_INPUT.test(amount);
   const paidValid = MONEY_INPUT.test(amountPaid);
-  const outstanding = amountValid && paidValid && toPaise(amountPaid) <= toPaise(amount) ? toPaise(amount) - toPaise(amountPaid) : null;
+  // Supplier payments already allocated to this bill (edit only) also reduce what is outstanding.
+  const allocated = initial ? toPaise(initial.allocatedPayments) : 0n;
+  const outstanding =
+    amountValid && paidValid && toPaise(amountPaid) + allocated <= toPaise(amount) ? toPaise(amount) - toPaise(amountPaid) - allocated : null;
   const unpaid = paidValid && toPaise(amountPaid) === 0n;
 
   function selectSupplier(next: SupplierRef | null) {
@@ -178,11 +198,13 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
         onSubmit={handleSubmit(async (values) => {
           // Synchronous re-entry guard: a fast double tap must not send twice (the server's
           // idempotency key is the second line of defence).
-          if (inFlight.current) return;
+          if (inFlight.current || saved) return;
           inFlight.current = true;
           setFormError(null);
           try {
-            await onSubmit(toInput(values), baseVersion.current);
+            const expense = await onSubmit(toInput(values), baseVersion.current);
+            if (pending.pendingCount === 0) onDone(expense, savedNotice);
+            else await finishUploads(expense);
           } catch (err) {
             if (err instanceof ApiError && err.details?.length) {
               for (const d of err.details) {
@@ -287,7 +309,10 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
             </fieldset>
 
             <div className="flex items-center justify-between rounded-lg bg-surface-muted px-3 py-2.5" aria-live="polite">
-              <span className="text-sm text-muted-foreground">Outstanding</span>
+              <span className="text-sm text-muted-foreground">
+                Outstanding
+                {allocated > 0n && <span className="block text-xs">after {formatInr(paiseToString(allocated))} of supplier payments</span>}
+              </span>
               <strong className={cn('figure text-base', outstanding !== null && outstanding > 0n && 'text-warning')}>
                 {outstanding === null ? '—' : formatInr(paiseToString(outstanding))}
               </strong>
@@ -412,6 +437,42 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           </div>
         </Section>
 
+        <Section step={4} title="Bill photos and documents">
+          {initial && initial.documentCount > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {initial.documentCount} document{initial.documentCount === 1 ? ' is' : 's are'} already attached; manage them on the expense
+              details page.
+            </p>
+          )}
+          <DocumentPicker
+            pending={pending}
+            maxCount={MAX_DOCUMENTS_PER_EXPENSE - (initial?.documentCount ?? 0)}
+            disabled={isSubmitting || saved !== null}
+          />
+        </Section>
+
+        {saved && (
+          <div role="alert" className="space-y-3 rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm">
+            <p>
+              <strong>{savedNotice}</strong> {pending.pendingCount} file{pending.pendingCount === 1 ? '' : 's'} could not be uploaded (see
+              the errors above). The expense is stored; you can retry now or add documents later from its details page.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button size="sm" disabled={pending.uploading} onClick={() => void finishUploads(saved)}>
+                {pending.uploading ? 'Uploading…' : 'Retry upload'}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending.uploading}
+                onClick={() => onDone(saved, `${savedNotice} Some documents were not uploaded.`)}
+              >
+                Continue without them
+              </Button>
+            </div>
+          </div>
+        )}
+
         {formError && (
           <div role="alert" className="space-y-2 rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm text-destructive">
             <p>{formError.message}</p>
@@ -427,8 +488,8 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
             Cancel
           </Link>
-          <Button type="submit" size="lg" className="md:min-w-44" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving…' : submitLabel}
+          <Button type="submit" size="lg" className="md:min-w-44" disabled={isSubmitting || saved !== null}>
+            {pending.uploading ? 'Uploading files…' : isSubmitting ? 'Saving…' : submitLabel}
           </Button>
         </div>
       </form>

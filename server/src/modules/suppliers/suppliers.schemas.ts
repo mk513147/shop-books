@@ -60,6 +60,8 @@ export const linkCategorySchema = z.strictObject({ categoryId: z.uuid('Choose a 
 export const supplierListQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
   status: z.enum(['active', 'archived', 'all']).default('active'),
+  /** payable = only suppliers that are still owed something. */
+  balance: z.enum(['all', 'payable']).default('all'),
   page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });

@@ -1,6 +1,17 @@
 import type { Queryable } from '../../database/connection.js';
 
-export type AuditEntityType = 'expense' | 'expense_category' | 'supplier';
+export type AuditEntityType =
+  | 'expense'
+  | 'expense_category'
+  | 'supplier'
+  | 'supplier_payment'
+  | 'customer'
+  | 'customer_transaction'
+  /** Monthly e-mail report configuration and manual actions (Stage 5). */
+  | 'report_settings'
+  | 'report_recipient'
+  | 'report_job'
+  | 'report_delivery';
 /** 'import' is written only by migrations (no actor); the application never records it. */
 export type AuditAction =
   | 'create'
@@ -11,7 +22,18 @@ export type AuditAction =
   | 'reactivate'
   | 'link_category'
   | 'unlink_category'
-  | 'import';
+  | 'import'
+  /** Recorded on the expense: a bill document was attached / removed (reason required). */
+  | 'document_add'
+  | 'document_remove'
+  /** Supplier payment / customer transaction reversed (reason required). */
+  | 'reverse'
+  /** Supplier payment allocated to a bill (recorded on the payment AND on the expense). */
+  | 'allocate'
+  /** Allocation released (reason required; recorded on the payment AND on the expense). */
+  | 'release_allocation'
+  /** Owner re-queued a failed report delivery. */
+  | 'retry';
 type RecordableAction = Exclude<AuditAction, 'import'>;
 export type AuditSnapshot = Record<string, string | number | boolean | null>;
 

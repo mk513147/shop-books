@@ -1,6 +1,7 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { ErrorState, LoadingState } from '@/components/states';
 import { formatDateTime } from '@/lib/dates';
+import { formatInr } from '@/lib/money';
 import type { AuditAction, AuditHistoryEntry } from '@/types/api';
 
 const ACTION_LABELS: Record<AuditAction, string> = {
@@ -13,7 +14,30 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   link_category: 'Category suggestion added',
   unlink_category: 'Category suggestion removed',
   import: 'Created from existing expenses',
+  document_add: 'Document attached',
+  document_remove: 'Document removed',
+  reverse: 'Reversed',
+  allocate: 'Payment allocated',
+  release_allocation: 'Allocation released',
 };
+
+/** Events about one linked item: shown as "<label>: <item>" without a field diff. */
+function itemText(entry: AuditHistoryEntry): string | null {
+  const a = entry.after;
+  switch (entry.action) {
+    case 'link_category':
+    case 'unlink_category':
+      return String(a.categoryName ?? '');
+    case 'document_add':
+    case 'document_remove':
+      return String(a.fileName ?? '');
+    case 'allocate':
+    case 'release_allocation':
+      return `${formatInr(String(a.amount ?? '0'))} · ${String(a.expenseDescription ?? '')}`;
+    default:
+      return null;
+  }
+}
 
 /** Newest-first change history (financial audit log), with field-by-field before → after. */
 export function AuditHistory({
@@ -35,14 +59,12 @@ export function AuditHistory({
           <span className="absolute -left-[1.6rem] top-1 size-2.5 rounded-full border-2 border-card bg-primary" aria-hidden="true" />
           <p>
             <strong className="font-medium">{ACTION_LABELS[entry.action]}</strong>
-            {(entry.action === 'link_category' || entry.action === 'unlink_category') && (
-              <>: {String(entry.after.categoryName ?? '')}</>
-            )}{' '}
+            {itemText(entry) !== null && <>: {itemText(entry)}</>}{' '}
             <span className="text-muted-foreground">by {entry.actor?.name ?? 'System (data migration)'}</span>
           </p>
           <p className="text-xs text-muted-foreground">{formatDateTime(entry.occurredAt)}</p>
           {entry.reason && <p className="mt-1 text-muted-foreground">Reason: {entry.reason}</p>}
-          {entry.action !== 'link_category' && entry.action !== 'unlink_category' && entry.changes.length > 0 && (
+          {itemText(entry) === null && entry.changes.length > 0 && (
             <ul className="mt-1.5 space-y-0.5">
               {entry.changes
                 .filter((c) => c.field in fieldLabels)

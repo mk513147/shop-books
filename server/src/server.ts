@@ -2,6 +2,8 @@ import { createApp } from './app.js';
 import { ConfigError, loadConfig } from './config/env.js';
 import { loadEnvFiles } from './config/loadEnvFiles.js';
 import { createPool } from './database/connection.js';
+import { createEmailSender } from './modules/email/email.js';
+import { ReportScheduler } from './modules/monthlyReports/scheduler.js';
 import { createLogger } from './utils/logger.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -20,7 +22,19 @@ function main(): void {
 
   const logger = createLogger(config);
   const pool = createPool(config, logger);
-  const app = createApp({ config, db: pool, logger });
+  const emailSender = createEmailSender(config.email);
+  // Monthly e-mail reports: a timer in this process; all state and locking are in PostgreSQL.
+  const scheduler = new ReportScheduler({
+    db: pool,
+    sender: emailSender,
+    shopName: config.shopName,
+    from: config.email.from,
+    logger,
+    intervalMs: config.reportScheduler.intervalMs,
+  });
+  const app = createApp({ config, db: pool, logger, emailSender, onReportQueued: () => scheduler.nudge() });
+  if (config.reportScheduler.enabled) scheduler.start();
+  logger.info({ emailProvider: emailSender.provider, scheduler: config.reportScheduler.enabled }, 'Monthly report scheduler configured');
 
   const server = app.listen(config.port, () => {
     logger.info({ port: config.port, env: config.nodeEnv }, 'Shop-Books API listening');
@@ -31,6 +45,7 @@ function main(): void {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'Shutting down');
+    scheduler.stop();
     const forceTimer = setTimeout(() => {
       logger.error('Graceful shutdown timed out; forcing exit');
       process.exit(1);

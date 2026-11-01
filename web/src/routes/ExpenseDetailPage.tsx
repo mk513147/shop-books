@@ -8,6 +8,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ReasonDialog } from '@/components/ui/reason-dialog';
 import { AuditHistory } from '@/features/audit/AuditHistory';
+import { ExpenseDocuments } from '@/features/documents/ExpenseDocuments';
 import {
   PAYMENT_MODE_LABELS,
   useExpense,
@@ -26,7 +27,7 @@ const FIELD_LABELS: Record<string, string> = {
   categoryName: 'Category',
   description: 'Description',
   amount: 'Amount',
-  amountPaid: 'Amount paid',
+  amountPaid: 'Amount paid at purchase',
   paymentMode: 'Payment mode',
   invoiceReference: 'Invoice ref.',
   status: 'Status',
@@ -124,16 +125,22 @@ export function ExpenseDetailPage() {
             </div>
             <Badge tone={voided ? 'danger' : 'accent'}>{voided ? 'Voided' : 'Active'}</Badge>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Figure label="Paid" value={formatInr(e.amountPaid)} />
+          <div className={cn('grid gap-2', e.allocatedPayments !== '0.00' ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2')}>
+            <Figure label="Paid at purchase" value={formatInr(e.amountPaid)} />
+            {e.allocatedPayments !== '0.00' && <Figure label="Paid by supplier payments" value={formatInr(e.allocatedPayments)} />}
             <Figure label="Outstanding" value={formatInr(e.outstanding)} tone={e.outstanding !== '0.00' ? 'warning' : undefined} />
           </div>
+          {e.supplier && e.outstanding !== '0.00' && !voided && (
+            <Link to={`/supplier-payments/new?supplierId=${e.supplier.id}`} className="inline-block text-sm text-primary hover:underline">
+              Record a payment to {e.supplier.name}
+            </Link>
+          )}
           <dl className="divide-y border-t">
             <Row label="Date">{formatDate(e.expenseDate)}</Row>
             <Row label="Supplier">
               {e.supplier ? (
                 <>
-                  <Link to={`/expenses?supplierId=${e.supplier.id}`} className="text-primary hover:underline">
+                  <Link to={`/suppliers/${e.supplier.id}`} className="text-primary hover:underline">
                     {e.supplier.name}
                   </Link>
                   {!e.supplier.isActive && <span className="text-muted-foreground"> (archived)</span>}
@@ -156,6 +163,15 @@ export function ExpenseDetailPage() {
               {e.updatedBy.name} · {formatDateTime(e.updatedAt)}
             </Row>
           </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Bill photos and documents</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ExpenseDocuments expenseId={e.id} voided={voided} />
         </CardContent>
       </Card>
 

@@ -1,5 +1,7 @@
+import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { databaseNameProblem } from '../database/isolation.js';
+import { REPO_ROOT } from './loadEnvFiles.js';
 
 /**
  * Thrown when configuration is missing or invalid. Messages name the offending variables
@@ -28,6 +30,23 @@ export interface AppConfig extends DatabaseConfig {
   appVersion: string | undefined;
   /** Server-side secret used to derive per-session CSRF tokens (HMAC). */
   sessionSecret: string;
+  /** Private storage for bill photographs/documents (docs/architecture.md → Bill documents). */
+  documentStorage: {
+    driver: 'local';
+    /** Absolute directory outside any web root; never served statically. */
+    directory: string;
+  };
+  /** Shop name printed on reports, Excel files and e-mails. */
+  shopName: string;
+  /** Outgoing e-mail (monthly reports). See docs/architecture.md → Monthly e-mail reports. */
+  email: {
+    /** none = not configured (deliveries fail honestly); outbox = write to a local folder (development only). */
+    provider: 'none' | 'outbox';
+    from: string;
+    outboxDirectory: string;
+  };
+  /** In-process scheduler for monthly reports (state lives in PostgreSQL). */
+  reportScheduler: { enabled: boolean; intervalMs: number };
   cookie: {
     /** `__Host-` prefixed in production (requires Secure, Path=/ and no Domain). */
     name: string;
@@ -72,6 +91,14 @@ const appSchema = z.object({
   APP_VERSION: z.string().trim().optional(),
   SESSION_SECRET: z.string({ error: 'SESSION_SECRET is required' }).min(1, 'SESSION_SECRET is required'),
   SESSION_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
+  DOCUMENT_STORAGE_DRIVER: z.enum(['local'], 'only "local" is implemented so far').default('local'),
+  DOCUMENT_STORAGE_DIR: z.string().trim().optional(),
+  SHOP_NAME: z.string().trim().min(1).max(100).default('Shop-Books'),
+  EMAIL_PROVIDER: z.enum(['none', 'outbox'], 'use "none" or "outbox" (no other provider is implemented yet)').optional(),
+  EMAIL_FROM: z.string().trim().max(200).optional(),
+  EMAIL_OUTBOX_DIR: z.string().trim().optional(),
+  REPORT_SCHEDULER_ENABLED: booleanString.optional(),
+  REPORT_SCHEDULER_INTERVAL_SECONDS: z.coerce.number().int().min(15).max(3600).default(60),
 });
 
 const databaseSchema = z.object(databaseShape);
@@ -153,6 +180,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     issues.push('SESSION_COOKIE_SAMESITE: "none" is only allowed in production (it requires Secure cookies)');
   }
 
+  // Production must name the storage directory explicitly (and it must be absolute); development
+  // and tests default to <repo>/storage/documents[-test], which is gitignored and never served.
+  const storageDir = data.DOCUMENT_STORAGE_DIR
+    ? data.DOCUMENT_STORAGE_DIR
+    : data.NODE_ENV === 'production'
+      ? null
+      : join(REPO_ROOT, 'storage', data.NODE_ENV === 'test' ? 'documents-test' : 'documents');
+  if (storageDir === null) issues.push('DOCUMENT_STORAGE_DIR: required in production');
+  else if (!isAbsolute(storageDir)) issues.push('DOCUMENT_STORAGE_DIR: must be an absolute path');
+
+  const emailProvider = data.EMAIL_PROVIDER ?? (data.NODE_ENV === 'production' ? 'none' : 'outbox');
+  if (emailProvider === 'outbox' && data.NODE_ENV === 'production') {
+    issues.push('EMAIL_PROVIDER: "outbox" only writes files locally and is not allowed in production; use "none" until a real provider is configured');
+  }
+  const emailFrom = data.EMAIL_FROM || `${data.SHOP_NAME} <reports@localhost>`;
+  const fromAddress = (/<([^<>]+)>\s*$/.exec(emailFrom)?.[1] ?? emailFrom).trim();
+  if (!/^[^@\s<>]+@[^@\s<>]+$/.test(fromAddress)) {
+    issues.push('EMAIL_FROM: must be an address like "Shop-Books <reports@example.com>"');
+  }
+  const outboxDir = data.EMAIL_OUTBOX_DIR || join(REPO_ROOT, 'storage', data.NODE_ENV === 'test' ? 'email-outbox-test' : 'email-outbox');
+  if (!isAbsolute(outboxDir)) issues.push('EMAIL_OUTBOX_DIR: must be an absolute path');
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   return {
@@ -166,6 +215,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trustProxy: data.TRUST_PROXY,
     appVersion: data.APP_VERSION || undefined,
     sessionSecret: secret,
+    documentStorage: { driver: data.DOCUMENT_STORAGE_DRIVER, directory: storageDir! },
+    shopName: data.SHOP_NAME,
+    email: { provider: emailProvider, from: emailFrom, outboxDirectory: outboxDir },
+    reportScheduler: {
+      enabled: data.REPORT_SCHEDULER_ENABLED ?? data.NODE_ENV !== 'test',
+      intervalMs: data.REPORT_SCHEDULER_INTERVAL_SECONDS * 1000,
+    },
     cookie: {
       name: secureCookie ? '__Host-sb_session' : 'sb_session',
       secure: secureCookie,

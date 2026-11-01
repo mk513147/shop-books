@@ -1,4 +1,7 @@
 import { Archive, ArchiveRestore, ChevronLeft, ChevronRight, History, MapPin, Pencil, Phone, Plus, Search, Truck } from 'lucide-react';
+import { StatTile } from '@/components/finance/StatTile';
+import { useSuppliersSummary } from '@/features/supplierPayments/payments-api';
+import { formatInr } from '@/lib/money';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
@@ -67,7 +70,7 @@ function SupplierActions({ supplier, open }: { supplier: Supplier; open: (d: Dia
   );
 }
 
-function ArchiveDialog({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
+export function ArchiveDialog({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
   const update = useUpdateSupplier();
   const archiving = supplier?.isActive ?? true;
   const close = () => {
@@ -112,7 +115,7 @@ function ArchiveDialog({ supplier, onClose }: { supplier: Supplier | null; onClo
   );
 }
 
-function HistoryDialog({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
+export function HistoryDialog({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
   const history = useSupplierHistory(supplier?.id ?? '', supplier !== null);
   return (
     <Dialog open={supplier !== null} title={`History: ${supplier?.name ?? ''}`} onClose={onClose} size="md">
@@ -128,7 +131,9 @@ export function SuppliersPage() {
   const page = Math.max(1, Number(params.get('page')) || 1);
   const [search, setSearch] = useState(q);
   const [dialog, setDialog] = useState<Dialogs>(null);
-  const list = useSuppliers({ q, status, page, pageSize: 25 });
+  const balance = params.get('balance') === 'payable' ? 'payable' : 'all';
+  const list = useSuppliers({ q, status, page, pageSize: 25, balance });
+  const summary = useSuppliersSummary();
 
   function update(next: Record<string, string>) {
     const merged = new URLSearchParams(params);
@@ -150,6 +155,27 @@ export function SuppliersPage() {
           </Button>
         }
       />
+
+      {summary.data && (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <StatTile label="Total payable" amount={summary.data.totalPayable} tone={summary.data.totalPayable !== '0.00' ? 'warning' : 'muted'} />
+          <StatTile label="Total payments" amount={summary.data.totalPayments} />
+          <StatTile label="Unallocated payments" amount={summary.data.totalUnallocated} tone={summary.data.totalUnallocated !== '0.00' ? 'accent' : 'muted'} />
+          <button
+            type="button"
+            onClick={() => update({ balance: balance === 'payable' ? '' : 'payable', page: '' })}
+            className={cn(
+              'min-w-0 rounded-xl border bg-card p-3 text-left shadow-card hover:bg-accent md:p-4',
+              balance === 'payable' && 'border-primary ring-1 ring-primary',
+            )}
+            aria-pressed={balance === 'payable'}
+          >
+            <p className="text-xs text-muted-foreground">Suppliers with dues</p>
+            <p className="figure mt-0.5 text-lg font-semibold md:text-xl">{summary.data.suppliersWithPayable}</p>
+            <p className="mt-0.5 text-xs text-primary">{balance === 'payable' ? 'Showing only these' : 'Show only these'}</p>
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 md:flex-row">
         <form
@@ -212,12 +238,17 @@ export function SuppliersPage() {
               <li key={s.id} className={cn('space-y-3 rounded-xl border bg-card p-4 shadow-card', !s.isActive && 'opacity-80')}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-medium break-words">{s.name}</p>
+                    <Link to={`/suppliers/${s.id}`} className="font-medium break-words hover:underline">
+                      {s.name}
+                    </Link>
                     <Link to={`/expenses?supplierId=${s.id}&status=all`} className="text-xs text-primary">
                       {s.expenseCount} expense{s.expenseCount === 1 ? '' : 's'}
                     </Link>
                   </div>
-                  {!s.isActive && <Badge>Archived</Badge>}
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    {s.payable !== '0.00' && <span className="figure text-sm font-semibold text-warning">{formatInr(s.payable)}</span>}
+                    {!s.isActive && <Badge>Archived</Badge>}
+                  </div>
                 </div>
                 {(s.phone || s.address) && (
                   <div className="space-y-1 text-sm text-muted-foreground">
@@ -250,6 +281,7 @@ export function SuppliersPage() {
                   <th className="px-4 py-2.5 font-medium">Contact</th>
                   <th className="px-4 py-2.5 font-medium">Usual categories</th>
                   <th className="px-4 py-2.5 text-right font-medium">Expenses</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Payable</th>
                   <th className="px-4 py-2.5 font-medium">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -259,7 +291,9 @@ export function SuppliersPage() {
                 {list.data.items.map((s) => (
                   <tr key={s.id} className={cn('align-top', !s.isActive && 'text-muted-foreground')}>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-foreground">{s.name}</p>
+                      <Link to={`/suppliers/${s.id}`} className="font-medium text-foreground hover:underline">
+                        {s.name}
+                      </Link>
                       {!s.isActive && <Badge className="mt-1">Archived</Badge>}
                       {s.notes && <p className="mt-0.5 line-clamp-2 max-w-xs text-xs text-muted-foreground">{s.notes}</p>}
                     </td>
@@ -274,6 +308,10 @@ export function SuppliersPage() {
                       <Link to={`/expenses?supplierId=${s.id}&status=all`} className="text-primary hover:underline">
                         {s.expenseCount}
                       </Link>
+                    </td>
+                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', s.payable !== '0.00' && 'font-medium text-warning')}>
+                      {formatInr(s.payable)}
+                      {s.unallocated !== '0.00' && <span className="block text-xs text-muted-foreground">{formatInr(s.unallocated)} unallocated</span>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">

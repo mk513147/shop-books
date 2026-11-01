@@ -28,3 +28,10 @@ export function formatInr(amount: string): string {
   const grouped = rest ? `${rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${lastThree}` : lastThree;
   return `${sign}₹${grouped}.${fraction.padEnd(2, '0')}`;
 }
+
+/** "1250.50" -> 125050n -> "1250.50": paise back to a decimal string (display helpers only). */
+export function fromPaise(paise: bigint): string {
+  const sign = paise < 0n ? '-' : '';
+  const abs = paise < 0n ? -paise : paise;
+  return `${sign}${abs / 100n}.${(abs % 100n).toString().padStart(2, '0')}`;
+}

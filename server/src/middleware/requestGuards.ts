@@ -34,11 +34,22 @@ export function verifyOrigin(allowedOrigins: string[]): RequestHandler {
   };
 }
 
+/**
+ * The ONLY requests allowed to carry a non-JSON body: raw file uploads (POST
+ * /expenses/:id/documents) as application/octet-stream. That type is not a "simple" CORS content
+ * type, so a cross-site page cannot send it without a preflight; Origin and CSRF checks still apply.
+ */
+const BINARY_UPLOAD_PATH = /^\/expenses\/[^/]+\/documents\/?$/;
+
+export function isBinaryUpload(req: Request, type: string): boolean {
+  return req.method === 'POST' && type === 'application/octet-stream' && BINARY_UPLOAD_PATH.test(req.path);
+}
+
 /** State-changing API requests must be JSON (blocks HTML-form and other simple cross-site posts). */
 export const requireJson: RequestHandler = (req, _res, next) => {
   if (!isStateChanging(req)) return next();
   const type = (req.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-  if (type !== 'application/json') {
+  if (type !== 'application/json' && !isBinaryUpload(req, type)) {
     return next(new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Requests must use Content-Type: application/json'));
   }
   next();
