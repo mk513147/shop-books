@@ -240,6 +240,26 @@ describe.skipIf(!pool)('monthly e-mail reports (critical paths)', () => {
       }
     });
 
+    it('never sends to a recipient removed (or re-addressed) after the month was queued', async () => {
+      const [y, m] = previousMonth.split('-').map(Number) as [number, number];
+      expect((await send(owner, 'post', '/monthly-reports/jobs', { year: y, month: m })).status).toBe(201);
+      const recipients = (await owner.agent.get('/api/v1/monthly-reports/recipients')).body.recipients as { id: string; email: string; version: number; isActive: boolean }[];
+      const accountant = recipients.find((r) => r.email === 'accountant@example.com')!;
+      const ownerR = recipients.find((r) => r.email === 'owner@example.com')!;
+      await send(owner, 'patch', `/monthly-reports/recipients/${accountant.id}`, { isActive: false, version: accountant.version });
+      await send(owner, 'patch', `/monthly-reports/recipients/${ownerR.id}`, { email: 'new-owner@example.com', version: ownerR.version });
+      const tick = await scheduler(recording, () => new Date()).tick();
+      expect(tick.processed.map((p) => p.status)).toEqual(['failed', 'failed']);
+      expect(recording.sent).toHaveLength(0);
+      const rows = await deliveries();
+      expect(rows.every((d) => /removed or their address changed/.test(d.last_error))).toBe(true);
+      expect((await send(owner, 'post', `/monthly-reports/deliveries/${rows[0].id}/retry`, {})).body.error.code).toBe('RECIPIENT_REMOVED');
+      // Restore the recipients for any later test.
+      const now = (await owner.agent.get('/api/v1/monthly-reports/recipients')).body.recipients as { id: string; version: number }[];
+      await send(owner, 'patch', `/monthly-reports/recipients/${accountant.id}`, { isActive: true, version: now.find((r) => r.id === accountant.id)!.version });
+      await send(owner, 'patch', `/monthly-reports/recipients/${ownerR.id}`, { email: 'owner@example.com', version: now.find((r) => r.id === ownerR.id)!.version });
+    });
+
     it('preview renders the same e-mail for the owner', async () => {
       const p = (await owner.agent.get(`/api/v1/monthly-reports/preview?year=${previousMonth.slice(0, 4)}&month=${Number(previousMonth.slice(5))}`)).body.preview;
       expect(p.subject).toContain('monthly financial summary');

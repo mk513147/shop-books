@@ -1,8 +1,13 @@
-import { QueryCache, QueryClient } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/lib/api-client';
 
 export function createQueryClient(): QueryClient {
-  return new QueryClient({
+  const client: QueryClient = new QueryClient({
+    // Every financial write can change report figures: dashboards and reports (cached for 30 s)
+    // are invalidated after ANY mutation, so they never show totals from before the change.
+    mutationCache: new MutationCache({
+      onSettled: () => void client.invalidateQueries({ queryKey: ['reports'] }),
+    }),
     queryCache: new QueryCache({
       // Global error reporting hook. Logs only non-sensitive identifiers.
       onError: (error) => {
@@ -24,4 +29,5 @@ export function createQueryClient(): QueryClient {
       },
     },
   });
+  return client;
 }

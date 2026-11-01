@@ -25,6 +25,9 @@ function DocumentThumb({ doc }: { doc: ExpenseDocument }) {
   return (
     <img
       src={documentContentUrl(doc)}
+      // CORS-mode request with the session cookie: works when the API is on another origin (staging
+      // tunnel) while the server keeps Cross-Origin-Resource-Policy: same-origin for no-cors embeds.
+      crossOrigin="use-credentials"
       alt={`Preview of ${doc.fileName}`}
       loading="lazy"
       decoding="async"

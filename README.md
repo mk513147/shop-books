@@ -94,7 +94,8 @@ npm run dev:web           # terminal 2 -> http://localhost:5173
 - [Development setup and troubleshooting](docs/development-setup.md)
 - [Testing plan](docs/testing-plan.md): tests deferred to the final test phase
 - [Maintenance](docs/maintenance.md): owner recovery, data-retention policy, document backup and reconciliation
-- [Project status](docs/project-status.md): implemented features, verification and open items per stage
+- [Project status](docs/project-status.md): implemented features, verification, open items and the production-readiness checklist
+- [Staging deployment](docs/staging-deployment.md): frontend on Vercel, backend on a Windows PC through Cloudflare Tunnel (smartphone/PWA testing)
 
 ## Roadmap
 

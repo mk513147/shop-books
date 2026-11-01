@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig, loadDatabaseConfig } from '../src/config/env.js';
+import { loadEnvFiles } from '../src/config/loadEnvFiles.js';
 
 const valid = {
   NODE_ENV: 'development',
@@ -19,6 +20,23 @@ function messageOf(env: NodeJS.ProcessEnv): string {
 }
 
 describe('environment validation', () => {
+  it('staging behind HTTPS: Secure + SameSite=None allowed outside production; bind address; production stays Secure', () => {
+    const staging = loadConfig({ ...valid, COOKIE_SECURE: 'true', SESSION_COOKIE_SAMESITE: 'none', HOST: '127.0.0.1' });
+    expect(staging.cookie).toEqual({ name: '__Host-sb_session', secure: true, sameSite: 'none' });
+    expect(staging.host).toBe('127.0.0.1');
+    expect(loadConfig(valid).host).toBeUndefined();
+    expect(messageOf({ ...valid, SESSION_COOKIE_SAMESITE: 'none' })).toContain('requires Secure cookies');
+    const prod = { ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com', DOCUMENT_STORAGE_DIR: '/srv/docs' };
+    expect(messageOf({ ...prod, COOKIE_SECURE: 'false' })).toContain('must be Secure in production');
+    expect(loadConfig(prod).cookie.secure).toBe(true);
+  });
+
+  it('SHOP_BOOKS_ENV_FILE only accepts an existing .env.<name> file in the repository root', () => {
+    expect(() => loadEnvFiles({ SHOP_BOOKS_ENV_FILE: '../secrets.env' })).toThrow(/must be a/);
+    expect(() => loadEnvFiles({ SHOP_BOOKS_ENV_FILE: '.env.does-not-exist' })).toThrow(/not found/);
+    expect(() => loadEnvFiles({ SHOP_BOOKS_ENV_FILE: 'x.env.staging' })).toThrow(/must be a/);
+  });
+
   it('document storage: defaults outside production, explicit absolute directory required in production', () => {
     expect(loadConfig(valid).documentStorage.directory).toMatch(/storage[\\/]documents$/);
     const prod = { ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com' };

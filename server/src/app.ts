@@ -61,6 +61,8 @@ export function createApp({
       origin: (origin, callback) => callback(null, !origin || config.frontendOrigins.includes(origin)),
       credentials: true,
       methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      // Readable by the web app when it is served from another origin (download names, retry hints).
+      exposedHeaders: ['Content-Disposition', 'Retry-After', 'Idempotent-Replayed'],
       maxAge: 600,
     }),
   );

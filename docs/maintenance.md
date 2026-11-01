@@ -106,3 +106,14 @@ DELETE FROM report_delivery_attempts WHERE id IN (
 ## Excel exports: limits
 
 At most 20,000 rows per export (larger requests are refused with a message to narrow the filters); ledger exports include at most 2,000 entries (as the ledger screens). Exports are built in memory and never stored on the server.
+
+## Dependency advisories (reviewed in Stage 6)
+
+`npm audit --omit=dev` (server) reports 9 *moderate* advisories, all inside ExcelJS 4.4.0's own dependencies (ExcelJS 4.4.0 is the latest release). They come from two root issues:
+
+| Advisory | Path | Reachable here? |
+|---|---|---|
+| `minimatch` < 11.0.1 — ReDoS via crafted glob patterns (GHSA-g3hv-75wg-m249); reported again for `glob`, `archiver-utils`, `readdir-glob`, `zip-stream`, `archiver`, `rimraf` | `exceljs → archiver → archiver-utils/readdir-glob/zip-stream → glob → minimatch`, `exceljs → unzipper → fstream → rimraf → glob` | **No.** Only exploitable with an attacker-controlled glob *pattern*. ExcelJS adds in-memory entries to the zip (no globbing), and the server never extracts uploaded workbooks or passes user input as a pattern. |
+| `uuid` < 11.1.1 — missing buffer bounds check in v3/v5/v6 when a `buf` is passed (GHSA-w5hq-g745-h8pq) | `exceljs → uuid@8` | **No.** ExcelJS only calls `v4()` without a buffer. |
+
+npm's only offered fix is `npm audit fix --force`, which would **downgrade** ExcelJS to 3.4.0 (older, unmaintained) — not applied. Forcing newer transitive versions with `overrides` (e.g. minimatch 11 inside glob 7) would break their APIs and is not justified for unreachable code. Action: re-run the audit when ExcelJS publishes 4.4.1 (currently a prerelease) and upgrade then; re-assess if the server ever starts reading user-supplied workbooks.

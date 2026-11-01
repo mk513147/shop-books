@@ -129,6 +129,14 @@ export async function retryDelivery(db: Database, id: string, actor: Actor): Pro
     if (row.status !== 'failed') {
       throw new AppError(409, 'DELIVERY_NOT_FAILED', 'Only failed deliveries can be retried.');
     }
+    const recipient = await client.query(
+      `SELECT 1 FROM report_deliveries d JOIN report_recipients r ON r.id = d.recipient_id
+        WHERE d.id = $1 AND r.is_active AND r.email = d.recipient_email`,
+      [id],
+    );
+    if (recipient.rowCount === 0) {
+      throw new AppError(409, 'RECIPIENT_REMOVED', 'This recipient was removed or their address changed; the report will not be sent to it.');
+    }
     await client.query(`UPDATE report_deliveries SET status = 'retry_scheduled', next_attempt_at = now() WHERE id = $1`, [id]);
     await recordFinancialAudit(client, {
       entityType: 'report_delivery',

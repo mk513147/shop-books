@@ -38,7 +38,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
 `FRONTEND_URL=http://localhost:5173` is correct for development (add `,http://localhost:4173` if you also use `npm --prefix web run preview`). Leave `SESSION_COOKIE_SAMESITE=lax`. Real environment variables override file values.
 
-The web app needs no configuration in development (Vite proxies `/api` to `localhost:3000`). Optional overrides: `web/.env.example`.
+The web app needs no configuration in development (Vite proxies `/api` to `localhost:3000`; leave `VITE_API_BASE_URL` empty). Optional overrides: `web/.env.example`. For a deployed frontend talking to an API on another origin see [staging-deployment.md](staging-deployment.md) (`VITE_API_BASE_URL`, `.env.staging`, `SHOP_BOOKS_ENV_FILE`).
 
 ## 3. Create and migrate the database
 

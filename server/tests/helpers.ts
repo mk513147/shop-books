@@ -12,6 +12,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     databaseUrl: 'postgresql://unused:unused@localhost:5432/unused_test',
     databasePoolMax: 2,
     port: 0,
+    host: undefined,
     frontendOrigins: ['http://localhost:5173'],
     logLevel: 'silent',
     trustProxy: false,

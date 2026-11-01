@@ -122,6 +122,10 @@ export class ReportScheduler {
       for (let i = 0; i < MAX_PER_TICK; i++) {
         const claimed = await this.claim(this.now());
         if (!claimed) break;
+        if ('skipped' in claimed) {
+          result.processed.push({ id: claimed.id, status: 'failed' });
+          continue;
+        }
         result.processed.push({ id: claimed.id, status: await this.deliver(claimed, cache) });
       }
       return result;
@@ -181,12 +185,19 @@ export class ReportScheduler {
     });
   }
 
-  private async claim(now: Date): Promise<ClaimedDelivery | null> {
+  /**
+   * Claims the next due delivery. A delivery whose recipient was removed, or whose address was
+   * changed, after the month's job was created is NOT sent (the owner no longer wants financial
+   * data going there): it is marked failed with an explanation instead.
+   */
+  private async claim(now: Date): Promise<ClaimedDelivery | { id: string; skipped: true } | null> {
     return withTransaction(this.deps.db, async (client) => {
       const row = (
-        await client.query<ClaimedDelivery>(
-          `SELECT d.id, d.job_id, d.recipient_email, d.attempt_count, j.period_start::text AS period_start, j.include_excel
+        await client.query<ClaimedDelivery & { recipient_ok: boolean }>(
+          `SELECT d.id, d.job_id, d.recipient_email, d.attempt_count, j.period_start::text AS period_start, j.include_excel,
+                  COALESCE(r.is_active AND r.email = d.recipient_email, false) AS recipient_ok
              FROM report_deliveries d JOIN report_jobs j ON j.id = d.job_id
+             LEFT JOIN report_recipients r ON r.id = d.recipient_id
             WHERE d.status IN ('pending', 'retry_scheduled') AND d.next_attempt_at <= $1
             ORDER BY d.next_attempt_at, d.id
             LIMIT 1
@@ -195,12 +206,26 @@ export class ReportScheduler {
         )
       ).rows[0];
       if (!row) return null;
+      if (!row.recipient_ok) {
+        const message = 'Not sent: this recipient was removed or their address changed after the report was queued.';
+        await client.query(
+          `UPDATE report_deliveries SET status = 'failed', last_error = $2, last_attempt_at = $3, attempt_count = attempt_count + 1 WHERE id = $1`,
+          [row.id, message, now],
+        );
+        await client.query(
+          `INSERT INTO report_delivery_attempts (delivery_id, attempt_number, started_at, finished_at, outcome, error)
+           VALUES ($1, $2, $3, $3, 'failed', $4)`,
+          [row.id, row.attempt_count + 1, now, message],
+        );
+        return { id: row.id, skipped: true as const };
+      }
       await client.query(
         `UPDATE report_deliveries SET status = 'processing', locked_at = $2, last_attempt_at = $2, attempt_count = attempt_count + 1
           WHERE id = $1`,
         [row.id, now],
       );
-      return { ...row, attempt_count: row.attempt_count + 1 };
+      const { recipient_ok: _ok, ...claimed } = row;
+      return { ...claimed, attempt_count: row.attempt_count + 1 };
     });
   }
 

@@ -36,9 +36,8 @@ function main(): void {
   if (config.reportScheduler.enabled) scheduler.start();
   logger.info({ emailProvider: emailSender.provider, scheduler: config.reportScheduler.enabled }, 'Monthly report scheduler configured');
 
-  const server = app.listen(config.port, () => {
-    logger.info({ port: config.port, env: config.nodeEnv }, 'Shop-Books API listening');
-  });
+  const onListening = () => logger.info({ port: config.port, host: config.host ?? 'all interfaces', env: config.nodeEnv }, 'Shop-Books API listening');
+  const server = config.host ? app.listen(config.port, config.host, onListening) : app.listen(config.port, onListening);
 
   let shuttingDown = false;
   const shutdown = (signal: string, exitCode = 0): void => {

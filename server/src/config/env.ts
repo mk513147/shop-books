@@ -24,6 +24,8 @@ export interface DatabaseConfig {
 
 export interface AppConfig extends DatabaseConfig {
   port: number;
+  /** Interface to bind (e.g. 127.0.0.1 behind a local tunnel); undefined = all interfaces. */
+  host: string | undefined;
   frontendOrigins: string[];
   logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
   trustProxy: boolean;
@@ -85,6 +87,9 @@ const databaseShape = {
 const appSchema = z.object({
   ...databaseShape,
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  HOST: z.string().trim().min(1).max(255).optional(),
+  /** Secure (HTTPS-only) session cookie. Default: on in production, off elsewhere. */
+  COOKIE_SECURE: booleanString.optional(),
   FRONTEND_URL: z.string({ error: 'FRONTEND_URL is required' }).min(1, 'FRONTEND_URL is required'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional(),
   TRUST_PROXY: booleanString.default(false),
@@ -175,9 +180,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     issues.push('SESSION_SECRET: looks like a placeholder; generate a random value');
   }
 
-  const secureCookie = data.NODE_ENV === 'production';
+  const secureCookie = data.COOKIE_SECURE ?? data.NODE_ENV === 'production';
+  if (data.NODE_ENV === 'production' && !secureCookie) {
+    issues.push('COOKIE_SECURE: session cookies must be Secure in production');
+  }
   if (data.SESSION_COOKIE_SAMESITE === 'none' && !secureCookie) {
-    issues.push('SESSION_COOKIE_SAMESITE: "none" is only allowed in production (it requires Secure cookies)');
+    issues.push('SESSION_COOKIE_SAMESITE: "none" requires Secure cookies (production, or COOKIE_SECURE=true behind HTTPS)');
   }
 
   // Production must name the storage directory explicitly (and it must be absolute); development
@@ -209,6 +217,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     databaseUrl: data.DATABASE_URL,
     databasePoolMax: data.DATABASE_POOL_MAX,
     port: data.PORT,
+    host: data.HOST,
     frontendOrigins,
     // Keep test output quiet unless a level is explicitly requested.
     logLevel: data.LOG_LEVEL ?? (data.NODE_ENV === 'test' ? 'silent' : 'info'),

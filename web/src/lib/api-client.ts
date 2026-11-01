@@ -1,3 +1,5 @@
+import { parseApiBaseUrl } from './api-base-url';
+
 export interface ApiErrorDetail {
   path: string;
   message: string;
@@ -17,8 +19,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The ONE place the API location is decided (VITE_API_BASE_URL; see lib/api-base-url.ts).
+ * Every request, document URL and export goes through it.
+ */
 export function apiBaseUrl(): string {
-  return (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/+$/, '');
+  const parsed = parseApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.url;
 }
 
 // --- Session plumbing --------------------------------------------------------------------------
