@@ -16,7 +16,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     host: undefined,
     frontendOrigins: ['http://localhost:5173'],
     logLevel: 'silent',
-    trustProxy: false,
+    trustProxy: 0,
     appVersion: '1.2.3-test',
     sessionSecret: 'test-secret-'.padEnd(48, 'x'),
     documentStorage: { driver: 'local', directory: path.join(tmpdir(), 'shop-books-test-documents') },

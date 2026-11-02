@@ -1,0 +1,38 @@
+# Render Blueprint for the Shop-Books API (see docs/staging-deployment.md → "Hosted deployment").
+# Secrets are never stored here: every `sync: false` value is entered in the Render dashboard.
+services:
+  - type: web
+    name: shop-books-api
+    runtime: node
+    rootDir: server
+    # NODE_ENV=production makes npm skip devDependencies; the build needs TypeScript, so include them
+    # for the build and prune them afterwards so the running service only has runtime dependencies.
+    buildCommand: npm ci --include=dev && npm run build && npm prune --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL # Neon DIRECT (non "-pooler") connection string
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: FRONTEND_URL # the exact Vercel production origin, e.g. https://shop-books.vercel.app
+        sync: false
+      - key: SESSION_COOKIE_SAMESITE # same-site through the Vercel /api proxy
+        value: lax
+      - key: TRUST_PROXY # Vercel rewrite + Render proxy
+        value: "2"
+      - key: DOCUMENT_STORAGE_DRIVER
+        value: agent
+      - key: DOCUMENT_STORAGE_AGENT_URL # the Cloudflare Tunnel hostname of the desktop storage agent
+        sync: false
+      - key: DOCUMENT_STORAGE_AGENT_SECRET
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: none
+      - key: REPORT_SCHEDULER_ENABLED
+        value: "false"
+      - key: SHOP_NAME
+        sync: false

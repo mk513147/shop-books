@@ -11,6 +11,8 @@ export interface ReconcileReport {
   orphanFiles: StoredObject[];
   /** Entries that are not valid storage keys (e.g. leftover "*.part" temp files). Safe to delete. */
   strayEntries: StoredObject[];
+  /** Documents still waiting in the upload queue (storage was offline); delivered automatically. */
+  pendingUploads: { documentId: string; expenseId: string; attempts: number; lastError: string | null }[];
   /** Metadata rows whose file is missing: DATA LOSS, restore the file from backup. */
   missingFiles: { documentId: string; expenseId: string; storageKey: string; status: string }[];
   /** With verification: stored bytes whose size or SHA-256 differs from the metadata. */
@@ -40,12 +42,20 @@ export async function reconcileDocuments(db: Queryable, storage: DocumentStorage
     )
   ).rows;
   const known = new Set(rows.map((r) => r.storage_key));
+  const queued = new Map(
+    (
+      await db.query<{ document_id: string; attempts: number; last_error: string | null }>(
+        `SELECT document_id, attempts, last_error FROM document_upload_queue`,
+      )
+    ).rows.map((q) => [q.document_id, q]),
+  );
 
   const report: ReconcileReport = {
     documents: rows.length,
     storedObjects: 0,
     orphanFiles: [],
     strayEntries: [],
+    pendingUploads: [],
     missingFiles: [],
     checksumMismatches: [],
     verified: verify,
@@ -58,6 +68,12 @@ export async function reconcileDocuments(db: Queryable, storage: DocumentStorage
   }
 
   for (const row of rows) {
+    const pending = queued.get(row.id);
+    if (pending) {
+      // Not in storage yet by design; the queue holds the verified bytes (checked by a DB trigger).
+      report.pendingUploads.push({ documentId: row.id, expenseId: row.expense_id, attempts: pending.attempts, lastError: pending.last_error });
+      continue;
+    }
     if (!(await storage.exists(row.storage_key))) {
       report.missingFiles.push({ documentId: row.id, expenseId: row.expense_id, storageKey: row.storage_key, status: row.status });
       continue;

@@ -1,5 +1,5 @@
 /**
- * Upgrade safety of migrations 0005–0010 on a database that already holds Stage 3A data (not just
+ * Upgrade safety of migrations 0005–0011 on a database that already holds Stage 3A data (not just
  * an empty one). Runs in a throw-away schema of the test database, which is dropped afterwards.
  */
 import { randomBytes } from 'node:crypto';
@@ -14,7 +14,7 @@ import { connectTestDatabase } from './helpers.js';
 const pool = await connectTestDatabase();
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../src/database/migrations');
 
-describe.skipIf(!pool)('migrations 0005–0010 on an existing 0004 database', () => {
+describe.skipIf(!pool)('migrations 0005–0011 on an existing 0004 database', () => {
   const db = pool!;
   const schema = `up_${randomBytes(4).toString('hex')}`;
   let schemaPool: pg.Pool;
@@ -81,7 +81,7 @@ describe.skipIf(!pool)('migrations 0005–0010 on an existing 0004 database', ()
     const before = await snapshot();
 
     const applied = await runMigrations(schemaPool, MIGRATIONS_DIR);
-    expect(applied.applied).toEqual(['0005', '0006', '0007', '0008', '0009', '0010']);
+    expect(applied.applied).toEqual(['0005', '0006', '0007', '0008', '0009', '0010', '0011']);
     expect(await snapshot()).toEqual(before);
 
     // 0010: every expense that was paid at purchase gets exactly one matching payment allocation;

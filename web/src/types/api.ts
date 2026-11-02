@@ -151,6 +151,8 @@ export interface ExpenseDocument {
   removedAt: string | null;
   removedBy: PersonRef | null;
   removeReason: string | null;
+  /** Saved, but still waiting to reach the desktop document storage (it was offline). */
+  pendingDelivery: boolean;
 }
 
 export interface ExpenseInput {

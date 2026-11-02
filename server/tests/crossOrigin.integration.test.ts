@@ -33,7 +33,7 @@ describe.skipIf(!pool)('cross-origin staging arrangement (Vercel web + tunnel AP
     app = createApp({
       config: testConfig({
         frontendOrigins: [WEB, 'http://localhost:5173'],
-        trustProxy: true,
+        trustProxy: 1,
         cookie: { name: '__Host-sb_session', secure: true, sameSite: 'none' },
       }),
       db,

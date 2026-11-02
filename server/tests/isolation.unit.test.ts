@@ -47,6 +47,18 @@ describe('automated tests: only the local designated test database (URL check)',
     expect(testDatabaseUrlProblem(url('localhost/shop_books_test?sslmode=disable&application_name=t'))).toBeNull();
   });
 
+  it('accepts the harmless parameters of a Neon URL; still rejects every redirecting one next to them', () => {
+    const neon = 'postgresql://u:p@ep-cool-name-123456.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+    expect(connectionTarget(neon)).toMatchObject({ problem: null, target: { host: 'ep-cool-name-123456.eu-central-1.aws.neon.tech', database: 'neondb', local: false } });
+    for (const extra of ['host=evil.example.com', 'hostaddr=10.0.0.1', 'port=6543', 'user=postgres', 'password=x', 'options=-c%20x%3Dy', 'service=prod', 'db=other', 'sslrootcert=x']) {
+      expect(connectionTarget(`${neon}&${extra}`).problem, extra).toMatch(/can redirect the connection/);
+    }
+    // A Neon URL is remote: changing commands still need the exact name.
+    expect(operationProblem('production', neon, 'neondb', ['--yes'])).toMatch(/remote host.*--confirm-database=neondb/);
+    expect(operationProblem('production', neon, 'neondb', ['--yes', '--confirm-database=neondb'])).toBeNull();
+    expect(testDatabaseUrlProblem(url('localhost/shop_books_test?sslmode=require&channel_binding=require'))).toBeNull();
+  });
+
   it('3. rejects a remote hostname', () => {
     expect(testDatabaseUrlProblem(url('db.example.com:5432/shop_books_test'))).toMatch(/not local/);
     expect(testDatabaseUrlProblem(url('192.168.1.10/shop_books_test'))).toMatch(/not local/);

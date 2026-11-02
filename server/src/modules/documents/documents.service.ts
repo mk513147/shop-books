@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import type { Database, Queryable } from '../../database/connection.js';
 import type { Actor } from '../../middleware/auth.js';
 import { AppError, NotFoundError } from '../../utils/errors.js';
@@ -7,7 +7,7 @@ import { recordFinancialAudit, type AuditSnapshot } from '../audit/financialAudi
 import type { Role } from '../auth/sessions.js';
 import { withSessionTransaction } from '../auth/sessionTransaction.js';
 import { MAX_DOCUMENTS_PER_EXPENSE, type DocumentMimeType, type ValidatedUpload } from './documents.validation.js';
-import { newStorageKey, StorageObjectMissing, type DocumentStorage } from './storage.js';
+import { newStorageKey, StorageObjectMissing, StorageUnavailable, type DocumentStorage } from './storage.js';
 
 interface PersonRef {
   id: string;
@@ -29,6 +29,11 @@ export interface ExpenseDocument {
   removedAt: string | null;
   removedBy: PersonRef | null;
   removeReason: string | null;
+  /**
+   * True while the file waits in the upload queue because the document storage (the desktop agent)
+   * was unreachable when it was uploaded. It is safely stored and can be opened meanwhile.
+   */
+  pendingDelivery: boolean;
 }
 
 interface DocumentRow {
@@ -47,11 +52,13 @@ interface DocumentRow {
   uploaded_by_name: string;
   removed_by_id: string | null;
   removed_by_name: string | null;
+  pending_delivery: boolean;
 }
 
 const SELECT_DOCUMENT = `
   SELECT d.id, d.expense_id, d.original_filename, d.storage_key, d.mime_type, d.size_bytes, d.sha256, d.status,
          d.created_at, d.removed_at, d.remove_reason,
+         EXISTS (SELECT 1 FROM document_upload_queue q WHERE q.document_id = d.id) AS pending_delivery,
          uu.id AS uploaded_by_id, uu.name AS uploaded_by_name, ru.id AS removed_by_id, ru.name AS removed_by_name
     FROM expense_documents d
     JOIN users uu ON uu.id = d.uploaded_by
@@ -71,6 +78,7 @@ function toDocument(row: DocumentRow): ExpenseDocument {
     removedAt: row.removed_at?.toISOString() ?? null,
     removedBy: row.removed_by_id ? { id: row.removed_by_id, name: row.removed_by_name ?? '' } : null,
     removeReason: row.remove_reason,
+    pendingDelivery: row.pending_delivery,
   };
 }
 
@@ -154,6 +162,9 @@ export interface UploadResult {
  *
  * Failure handling:
  *  - validation/limits/voided expense are checked before anything is stored;
+ *  - storage unreachable      -> (StorageUnavailable, e.g. the desktop agent is offline) the bytes are
+ *                                queued in document_upload_queue in the SAME transaction as the
+ *                                metadata row, and delivered later (documentQueue.ts): nothing is lost;
  *  - storage write fails      -> nothing was recorded; the error is returned;
  *  - transaction fails        -> the stored file is deleted again (best effort);
  *  - crash between the two    -> an orphan FILE without metadata, which `documents:reconcile`
@@ -176,7 +187,13 @@ export async function uploadDocument(
   if ((await activeCount(db, expenseId)) >= MAX_DOCUMENTS_PER_EXPENSE) throw LIMIT_REACHED();
 
   const key = newStorageKey();
-  await storage.put(key, file.data, file.mimeType);
+  let queued = false;
+  try {
+    await storage.put(key, file.data, file.mimeType);
+  } catch (err) {
+    if (!(err instanceof StorageUnavailable)) throw err;
+    queued = true;
+  }
 
   let result: UploadResult;
   try {
@@ -192,6 +209,9 @@ export async function uploadDocument(
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
         [expenseId, file.fileName, key, file.mimeType, file.sizeBytes, sha256, actor.userId],
       );
+      if (queued) {
+        await client.query(`INSERT INTO document_upload_queue (document_id, content) VALUES ($1, $2)`, [inserted.rows[0]!.id, file.data]);
+      }
       const row = await selectDocument(client, expenseId, inserted.rows[0]!.id);
       await recordFinancialAudit(client, {
         entityType: 'expense',
@@ -204,11 +224,11 @@ export async function uploadDocument(
       return { document: toDocument(row), created: true };
     });
   } catch (err) {
-    await storage.delete(key).catch(() => undefined);
+    if (!queued) await storage.delete(key).catch(() => undefined);
     throw err;
   }
   // A concurrent identical upload won: our copy is not referenced by any row.
-  if (!result.created) await storage.delete(key).catch(() => undefined);
+  if (!result.created && !queued) await storage.delete(key).catch(() => undefined);
   return result;
 }
 
@@ -269,6 +289,12 @@ export async function openDocumentContent(
     throw new AppError(403, 'FORBIDDEN', 'Removed documents can only be opened by the owner.');
   }
   const document = toDocument(row);
+  // Still waiting in the upload queue: serve the (verified) bytes from there.
+  const queued = await db.query<{ content: Buffer }>(`SELECT content FROM document_upload_queue WHERE document_id = $1`, [row.id]);
+  if (queued.rows[0]) {
+    const content = queued.rows[0].content;
+    return { document, accessUrl: null, stream: Readable.from([content]), sizeBytes: content.length };
+  }
   const accessUrl = await storage.createAccessUrl(row.storage_key, {
     expiresInSeconds: 60,
     fileName: row.original_filename,
@@ -279,6 +305,9 @@ export async function openDocumentContent(
     const opened = await storage.open(row.storage_key);
     return { document, accessUrl: null, stream: opened.stream, sizeBytes: opened.sizeBytes };
   } catch (err) {
+    if (err instanceof StorageUnavailable) {
+      throw new AppError(503, 'DOCUMENT_STORAGE_OFFLINE', 'Document storage is offline right now. Try again later.');
+    }
     if (err instanceof StorageObjectMissing) {
       throw new AppError(
         500,

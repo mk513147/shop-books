@@ -42,7 +42,13 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
  * Query parameters that cannot redirect a connection. The pg driver copies EVERY query parameter
  * into its settings (`?host=`, `?port=`, `?user=`, ... override the URL), so anything else fails closed.
  */
-const SAFE_URL_PARAMS = new Set(['sslmode', 'application_name', 'connect_timeout']);
+const SAFE_URL_PARAMS = new Set([
+  'sslmode',
+  // Neon's default URLs carry channel_binding=require: it only hardens authentication (SCRAM channel binding).
+  'channel_binding',
+  'application_name',
+  'connect_timeout',
+]);
 
 export interface ConnectionTarget {
   host: string;

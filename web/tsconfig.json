@@ -21,5 +21,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "e2e", "vite.config.ts", "pwa-config.ts", "playwright.config.ts"]
+  "include": ["src", "e2e", "vite.config.ts", "pwa-config.ts", "vercel-config.ts", "playwright.config.ts"]
 }

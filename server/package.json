@@ -24,7 +24,9 @@
     "suppliers:backfill-report": "tsx src/cli/supplierBackfillReport.ts",
     "suppliers:backfill-report:built": "node dist/cli/supplierBackfillReport.js",
     "documents:reconcile": "tsx src/cli/documentsReconcile.ts",
-    "documents:reconcile:built": "node dist/cli/documentsReconcile.js"
+    "documents:reconcile:built": "node dist/cli/documentsReconcile.js",
+    "storage-agent": "tsx src/cli/storageAgent.ts",
+    "storage-agent:built": "node dist/cli/storageAgent.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

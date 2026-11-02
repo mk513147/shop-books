@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -6,6 +7,7 @@ import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { NAVIGATE_FALLBACK_DENYLIST } from './pwa-config';
 import { parseApiBaseUrl } from './src/lib/api-base-url';
+import { vercelApiProxyProblem } from './vercel-config';
 
 /**
  * Build-time guard: a deployed build (Vercel sets VERCEL=1; or REQUIRE_API_BASE_URL=true) MUST have
@@ -18,7 +20,12 @@ function checkApiBaseUrl(mode: string, command: string): void {
   const parsed = parseApiBaseUrl(value);
   if (!parsed.ok) throw new Error(parsed.error);
   if ((process.env.VERCEL || process.env.REQUIRE_API_BASE_URL === 'true') && !(value ?? '').trim()) {
-    throw new Error('VITE_API_BASE_URL must be set for a deployed build (e.g. https://<your-tunnel-host>). See docs/staging-deployment.md.');
+    throw new Error('VITE_API_BASE_URL must be set for a deployed build (e.g. /api/v1 with the Vercel proxy). See docs/staging-deployment.md.');
+  }
+  // Same-origin API on Vercel: the /api proxy rewrite to the backend must exist and be real.
+  if (process.env.VERCEL && parsed.ok && !parsed.crossOrigin && (value ?? '').trim()) {
+    const problem = vercelApiProxyProblem(JSON.parse(readFileSync(path.join(import.meta.dirname, 'vercel.json'), 'utf8')));
+    if (problem) throw new Error(problem);
   }
 }
 

@@ -35,7 +35,7 @@ export function createApp({
 }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
-  if (config.trustProxy) app.set('trust proxy', 1);
+  if (config.trustProxy > 0) app.set('trust proxy', config.trustProxy);
 
   app.use(requestId);
   app.use(

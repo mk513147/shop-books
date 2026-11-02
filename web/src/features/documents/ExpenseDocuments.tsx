@@ -82,6 +82,14 @@ export function ExpenseDocuments({ expenseId, voided }: { expenseId: string; voi
                     {doc.mimeType === 'application/pdf' ? 'PDF' : 'Photo'} · {formatBytes(doc.sizeBytes)} · {doc.uploadedBy.name},{' '}
                     {formatDateTime(doc.createdAt)}
                   </p>
+                  {doc.pendingDelivery && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      <Badge tone="warning" className="mr-1">
+                        Waiting for storage
+                      </Badge>
+                      Saved safely; it moves to the shop's document storage when that is back online.
+                    </p>
+                  )}
                   {isRemoved && (
                     <p className="mt-0.5 text-xs break-words text-muted-foreground">
                       <Badge tone="danger" className="mr-1">

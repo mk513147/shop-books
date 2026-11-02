@@ -249,11 +249,15 @@ Additive; no existing row is changed (only the audit entity list and idempotency
 
 ### Migration order and verification
 
-`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010`.
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010` → `0011`.
 
 **Status on 2026-11-02 (verified with `db:status` / `schema_migrations`):** `shop_books_dev` and `shop_books_test` both have 0001–0010. 0010 was applied to `shop_books_dev` after a backup (`D:\ShopBooksBackups\shop_books_dev_before_0010_2026-11-02_214312.dump`); a row-by-row comparison showed every existing table unchanged apart from the new `schema_migrations` row and the backfilled `expense_payments` rows. No production database exists yet.
 
 History of the earlier migrations: 0005–0009 were applied (via `runMigrations`, the same code as `npm run db:migrate`) to the **test** database `shop_books_test` by the integration tests, which also exercise every trigger above. An upgrade test (`server/tests/migrations.upgrade.integration.test.ts`) builds a 0004 database **with data** (suppliers, paid/unpaid/voided expenses, audit rows, idempotency keys) in a throw-away schema, applies 0005–0009 and checks that every existing row of `expenses`, `suppliers`, `financial_audit_events` and `idempotency_keys` is byte-for-byte unchanged, that `supplier_balances` equals `amount − amount_paid` over active bills, that existing expenses stay editable/voidable, and that re-running is a no-op. They were later applied to the development database (2026-11-01); never to a production database. Before production: back up, apply to a **copy** of the real database first, then run `npm run db:status`, `npm run documents:reconcile`, and spot-check supplier payables (`SELECT * FROM supplier_balances`), which should equal `amount − amount_paid` per supplier until payments are recorded.
+
+### `0011_document_upload_queue`
+
+Additive; no existing row changes. `document_upload_queue (document_id PK → expense_documents, content bytea ≤ 10 MB, queued_at, attempts, last_attempt_at, last_error)` holds bill documents uploaded while the document storage (desktop agent) was unreachable, written in the same transaction as their `expense_documents` row. A `BEFORE INSERT OR UPDATE` trigger requires the bytes to match the document's `size_bytes` and `sha256` and forbids changing them. Rows are deleted only after the storage confirmed delivery (the document row is never deleted). Applied so far only to `shop_books_test` (by the test suite). Rollback when the queue is empty: drop the trigger, `check_document_upload_queue()` and the table.
 
 ### `0008_reporting_indexes` (Stage 4)
 

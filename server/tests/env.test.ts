@@ -38,7 +38,7 @@ describe('environment validation', () => {
   });
 
   it('document storage: defaults outside production, explicit absolute directory required in production', () => {
-    expect(loadConfig(valid).documentStorage.directory).toMatch(/storage[\\/]documents$/);
+    expect(loadConfig(valid).documentStorage).toMatchObject({ driver: 'local', directory: expect.stringMatching(/storage[\\/]documents$/) });
     const prod = { ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com' };
     expect(messageOf(prod)).toContain('DOCUMENT_STORAGE_DIR: required in production');
     expect(messageOf({ ...prod, DOCUMENT_STORAGE_DIR: 'relative/dir' })).toContain('must be an absolute path');
@@ -49,7 +49,7 @@ describe('environment validation', () => {
     const config = loadConfig(valid);
     expect(config.port).toBe(3000);
     expect(config.frontendOrigins).toEqual(['http://localhost:5173']);
-    expect(config.trustProxy).toBe(false);
+    expect(config.trustProxy).toBe(0);
     expect(config.logLevel).toBe('info');
   });
 
@@ -140,5 +140,56 @@ describe('environment validation', () => {
     expect(() =>
       loadDatabaseConfig({ NODE_ENV: 'test', DATABASE_URL: 'postgresql://u:p@localhost/shop_books_dev' }),
     ).toThrow(ConfigError);
+  });
+});
+
+describe('hosted deployment (Render + Neon + desktop storage agent)', () => {
+  const render = {
+    ...valid,
+    NODE_ENV: 'production',
+    FRONTEND_URL: 'https://shop-books.vercel.app',
+    DATABASE_URL: 'postgresql://u:p@ep-x-123.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
+    RENDER: 'true',
+    DOCUMENT_STORAGE_DRIVER: 'agent',
+    DOCUMENT_STORAGE_AGENT_URL: 'https://storage.example.com',
+    DOCUMENT_STORAGE_AGENT_SECRET: 'a'.repeat(48),
+    TRUST_PROXY: '2',
+    EMAIL_PROVIDER: 'none',
+    REPORT_SCHEDULER_ENABLED: 'false',
+  };
+
+  it('accepts the planned production configuration; Lax cookies; scheduler off; two proxy hops', () => {
+    const config = loadConfig(render);
+    expect(config.documentStorage).toEqual({ driver: 'agent', url: 'https://storage.example.com', secret: 'a'.repeat(48) });
+    expect(config.cookie).toEqual({ name: '__Host-sb_session', secure: true, sameSite: 'lax' });
+    expect(config.reportScheduler.enabled).toBe(false);
+    expect(config.trustProxy).toBe(2);
+    expect(loadConfig({ ...render, REPORT_SCHEDULER_ENABLED: undefined }).reportScheduler.enabled).toBe(true); // production default
+  });
+
+  it('refuses local document storage on Render (its disk is temporary)', () => {
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_DRIVER: 'local', DOCUMENT_STORAGE_DIR: '/var/data' })).toMatch(/temporary disk; use "agent"/);
+    // Off Render (e.g. the Windows PC) the local driver stays available.
+    expect(loadConfig({ ...render, RENDER: undefined, DOCUMENT_STORAGE_DRIVER: 'local', DOCUMENT_STORAGE_DIR: '/var/data' }).documentStorage.driver).toBe('local');
+  });
+
+  it('validates the agent URL and secret', () => {
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_URL: undefined })).toMatch(/DOCUMENT_STORAGE_AGENT_URL: required/);
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_URL: 'http://storage.example.com' })).toMatch(/must use https/);
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_URL: 'https://u:p@storage.example.com' })).toMatch(/only scheme, host and port/);
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_URL: 'https://storage.example.com/files?x=1' })).toMatch(/only scheme, host and port/);
+    expect(loadConfig({ ...render, NODE_ENV: 'development', RENDER: undefined, COOKIE_SECURE: 'true', DOCUMENT_STORAGE_AGENT_URL: 'http://127.0.0.1:8787' }).documentStorage).toMatchObject({
+      url: 'http://127.0.0.1:8787',
+    });
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_SECRET: 'short' })).toMatch(/at least 32 characters/);
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_SECRET: `change-me-${'x'.repeat(40)}` })).toMatch(/placeholder/);
+    expect(messageOf({ ...render, DOCUMENT_STORAGE_AGENT_SECRET: valid.SESSION_SECRET })).toMatch(/must differ from SESSION_SECRET/);
+  });
+
+  it('TRUST_PROXY accepts true/false or a hop count', () => {
+    expect(loadConfig({ ...valid, TRUST_PROXY: 'true' }).trustProxy).toBe(1);
+    expect(loadConfig({ ...valid, TRUST_PROXY: 'false' }).trustProxy).toBe(0);
+    expect(loadConfig({ ...valid, TRUST_PROXY: '3' }).trustProxy).toBe(3);
+    expect(messageOf({ ...valid, TRUST_PROXY: '9' })).toContain('TRUST_PROXY');
   });
 });

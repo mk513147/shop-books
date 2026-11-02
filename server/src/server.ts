@@ -2,6 +2,8 @@ import { createApp } from './app.js';
 import { ConfigError, loadConfig } from './config/env.js';
 import { loadEnvFiles } from './config/loadEnvFiles.js';
 import { createPool } from './database/connection.js';
+import { DocumentQueueWorker } from './modules/documents/documentQueue.js';
+import { createDocumentStorage } from './modules/documents/storage.js';
 import { createEmailSender } from './modules/email/email.js';
 import { ReportScheduler } from './modules/monthlyReports/scheduler.js';
 import { createLogger } from './utils/logger.js';
@@ -32,7 +34,15 @@ function main(): void {
     logger,
     intervalMs: config.reportScheduler.intervalMs,
   });
-  const app = createApp({ config, db: pool, logger, emailSender, onReportQueued: () => scheduler.nudge() });
+  const storage = createDocumentStorage(config.documentStorage, {
+    // Secret-free: only the HTTP status and method are logged.
+    onAgentRejected: (d) =>
+      logger.error(d, 'Document storage agent rejected the request signature: check DOCUMENT_STORAGE_AGENT_SECRET and the desktop clock'),
+  });
+  // Uploads accepted while the desktop storage agent was offline wait in PostgreSQL until delivered.
+  const documentQueue = new DocumentQueueWorker({ db: pool, storage, logger, intervalMs: 60_000 });
+  const app = createApp({ config, db: pool, logger, emailSender, storage, onReportQueued: () => scheduler.nudge() });
+  if (storage.driver === 'agent') documentQueue.start();
   if (config.reportScheduler.enabled) scheduler.start();
   logger.info({ emailProvider: emailSender.provider, scheduler: config.reportScheduler.enabled }, 'Monthly report scheduler configured');
 
@@ -45,6 +55,7 @@ function main(): void {
     shuttingDown = true;
     logger.info({ signal }, 'Shutting down');
     scheduler.stop();
+    documentQueue.stop();
     const forceTimer = setTimeout(() => {
       logger.error('Graceful shutdown timed out; forcing exit');
       process.exit(1);

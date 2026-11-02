@@ -46,6 +46,10 @@ async function main(): Promise<void> {
     console.log(`Metadata rows: ${report.documents}   Stored objects: ${report.storedObjects}`);
     console.log(`Orphan files (no metadata): ${report.orphanFiles.length}`);
     console.log(`Stray entries (not valid keys, e.g. *.part): ${report.strayEntries.length}`);
+    console.log(`Waiting in the upload queue (storage was offline; delivered automatically): ${report.pendingUploads.length}`);
+    for (const p of report.pendingUploads) {
+      console.log(`  document ${p.documentId} (expense ${p.expenseId}), ${p.attempts} attempt(s)${p.lastError ? `, last error: ${p.lastError}` : ''}`);
+    }
     console.log(`MISSING files for metadata rows: ${report.missingFiles.length}`);
     for (const m of report.missingFiles) console.log(`  document ${m.documentId} (expense ${m.expenseId}, ${m.status})`);
     if (verify) {

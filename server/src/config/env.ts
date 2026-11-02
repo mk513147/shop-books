@@ -28,16 +28,26 @@ export interface AppConfig extends DatabaseConfig {
   host: string | undefined;
   frontendOrigins: string[];
   logLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
-  trustProxy: boolean;
+  /** Number of reverse proxies in front of the API whose X-Forwarded-For is trusted (0 = none). */
+  trustProxy: number;
   appVersion: string | undefined;
   /** Server-side secret used to derive per-session CSRF tokens (HMAC). */
   sessionSecret: string;
   /** Private storage for bill photographs/documents (docs/architecture.md → Bill documents). */
-  documentStorage: {
-    driver: 'local';
-    /** Absolute directory outside any web root; never served statically. */
-    directory: string;
-  };
+  documentStorage:
+    | {
+        driver: 'local';
+        /** Absolute directory outside any web root; never served statically. */
+        directory: string;
+      }
+    | {
+        /** The authenticated storage agent on the owner's desktop (reached through Cloudflare Tunnel). */
+        driver: 'agent';
+        /** Base URL of the agent, e.g. https://storage.example.com (https except for localhost). */
+        url: string;
+        /** Shared secret for the HMAC request signatures (never sent itself). */
+        secret: string;
+      };
   /** Shop name printed on reports, Excel files and e-mails. */
   shopName: string;
   /** Outgoing e-mail (monthly reports). See docs/architecture.md → Monthly e-mail reports. */
@@ -92,12 +102,18 @@ const appSchema = z.object({
   COOKIE_SECURE: booleanString.optional(),
   FRONTEND_URL: z.string({ error: 'FRONTEND_URL is required' }).min(1, 'FRONTEND_URL is required'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional(),
-  TRUST_PROXY: booleanString.default(false),
+  // true = 1 hop (e.g. one tunnel); a number counts proxies, e.g. 2 for Vercel rewrite -> Render.
+  TRUST_PROXY: z
+    .enum(['true', 'false', '0', '1', '2', '3'], 'use true, false or the number of proxy hops (1-3)')
+    .default('false')
+    .transform((v) => (v === 'true' ? 1 : v === 'false' ? 0 : Number(v))),
   APP_VERSION: z.string().trim().optional(),
   SESSION_SECRET: z.string({ error: 'SESSION_SECRET is required' }).min(1, 'SESSION_SECRET is required'),
   SESSION_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
-  DOCUMENT_STORAGE_DRIVER: z.enum(['local'], 'only "local" is implemented so far').default('local'),
+  DOCUMENT_STORAGE_DRIVER: z.enum(['local', 'agent'], 'use "local" or "agent"').default('local'),
   DOCUMENT_STORAGE_DIR: z.string().trim().optional(),
+  DOCUMENT_STORAGE_AGENT_URL: z.string().trim().optional(),
+  DOCUMENT_STORAGE_AGENT_SECRET: z.string().optional(),
   SHOP_NAME: z.string().trim().min(1).max(100).default('Shop-Books'),
   EMAIL_PROVIDER: z.enum(['none', 'outbox'], 'use "none" or "outbox" (no other provider is implemented yet)').optional(),
   EMAIL_FROM: z.string().trim().max(200).optional(),
@@ -122,6 +138,31 @@ function emptyToUndefined(env: NodeJS.ProcessEnv): Record<string, string | undef
     cleaned[key] = value === '' ? undefined : value;
   }
   return cleaned;
+}
+
+/** The storage agent's base URL: https (http only for localhost), no credentials/query/fragment/path. */
+function checkAgentUrl(raw: string | undefined, issues: string[]): string | null {
+  if (!raw) {
+    issues.push('DOCUMENT_STORAGE_AGENT_URL: required when DOCUMENT_STORAGE_DRIVER=agent');
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    issues.push('DOCUMENT_STORAGE_AGENT_URL: must be a valid URL');
+    return null;
+  }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+    issues.push('DOCUMENT_STORAGE_AGENT_URL: must use https:// (http:// only for localhost)');
+    return null;
+  }
+  if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) {
+    issues.push('DOCUMENT_STORAGE_AGENT_URL: only scheme, host and port are allowed (no path, query or credentials)');
+    return null;
+  }
+  return url.origin;
 }
 
 /** Guards that stop one environment from silently using another environment's database. */
@@ -188,15 +229,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     issues.push('SESSION_COOKIE_SAMESITE: "none" requires Secure cookies (production, or COOKIE_SECURE=true behind HTTPS)');
   }
 
-  // Production must name the storage directory explicitly (and it must be absolute); development
-  // and tests default to <repo>/storage/documents[-test], which is gitignored and never served.
-  const storageDir = data.DOCUMENT_STORAGE_DIR
-    ? data.DOCUMENT_STORAGE_DIR
-    : data.NODE_ENV === 'production'
-      ? null
-      : join(REPO_ROOT, 'storage', data.NODE_ENV === 'test' ? 'documents-test' : 'documents');
-  if (storageDir === null) issues.push('DOCUMENT_STORAGE_DIR: required in production');
-  else if (!isAbsolute(storageDir)) issues.push('DOCUMENT_STORAGE_DIR: must be an absolute path');
+  let documentStorage: AppConfig['documentStorage'] | null = null;
+  if (data.DOCUMENT_STORAGE_DRIVER === 'agent') {
+    const agentUrl = checkAgentUrl(data.DOCUMENT_STORAGE_AGENT_URL, issues);
+    const agentSecret = data.DOCUMENT_STORAGE_AGENT_SECRET ?? '';
+    if (agentSecret.length < 32) issues.push('DOCUMENT_STORAGE_AGENT_SECRET: must be at least 32 characters');
+    else if (PLACEHOLDER_PATTERN.test(agentSecret)) issues.push('DOCUMENT_STORAGE_AGENT_SECRET: looks like a placeholder; generate a random value');
+    else if (agentSecret === secret) issues.push('DOCUMENT_STORAGE_AGENT_SECRET: must differ from SESSION_SECRET');
+    if (agentUrl) documentStorage = { driver: 'agent', url: agentUrl, secret: agentSecret };
+  } else {
+    // Render's disk is wiped on every deploy/restart: bill documents must never live there.
+    if (env.RENDER === 'true') {
+      issues.push('DOCUMENT_STORAGE_DRIVER: "local" stores files on Render\'s temporary disk; use "agent" (the desktop storage agent)');
+    }
+    // Production must name the storage directory explicitly (and it must be absolute); development
+    // and tests default to <repo>/storage/documents[-test], which is gitignored and never served.
+    const storageDir = data.DOCUMENT_STORAGE_DIR
+      ? data.DOCUMENT_STORAGE_DIR
+      : data.NODE_ENV === 'production'
+        ? null
+        : join(REPO_ROOT, 'storage', data.NODE_ENV === 'test' ? 'documents-test' : 'documents');
+    if (storageDir === null) issues.push('DOCUMENT_STORAGE_DIR: required in production');
+    else if (!isAbsolute(storageDir)) issues.push('DOCUMENT_STORAGE_DIR: must be an absolute path');
+    else documentStorage = { driver: 'local', directory: storageDir };
+  }
 
   const emailProvider = data.EMAIL_PROVIDER ?? (data.NODE_ENV === 'production' ? 'none' : 'outbox');
   if (emailProvider === 'outbox' && data.NODE_ENV === 'production') {
@@ -224,7 +280,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trustProxy: data.TRUST_PROXY,
     appVersion: data.APP_VERSION || undefined,
     sessionSecret: secret,
-    documentStorage: { driver: data.DOCUMENT_STORAGE_DRIVER, directory: storageDir! },
+    documentStorage: documentStorage!,
     shopName: data.SHOP_NAME,
     email: { provider: emailProvider, from: emailFrom, outboxDirectory: outboxDir },
     reportScheduler: {
