@@ -14,7 +14,7 @@ import { PAYMENT_MODE_LABELS, PAYMENT_MODES, useExpenseList, useRecorders } from
 import { useSuppliers } from '@/features/suppliers/suppliers-api';
 import { formatDate } from '@/lib/dates';
 import { formatInr, MONEY_INPUT } from '@/lib/money';
-import { cn } from '@/lib/utils';
+import { cn, expenseLabel } from '@/lib/utils';
 import type { Expense } from '@/types/api';
 
 const FILTER_KEYS = ['q', 'from', 'to', 'categoryId', 'supplierId', 'paymentMode', 'recordedBy', 'status', 'minAmount', 'maxAmount'] as const;
@@ -292,10 +292,12 @@ export function ExpensesPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="flex items-center gap-1 font-medium">
-                        <span className="truncate">{e.description}</span>
+                        <span className="truncate">{expenseLabel(e)}</span>
                         {e.documentCount > 0 && <Paperclip className="size-3.5 shrink-0 text-muted-foreground" aria-label={`${e.documentCount} document(s)`} />}
                       </p>
-                      <p className="truncate text-sm text-muted-foreground">{e.supplier?.name ?? e.category.name}</p>
+                      {(e.supplier ?? e.description) && (
+                        <p className="truncate text-sm text-muted-foreground">{e.supplier?.name ?? e.category.name}</p>
+                      )}
                     </div>
                     <div className="shrink-0 text-right">
                       <p className={cn('figure font-semibold', e.status === 'voided' && 'line-through')}>{formatInr(e.amount)}</p>
@@ -340,7 +342,7 @@ export function ExpensesPage() {
                     <td className="whitespace-nowrap px-4 py-3">{formatDate(e.expenseDate)}</td>
                     <td className="max-w-64 px-4 py-3">
                       <Link to={`/expenses/${e.id}`} className="line-clamp-2 font-medium hover:underline" onClick={(ev) => ev.stopPropagation()}>
-                        {e.description}
+                        {expenseLabel(e)}
                       </Link>
                       {e.documentCount > 0 && (
                         <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -359,7 +361,7 @@ export function ExpensesPage() {
                     <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', e.outstanding !== '0.00' && 'text-warning')}>
                       {formatInr(e.outstanding)}
                     </td>
-                    <td className="px-4 py-3">{e.paymentMode ? PAYMENT_MODE_LABELS[e.paymentMode] : '—'}</td>
+                    <td className="px-4 py-3">{e.payments.length ? e.payments.map((p) => PAYMENT_MODE_LABELS[p.paymentMode]).join(' + ') : '—'}</td>
                     <td className="px-4 py-3">{e.createdBy.name}</td>
                   </tr>
                 ))}

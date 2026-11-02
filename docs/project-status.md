@@ -132,6 +132,16 @@ Automated verification: `exports.critical.integration.test.ts` **6/6**, `monthly
 
 **Not implemented / blocked by missing configuration:** a real e-mail provider adapter (SMTP or HTTP API) and its credentials — until then no e-mail can be delivered (deliveries are recorded as failed or simulated, never as sent). Not verified: opening the workbooks in Microsoft Excel/LibreOffice (only ExcelJS read-back), e-mail rendering in real mail clients, behaviour over real calendar time and with two API processes, performance with large data volumes.
 
+## Expense payment improvements and database separation (2026-11-02, uncommitted)
+
+Implemented:
+- [x] Optional expense description (NULL when empty); the category name is shown instead in lists, details, reports and the supplier ledger.
+- [x] Several payment methods per expense: `payments` API field, table `expense_payments` (migration 0010, backfilled from `amount_paid`/`payment_mode`), deferred trigger "rows = amount paid", rules in [architecture.md](architecture.md#expenses-and-categories-stage-3a). Supplier bills may stay unpaid or part-paid; other expenses must be paid in full. New supplier bills start **unpaid** in the form; payments the user entered are never changed by choosing or removing a supplier.
+- [x] Form: dynamic payment rows (add/remove, focus handling, per-field error messages), live total/allocated/remaining, exact BigInt arithmetic. Reports, Excel exports, supplier ledger and audit history show every method.
+- [x] Database separation: `shop_books_dev` (persistent, manual testing, also served by the tunnel profile `.env.staging`) and `shop_books_test` (automated tests only, disposable). Test guards check the URL (local host, exact name, no redirecting query parameters) and the server (`current_database()`, loopback address). `db:migrate` and `documents:reconcile --delete-orphans` need `--confirm-database=<name>` for anything but the local dev/test database. See [database.md](database.md#test-database-isolation).
+
+Verification: see the final report of the change; migration 0010 applied to `shop_books_dev` (after a backup) and `shop_books_test`.
+
 ## Stage 6 — Release-readiness review (2026-11-01)
 
 Scope: verification, defect fixing and documentation only; no new business features. Nothing committed, pushed, deployed or migrated outside the test database.

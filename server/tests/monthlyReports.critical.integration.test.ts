@@ -73,8 +73,8 @@ describe.skipIf(!pool)('monthly e-mail reports (critical paths)', () => {
       categoryId: cat,
       description: 'Last month bill',
       amount: '1234.50',
-      amountPaid: '0',
-      paymentMode: null,
+      amountPaid: '1234.50',
+      paymentMode: 'cash',
       invoiceReference: null,
     });
     const c = (await send(manager, 'post', '/customers', { name: 'Report Customer' })).body.customer.id;

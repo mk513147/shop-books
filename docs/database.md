@@ -23,17 +23,40 @@ CREATE DATABASE shop_books_test OWNER shop_books_app;
 
 | File | Used when | `DATABASE_URL` |
 |---|---|---|
-| `.env.development` | `NODE_ENV` unset/`development` | `postgresql://shop_books_app:…@localhost:5432/shop_books_dev` |
+| `.env.development` | `NODE_ENV` unset/`development` (`npm run dev:server`) | `postgresql://shop_books_app:…@localhost:5432/shop_books_dev` |
+| `.env.staging` | `SHOP_BOOKS_ENV_FILE=.env.staging` (tunnel profile for the Vercel site / phones) | the **same** `…/shop_books_dev` |
 | `.env.test` | `NODE_ENV=test` (automated tests) | `postgresql://shop_books_app:…@localhost:5432/shop_books_test` |
 | real environment variables | production | provided by the host |
+
+## Databases and what may touch them
+
+There are exactly **two local databases**:
+
+| Database | Purpose | Data |
+|---|---|---|
+| `shop_books_dev` | Development and **all manual testing** (browser, phone, via the tunnel profile) | **Persistent.** No automated test, script or reset utility may truncate, drop or reset it. |
+| `shop_books_test` | **Automated server integration tests only** | **Disposable.** Every test run truncates its tables (users, expenses, payments, audit history…). Never keep anything you need in it, and never point any other environment at it. |
+
+- **Production** will use its own hosted PostgreSQL database, configured only on the host. Nothing in this repository points at it.
+- **There is no staging database.** Manual acceptance testing happens on `shop_books_dev` (see [staging-deployment.md](staging-deployment.md)). A separate staging database can be added later: name it with `staging` in the name (e.g. `shop_books_staging`); the guards below then already treat it as protected (only `NODE_ENV=production`, explicit `--confirm-database` for changes).
+- Back up `shop_books_dev` before applying migrations to it:
+
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -U shop_books_app -h localhost -Fc --no-owner -d shop_books_dev -f "D:\ShopBooksBackups\shop_books_dev_<date>.dump"
+# restore into an EMPTY database only: pg_restore.exe -U shop_books_app -h localhost --no-owner -d <empty database> <file>
+```
 
 URL-encode special characters in passwords (`@` → `%40`, etc.).
 
 ## Test-database isolation
 
-Tests never touch development or production data:
+Tests never touch development or production data. `NODE_ENV=test` alone is **not** relied on; the actual database name is checked:
 
+- **Hard guard (tests):** `server/tests/setup.ts` runs before every test file and aborts the run unless the resolved `DATABASE_URL` reaches **exactly** `shop_books_test` (`DESIGNATED_TEST_DATABASE` in `server/src/database/isolation.ts`) on **localhost / 127.0.0.1 / ::1**, whichever way it was set (`.env.test` or the shell). The URL may only carry harmless query parameters (`sslmode`, `application_name`, `connect_timeout`): the pg driver applies every query parameter, so `?host=`, `?port=`, `?user=`, `?options=` … could redirect the connection and are refused. Unparseable URLs, socket or empty hosts and unreadable database names are refused too (fail closed). It also refuses `SHOP_BOOKS_ENV_FILE` (other than `.env.test`), so the tests can never inherit `.env.development` or `.env.staging`.
+- **Live check:** every integration test gets its pool from `connectTestDatabase()`, which repeats the URL check and asks the server for `current_database()` and `inet_server_addr()`; it throws (rather than skipping) unless the database is `shop_books_test` on a loopback address (or a local socket). All `TRUNCATE`/`DROP SCHEMA` statements in the tests run through that pool, or through a pool on the same already-checked URL. There are no reset utilities outside the tests.
 - With `NODE_ENV=test` the app **refuses to start** unless the database name ends in `_test`; conversely a `_test` database is refused in any other environment.
+- A database whose name contains `staging` or `prod` is refused unless `NODE_ENV=production` (so neither tests nor development can open it).
+- **Changing commands** (`db:migrate`, `documents:reconcile --delete-orphans`): only `NODE_ENV=development` on the local `shop_books_dev` and `NODE_ENV=test` on the local `shop_books_test` run without confirmation. Any remote host (whatever `NODE_ENV` says), production mode, and any other or protected name need `--confirm-database=<exact name>`, compared with the live `current_database()`. An unknown host, a redirecting query parameter, or a server that reports a different database than the URL fails closed — a confirmation cannot override that.
 - The server test runner sets `NODE_ENV=test` and loads only `.env.test`.
 - The migration runner re-checks `current_database()` against `NODE_ENV` on every call (`db:status`, `db:migrate`, and the programmatic `runMigrations` / `getMigrationStatus`), whatever pool it was handed, and refuses before reading or changing anything.
 - If no test database is reachable, the PostgreSQL integration tests are **skipped** (reported as skipped, never passed).
@@ -53,7 +76,7 @@ Production (after building, `npm run build`):
 ```powershell
 $env:NODE_ENV = "production"
 npm --prefix server run db:status:built
-npm --prefix server run db:migrate:built -- --yes     # --yes is mandatory in production
+npm --prefix server run db:migrate:built -- --yes --confirm-database=<database name>   # both mandatory in production
 ```
 
 To migrate the test database: `$env:NODE_ENV = "test"; npm run db:migrate`.
@@ -132,6 +155,7 @@ Behaviour:
 - Indexes: date (+created_at), category, created_by, and a partial index on active rows by date.
 - **Suppliers**: added by `0004` (below).
 - **Supplier payments** (0006): `amount_paid` remains the "paid at purchase" amount. Later payments live in `supplier_payments` and settle bills through `supplier_payment_allocations`; existing rows keep their meaning (no rewrite of history).
+- **Expense payment allocations** (0010): `expense_payments` holds one row per payment method of an expense (`expense_id`, `position`, `payment_mode`, `amount > 0`). `amount_paid` stays the paid-at-purchase total and a deferred constraint trigger requires it to equal the sum of the allocations; `payment_mode` mirrors the first allocation. These are **not** supplier payments. Existing paid expenses were backfilled with one allocation each. `expenses.description` became optional (NULL when empty). Rollback (only before multi-method data matters): drop both `*_check_*total` triggers, the function `check_expense_payments_total`, the table `expense_payments`, and restore `description NOT NULL` once no NULL descriptions exist.
 
 **`financial_audit_events`**: append-only history of financial changes (separate from `auth_events`).
 - `entity_type` (`expense`, `expense_category`), `entity_id`, `action` (`create`, `update`, `void`, `restore`, `archive`, `reactivate`), `actor_user_id`, `occurred_at`, `reason` (required for void/restore, otherwise NULL), `before_values` (NULL only for create), `after_values` (JSONB snapshots of business fields only: never secrets).
@@ -225,7 +249,11 @@ Additive; no existing row is changed (only the audit entity list and idempotency
 
 ### Migration order and verification
 
-`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009`. 0005–0009 were applied (via `runMigrations`, the same code as `npm run db:migrate`) to the **test** database `shop_books_test` by the integration tests, which also exercise every trigger above. An upgrade test (`server/tests/migrations.upgrade.integration.test.ts`) builds a 0004 database **with data** (suppliers, paid/unpaid/voided expenses, audit rows, idempotency keys) in a throw-away schema, applies 0005–0009 and checks that every existing row of `expenses`, `suppliers`, `financial_audit_events` and `idempotency_keys` is byte-for-byte unchanged, that `supplier_balances` equals `amount − amount_paid` over active bills, that existing expenses stay editable/voidable, and that re-running is a no-op. They have **not** been applied to the development database (it is still at 0004) nor to any production database. Before production: back up, apply to a **copy** of the real database first, then run `npm run db:status`, `npm run documents:reconcile`, and spot-check supplier payables (`SELECT * FROM supplier_balances`), which should equal `amount − amount_paid` per supplier until payments are recorded.
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010`.
+
+**Status on 2026-11-02 (verified with `db:status` / `schema_migrations`):** `shop_books_dev` and `shop_books_test` both have 0001–0010. 0010 was applied to `shop_books_dev` after a backup (`D:\ShopBooksBackups\shop_books_dev_before_0010_2026-11-02_214312.dump`); a row-by-row comparison showed every existing table unchanged apart from the new `schema_migrations` row and the backfilled `expense_payments` rows. No production database exists yet.
+
+History of the earlier migrations: 0005–0009 were applied (via `runMigrations`, the same code as `npm run db:migrate`) to the **test** database `shop_books_test` by the integration tests, which also exercise every trigger above. An upgrade test (`server/tests/migrations.upgrade.integration.test.ts`) builds a 0004 database **with data** (suppliers, paid/unpaid/voided expenses, audit rows, idempotency keys) in a throw-away schema, applies 0005–0009 and checks that every existing row of `expenses`, `suppliers`, `financial_audit_events` and `idempotency_keys` is byte-for-byte unchanged, that `supplier_balances` equals `amount − amount_paid` over active bills, that existing expenses stay editable/voidable, and that re-running is a no-op. They were later applied to the development database (2026-11-01); never to a production database. Before production: back up, apply to a **copy** of the real database first, then run `npm run db:status`, `npm run documents:reconcile`, and spot-check supplier payables (`SELECT * FROM supplier_balances`), which should equal `amount − amount_paid` per supplier until payments are recorded.
 
 ### `0008_reporting_indexes` (Stage 4)
 

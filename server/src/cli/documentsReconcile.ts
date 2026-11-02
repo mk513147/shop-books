@@ -1,6 +1,7 @@
 import { loadConfig } from '../config/env.js';
 import { loadEnvFiles } from '../config/loadEnvFiles.js';
 import { createPool } from '../database/connection.js';
+import { operationProblem } from '../database/isolation.js';
 import { getMigrationStatus } from '../database/migrator.js';
 import { LocalDocumentStorage } from '../modules/documents/localStorage.js';
 import { reconcileDocuments } from '../modules/documents/reconcile.js';
@@ -13,6 +14,7 @@ import { reportCliError, UserFacingError } from './shared.js';
  *   npm run documents:reconcile -- --verify              also re-hash every file (slower)
  *   npm run documents:reconcile -- --delete-orphans      delete orphan/stray files older than 24 h
  *        [--min-age-hours=N]  (minimum 1)  [--yes] (required in production)
+ *        [--confirm-database=<name>] (required unless it is the local development/test database)
  *
  * Orphans are files with no metadata row (an upload interrupted between storing and recording, or
  * a failed clean-up). The grace period protects uploads still in progress. Files that DO have a
@@ -52,6 +54,9 @@ async function main(): Promise<void> {
     }
 
     if (deleteOrphans) {
+      const connected = (await pool.query<{ name: string }>('SELECT current_database() AS name')).rows[0]?.name ?? '';
+      const problem = operationProblem(config.nodeEnv, config.databaseUrl, connected, args);
+      if (problem) throw new UserFacingError(`Not deleting any files: ${problem}`);
       const cutoff = Date.now() - minAgeHours * 3600 * 1000;
       let deleted = 0;
       for (const o of report.orphanFiles) {

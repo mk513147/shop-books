@@ -1,6 +1,6 @@
 import type { Queryable } from '../../database/connection.js';
 import { toPaise } from '../../utils/money.js';
-import { containsPattern } from '../../utils/sql.js';
+import { containsPattern, expenseLabelSql } from '../../utils/sql.js';
 import { getCustomersSummary } from '../customers/customers.service.js';
 import type { PaymentMode } from '../expenses/expenses.schemas.js';
 import { getSuppliersSummary } from '../supplierPayments/supplierLedger.service.js';
@@ -62,8 +62,10 @@ function expenseConditions(f: Omit<ExpenseFilters, 'from' | 'to'>, bind: Bind): 
   const where: string[] = [];
   if (f.categoryId) where.push(`e.category_id = ${bind(f.categoryId)}`);
   if (f.supplierId) where.push(`e.supplier_id = ${bind(f.supplierId)}`);
-  if (f.paymentMode === 'none') where.push('e.payment_mode IS NULL');
-  else if (f.paymentMode) where.push(`e.payment_mode = ${bind(f.paymentMode)}`);
+  if (f.paymentMode === 'none') where.push('NOT EXISTS (SELECT 1 FROM expense_payments xp WHERE xp.expense_id = e.id)');
+  else if (f.paymentMode) {
+    where.push(`EXISTS (SELECT 1 FROM expense_payments xp WHERE xp.expense_id = e.id AND xp.payment_mode = ${bind(f.paymentMode)})`);
+  }
   if (f.recordedBy) where.push(`e.created_by = ${bind(f.recordedBy)}`);
   return where;
 }
@@ -236,15 +238,27 @@ export interface ModeRow {
   paidAtPurchase: string;
 }
 
-/** Expenses grouped by how the at-purchase payment was made. */
+/**
+ * How the at-purchase payments were made, from the payment allocations. One row per payment
+ * method (amount = paid by that method; an expense paid by several methods counts in each), plus
+ * a null-mode row for what was NOT paid at purchase (the unpaid remainder). Amounts add up to
+ * the total of the filtered expenses.
+ */
 export async function paymentModeBreakdown(db: Queryable, f: ExpenseFilters): Promise<ModeRow[]> {
   const params: unknown[] = [];
   const bind = binder(params);
   const where = ['e.voided_at IS NULL', `e.expense_date BETWEEN ${bind(f.from)}::date AND ${bind(f.to)}::date`, ...expenseConditions(f, bind)];
   const rows = await db.query<{ payment_mode: PaymentMode | null; count: number; amount: string; paid: string }>(
-    `SELECT e.payment_mode, count(*)::int AS count, sum(e.amount)::numeric(20,2) AS amount, sum(e.amount_paid)::numeric(20,2) AS paid
-       FROM expenses e WHERE ${where.join(' AND ')}
-      GROUP BY e.payment_mode ORDER BY sum(e.amount) DESC`,
+    `SELECT payment_mode, count(DISTINCT expense_id)::int AS count, sum(amount)::numeric(20,2) AS amount, sum(paid)::numeric(20,2) AS paid
+       FROM (
+         SELECT xp.payment_mode, e.id AS expense_id, xp.amount, xp.amount AS paid
+           FROM expenses e JOIN expense_payments xp ON xp.expense_id = e.id
+          WHERE ${where.join(' AND ')}
+         UNION ALL
+         SELECT NULL::text, e.id, e.amount - e.amount_paid, 0::numeric
+           FROM expenses e WHERE ${where.join(' AND ')} AND e.amount > e.amount_paid
+       ) m
+      GROUP BY payment_mode ORDER BY sum(amount) DESC`,
     params,
   );
   return rows.rows.map((r) => ({ paymentMode: r.payment_mode, count: r.count, amount: r.amount, paidAtPurchase: r.paid }));
@@ -668,7 +682,7 @@ function transactionsSql(q: TransactionQuery, bind: Bind): string {
   const and = (conds: string[]) => (conds.length ? `WHERE ${conds.join(' AND ')}` : '');
   if (types.has('expense')) {
     parts.push(`SELECT 'expense'::text AS type, e.id, e.expense_date AS date, e.created_at, e.invoice_reference AS reference,
-                       s.name AS entity, s.id AS entity_id, e.description, e.amount,
+                       s.name AS entity, s.id AS entity_id, ${expenseLabelSql('e')} AS description, e.amount,
                        CASE WHEN e.voided_at IS NULL THEN 'active' ELSE 'voided' END AS status, u.name AS recorded_by
                   FROM expenses e LEFT JOIN suppliers s ON s.id = e.supplier_id JOIN users u ON u.id = e.created_by
                   ${and([...date('e.expense_date'), ...search(['e.description', 'e.invoice_reference', 's.name'])])}`);
@@ -766,7 +780,7 @@ export async function recentActivity(db: Queryable, limit = 12): Promise<Transac
   const rows = await db.query<TxnDbRow>(
     `SELECT * FROM (
        (SELECT 'expense'::text AS type, e.id, e.expense_date AS date, e.created_at, e.invoice_reference AS reference, s.name AS entity,
-               s.id AS entity_id, e.description, e.amount, CASE WHEN e.voided_at IS NULL THEN 'active' ELSE 'voided' END AS status,
+               s.id AS entity_id, ${expenseLabelSql('e')} AS description, e.amount, CASE WHEN e.voided_at IS NULL THEN 'active' ELSE 'voided' END AS status,
                u.name AS recorded_by
           FROM expenses e LEFT JOIN suppliers s ON s.id = e.supplier_id JOIN users u ON u.id = e.created_by
          ORDER BY e.created_at DESC LIMIT ${l})

@@ -28,7 +28,7 @@ Copy-Item .env.example .env.test
 Edit them:
 
 - `.env.development` → `DATABASE_URL=postgresql://shop_books_app:<password>@localhost:5432/shop_books_dev`
-- `.env.test` → `DATABASE_URL=postgresql://shop_books_app:<password>@localhost:5432/shop_books_test` (name **must** end in `_test`)
+- `.env.test` → `DATABASE_URL=postgresql://shop_books_app:<password>@localhost:5432/shop_books_test` (**exactly** this name: the server tests refuse any other database; they truncate it on every run, so it is for automated tests only — manual testing uses `shop_books_dev`)
 
 In **both** files set `SESSION_SECRET` to a different random value (required; the server will not start without it):
 
@@ -102,6 +102,7 @@ npm --prefix web run preview   # serve the built web app on http://localhost:417
 | Owner forgot the password / locked out | On the server: `npm run owner:reset-password` (see [maintenance.md](maintenance.md#owner-account-recovery)). |
 | `Invalid configuration: DATABASE_URL: …` on start | Missing/invalid variable. Check `.env.development` exists at the repo root. |
 | `…when NODE_ENV=test the database name must end in "_test"` | `.env.test` points at the wrong database. Use a dedicated `*_test` database. |
+| `Refusing to run the server tests against "…"` / `…with SHOP_BOOKS_ENV_FILE=…` | The tests only ever use `shop_books_test` from `.env.test`. Fix `DATABASE_URL` there, or unset `DATABASE_URL` / `SHOP_BOOKS_ENV_FILE` in the shell. |
 | `password authentication failed` / `ECONNREFUSED` | Wrong credentials, PostgreSQL not running (check the `postgresql-x64-*` service), or wrong port. |
 | Health shows `degraded` / dashboard says "Cannot reach the server" | API not running or database down; start `npm run dev:server`. |
 | Database tests show as skipped | No reachable test database (see above). |

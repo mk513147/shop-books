@@ -95,8 +95,8 @@ describe.skipIf(!pool)('bill documents (critical paths)', () => {
         categoryId,
         description: 'Bill test',
         amount: '100',
-        amountPaid: '0',
-        paymentMode: null,
+        amountPaid: '100',
+        paymentMode: 'cash',
         invoiceReference: null,
       })
     ).body.expense as { id: string; version: number };

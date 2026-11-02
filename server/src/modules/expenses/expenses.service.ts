@@ -2,12 +2,12 @@ import type { Database, Queryable } from '../../database/connection.js';
 import type { Actor } from '../../middleware/auth.js';
 import { todayInReportingZone } from '../../utils/dates.js';
 import { AppError, NotFoundError, ValidationError, type ErrorDetail } from '../../utils/errors.js';
-import { normaliseMoney, toPaise } from '../../utils/money.js';
+import { fromPaise, normaliseMoney, rupees, toPaise } from '../../utils/money.js';
 import { containsPattern } from '../../utils/sql.js';
 import { listAuditHistory, recordFinancialAudit, type AuditHistoryEntry, type AuditSnapshot } from '../audit/financialAudit.js';
 import { withSessionTransaction } from '../auth/sessionTransaction.js';
 import { hashRequest, runIdempotent, type IdempotentResult } from '../idempotency/idempotency.js';
-import type { ExpenseInput, ExpenseListQuery, PaymentMode } from './expenses.schemas.js';
+import type { ExpenseInput, ExpenseListQuery, PaymentLine, PaymentMode } from './expenses.schemas.js';
 
 interface PersonRef {
   id: string;
@@ -21,14 +21,19 @@ export interface Expense {
   /** Supplier text as typed before suppliers existed (migrated expenses only); read-only history. */
   legacySupplierName: string | null;
   category: { id: string; name: string; isActive: boolean };
-  description: string;
+  /** Optional free text; null when none was given (clients then show the category name). */
+  description: string | null;
   /** Money: decimal strings, e.g. "1250.00". */
   amount: string;
+  /** Paid at purchase: always the exact sum of `payments`. */
   amountPaid: string;
+  /** How the paid-at-purchase amount was made up, one row per payment method (empty when unpaid). */
+  payments: PaymentLine[];
   /** Derived: active supplier-payment allocations settling this bill (Stage 3C). */
   allocatedPayments: string;
   /** Derived: amount - amountPaid - allocatedPayments (never stored). */
   outstanding: string;
+  /** The first payment's method (summary of `payments`); null when nothing was paid. */
   paymentMode: PaymentMode | null;
   invoiceReference: string | null;
   status: 'active' | 'voided';
@@ -51,7 +56,7 @@ interface ExpenseRow {
   supplier_id: string | null;
   supplier_name: string | null;
   supplier_active: boolean | null;
-  description: string;
+  description: string | null;
   amount: string;
   amount_paid: string;
   allocated: string;
@@ -97,7 +102,9 @@ const SELECT_EXPENSE = `
     LEFT JOIN users vu ON vu.id = e.voided_by
     CROSS JOIN LATERAL (${ALLOCATED_SQL}) al`;
 
-function toExpense(row: ExpenseRow): Expense {
+type ExpenseRowWithPayments = ExpenseRow & { payments: PaymentLine[] };
+
+function toExpense(row: ExpenseRowWithPayments): Expense {
   return {
     id: row.id,
     expenseDate: row.expense_date,
@@ -109,6 +116,7 @@ function toExpense(row: ExpenseRow): Expense {
     description: row.description,
     amount: row.amount,
     amountPaid: row.amount_paid,
+    payments: row.payments,
     allocatedPayments: row.allocated,
     outstanding: row.outstanding,
     paymentMode: row.payment_mode,
@@ -127,7 +135,7 @@ function toExpense(row: ExpenseRow): Expense {
 }
 
 /** Business fields recorded in the financial audit log (as of the change, incl. supplier/category names). */
-function snapshot(row: ExpenseRow): AuditSnapshot {
+function snapshot(row: ExpenseRowWithPayments): AuditSnapshot {
   return {
     expenseDate: row.expense_date,
     supplierId: row.supplier_id,
@@ -138,38 +146,95 @@ function snapshot(row: ExpenseRow): AuditSnapshot {
     amount: row.amount,
     amountPaid: row.amount_paid,
     paymentMode: row.payment_mode,
+    // "upi:1000.00,cash:1500.00" (audit snapshots hold primitives only).
+    payments: row.payments.length ? row.payments.map((p) => `${p.paymentMode}:${p.amount}`).join(',') : null,
     invoiceReference: row.invoice_reference,
     status: row.voided_at ? 'voided' : 'active',
     voidReason: row.void_reason,
   };
 }
 
-async function selectExpense(client: Queryable, id: string, lock = false): Promise<ExpenseRow> {
+/** Payment rows of the given expenses, in the order the user entered them. */
+export async function loadPayments(client: Queryable, ids: string[]): Promise<Map<string, PaymentLine[]>> {
+  const byExpense = new Map<string, PaymentLine[]>();
+  if (ids.length === 0) return byExpense;
+  const result = await client.query<{ expense_id: string; payment_mode: PaymentMode; amount: string }>(
+    `SELECT expense_id, payment_mode, amount FROM expense_payments WHERE expense_id = ANY($1::uuid[]) ORDER BY expense_id, position`,
+    [ids],
+  );
+  for (const r of result.rows) {
+    const lines = byExpense.get(r.expense_id) ?? [];
+    lines.push({ paymentMode: r.payment_mode, amount: r.amount });
+    byExpense.set(r.expense_id, lines);
+  }
+  return byExpense;
+}
+
+async function selectExpense(client: Queryable, id: string, lock = false): Promise<ExpenseRowWithPayments> {
   if (lock) await client.query(`SELECT 1 FROM expenses WHERE id = $1 FOR UPDATE`, [id]);
   const result = await client.query<ExpenseRow>(`${SELECT_EXPENSE} WHERE e.id = $1`, [id]);
   const row = result.rows[0];
   if (!row) throw new NotFoundError('Expense not found');
-  return row;
+  return { ...row, payments: (await loadPayments(client, [id])).get(id) ?? [] };
 }
 
-/** Cross-field financial rules, checked on every create and update (the DB re-checks them too). */
-function validateFinancials(input: ExpenseInput, current?: ExpenseRow): void {
+/** Order-sensitive identity of a payment list, for change detection. */
+const paymentsKey = (payments: PaymentLine[]): string => payments.map((p) => `${p.paymentMode}:${p.amount}`).join(',');
+
+const paidTotal = (input: ExpenseInput): bigint => input.payments.reduce((sum, p) => sum + toPaise(p.amount), 0n);
+
+/** Replaces the allocation rows of an expense (inside the caller's transaction). */
+async function writePayments(client: Queryable, expenseId: string, payments: PaymentLine[]): Promise<void> {
+  await client.query(`DELETE FROM expense_payments WHERE expense_id = $1`, [expenseId]);
+  for (const [index, p] of payments.entries()) {
+    await client.query(
+      `INSERT INTO expense_payments (expense_id, position, payment_mode, amount) VALUES ($1, $2, $3, $4::numeric)`,
+      [expenseId, index + 1, p.paymentMode, p.amount],
+    );
+  }
+}
+
+/**
+ * Cross-field financial rules, checked on every create and update (the DB re-checks them too).
+ * All amounts are compared as integer paise; nothing here uses floating point.
+ *
+ * Payments must add up to the amount paid at purchase. A bill with a supplier may be paid only
+ * in part or not at all (the rest stays payable to that supplier); any other expense must be
+ * paid in full. Historic supplier-less expenses that were saved part-paid may keep that state as
+ * long as neither their amount nor their payments change.
+ */
+function validateFinancials(input: ExpenseInput, current?: ExpenseRowWithPayments): void {
   const issues: ErrorDetail[] = [];
   const amount = toPaise(input.amount);
-  const paid = toPaise(input.amountPaid);
+  const paid = paidTotal(input);
 
   if (amount <= 0n) issues.push({ path: 'amount', message: 'The amount must be greater than zero' });
+  input.payments.forEach((p, i) => {
+    if (toPaise(p.amount) <= 0n) issues.push({ path: `payments.${i}.amount`, message: 'The payment amount must be greater than zero' });
+  });
   if (paid > amount) {
     const reducingBelowPaid = current !== undefined && toPaise(current.amount_paid) === paid && toPaise(current.amount) !== amount;
     issues.push({
-      path: reducingBelowPaid ? 'amount' : 'amountPaid',
+      path: reducingBelowPaid ? 'amount' : 'payments',
       message: reducingBelowPaid
-        ? `The amount cannot be less than the amount already paid (₹${current.amount_paid}). Correct the amount paid first if it was wrong.`
-        : 'The amount paid cannot be more than the total amount',
+        ? `The amount cannot be less than the amount already paid (₹${current.amount_paid}). Correct the payments first if they were wrong.`
+        : `The payments total ${rupees(paid)}, which is more than the expense amount ${rupees(amount)} (${rupees(paid - amount)} over)`,
     });
-  }
-  if (paid > 0n && input.paymentMode === null) {
-    issues.push({ path: 'paymentMode', message: 'Choose how the payment was made' });
+  } else if (paid < amount && input.supplierId === null) {
+    // A historic supplier-less part-paid expense may be edited (description, date, ...) as it is,
+    // but only while both its amount and what was paid stay exactly as recorded.
+    const keepsLegacyState =
+      current !== undefined &&
+      current.supplier_id === null &&
+      toPaise(current.amount) === amount &&
+      toPaise(current.amount_paid) === paid &&
+      paid < amount;
+    if (!keepsLegacyState) {
+      issues.push({
+        path: 'payments',
+        message: `The payments total ${rupees(paid)}, but the expense amount is ${rupees(amount)} (${rupees(amount - paid)} remaining). The payments must add up to the full amount.`,
+      });
+    }
   }
   if (input.expenseDate > todayInReportingZone()) {
     issues.push({ path: 'expenseDate', message: 'The expense date cannot be in the future' });
@@ -185,6 +250,7 @@ function validateFinancials(input: ExpenseInput, current?: ExpenseRow): void {
  * the supplier cannot change, and amount - amount paid at purchase must still cover the allocations.
  */
 function assertAllocationsKept(input: ExpenseInput, current: ExpenseRow): void {
+  const paid = paidTotal(input);
   const allocated = toPaise(current.allocated);
   if (allocated === 0n) return;
   if (input.supplierId !== current.supplier_id) {
@@ -194,10 +260,10 @@ function assertAllocationsKept(input: ExpenseInput, current: ExpenseRow): void {
       `Supplier payments (₹${current.allocated}) are allocated to this bill, so its supplier cannot change. Release those allocations first.`,
     );
   }
-  if (toPaise(input.amount) - toPaise(input.amountPaid) < allocated) {
+  if (toPaise(input.amount) - paid < allocated) {
     throw new ValidationError([
       {
-        path: toPaise(input.amount) !== toPaise(current.amount) ? 'amount' : 'amountPaid',
+        path: toPaise(input.amount) !== toPaise(current.amount) ? 'amount' : 'payments',
         message: `Supplier payments of ₹${current.allocated} are allocated to this bill: the amount minus the amount paid at purchase cannot be less than that.`,
       },
     ]);
@@ -232,8 +298,15 @@ async function assertSupplierUsable(client: Queryable, supplierId: string): Prom
 }
 
 function normalised(input: ExpenseInput): ExpenseInput {
-  return { ...input, amount: normaliseMoney(input.amount), amountPaid: normaliseMoney(input.amountPaid) };
+  return {
+    ...input,
+    amount: normaliseMoney(input.amount),
+    payments: input.payments.map((p) => ({ ...p, amount: normaliseMoney(p.amount) })),
+  };
 }
+
+/** Payment method summarised on the expense row: the first payment's (null when nothing was paid). */
+const primaryMode = (input: ExpenseInput): PaymentMode | null => input.payments[0]?.paymentMode ?? null;
 
 async function insertExpense(client: Queryable, input: ExpenseInput, actor: Actor): Promise<Expense> {
   await assertCategoryUsable(client, input.categoryId);
@@ -249,12 +322,13 @@ async function insertExpense(client: Queryable, input: ExpenseInput, actor: Acto
       input.categoryId,
       input.description,
       input.amount,
-      input.amountPaid,
-      input.paymentMode,
+      fromPaise(paidTotal(input)),
+      primaryMode(input),
       input.invoiceReference,
       actor.userId,
     ],
   );
+  await writePayments(client, inserted.rows[0]!.id, input.payments);
   const row = await selectExpense(client, inserted.rows[0]!.id);
   await recordFinancialAudit(client, {
     entityType: 'expense',
@@ -295,7 +369,7 @@ async function lockForChange(
   id: string,
   expectedVersion: number,
   mustBeVoided: boolean,
-): Promise<ExpenseRow> {
+): Promise<ExpenseRowWithPayments> {
   const current = await selectExpense(client, id, true);
   if (current.version !== expectedVersion) {
     throw new AppError(
@@ -336,8 +410,7 @@ export async function updateExpense(
       input.categoryId === current.category_id &&
       input.description === current.description &&
       input.amount === current.amount &&
-      input.amountPaid === current.amount_paid &&
-      input.paymentMode === current.payment_mode &&
+      paymentsKey(input.payments) === paymentsKey(current.payments) &&
       input.invoiceReference === current.invoice_reference;
     if (unchanged) return toExpense(current);
 
@@ -354,12 +427,13 @@ export async function updateExpense(
         input.categoryId,
         input.description,
         input.amount,
-        input.amountPaid,
-        input.paymentMode,
+        fromPaise(paidTotal(input)),
+        primaryMode(input),
         input.invoiceReference,
         actor.userId,
       ],
     );
+    await writePayments(client, id, input.payments);
     const after = await selectExpense(client, id);
     await recordFinancialAudit(client, {
       entityType: 'expense',
@@ -472,8 +546,10 @@ export async function listExpenses(db: Queryable, query: ExpenseListQuery): Prom
   if (query.to) where.push(`e.expense_date <= ${bind(query.to)}::date`);
   if (query.categoryId) where.push(`e.category_id = ${bind(query.categoryId)}`);
   if (query.supplierId) where.push(`e.supplier_id = ${bind(query.supplierId)}`);
-  if (query.paymentMode === 'none') where.push('e.payment_mode IS NULL');
-  else if (query.paymentMode) where.push(`e.payment_mode = ${bind(query.paymentMode)}`);
+  if (query.paymentMode === 'none') where.push('NOT EXISTS (SELECT 1 FROM expense_payments xp WHERE xp.expense_id = e.id)');
+  else if (query.paymentMode) {
+    where.push(`EXISTS (SELECT 1 FROM expense_payments xp WHERE xp.expense_id = e.id AND xp.payment_mode = ${bind(query.paymentMode)})`);
+  }
   if (query.recordedBy) where.push(`e.created_by = ${bind(query.recordedBy)}`);
   if (query.minAmount) where.push(`e.amount >= ${bind(query.minAmount)}::numeric`);
   if (query.maxAmount) where.push(`e.amount <= ${bind(query.maxAmount)}::numeric`);
@@ -500,8 +576,9 @@ export async function listExpenses(db: Queryable, query: ExpenseListQuery): Prom
   );
 
   const s = summary.rows[0]!;
+  const payments = await loadPayments(db, rows.rows.map((r) => r.id));
   return {
-    items: rows.rows.map(toExpense),
+    items: rows.rows.map((r) => toExpense({ ...r, payments: payments.get(r.id) ?? [] })),
     pagination: {
       page: query.page,
       pageSize: query.pageSize,

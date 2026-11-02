@@ -33,7 +33,9 @@ function Amount({ entry }: { entry: SupplierLedgerEntry }) {
 
 function detailLine(e: SupplierLedgerEntry): string {
   const parts: string[] = [];
-  if (e.paymentMode) parts.push(PAYMENT_MODE_LABELS[e.paymentMode]);
+  // Paid at purchase with several methods: "UPI ₹1,000.00 + Cash ₹1,500.00" (the entry's debit is their total).
+  if (e.payments && e.payments.length > 1) parts.push(e.payments.map((p) => `${PAYMENT_MODE_LABELS[p.paymentMode]} ${formatInr(p.amount)}`).join(' + '));
+  else if (e.paymentMode) parts.push(PAYMENT_MODE_LABELS[e.paymentMode]);
   if (e.reference) parts.push(e.reference);
   if (e.type === 'payment' && e.counted && e.allocated !== null) parts.push(`${formatInr(e.allocated)} allocated`);
   if (e.type === 'bill' && e.counted && e.allocated && e.allocated !== '0.00') parts.push(`${formatInr(e.allocated)} settled by payments`);
@@ -157,8 +159,8 @@ export function SupplierLedgerPage() {
                     </div>
                     <Amount entry={e} />
                   </div>
-                  <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">{detailLine(e)}</span>
+                  <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+                    <span className="min-w-0 break-words">{detailLine(e)}</span>
                     {e.counted ? <span className="figure shrink-0">Balance {formatInr(e.runningBalance)}</span> : <StatusBadge status={e.status} />}
                   </div>
                 </Link>

@@ -18,8 +18,8 @@ import {
 } from '@/features/expenses/expenses-api';
 import { formatDate, formatDateTime } from '@/lib/dates';
 import { formatInr } from '@/lib/money';
-import { cn } from '@/lib/utils';
-import type { PaymentMode } from '@/types/api';
+import { cn, expenseLabel } from '@/lib/utils';
+import type { AuditHistoryEntry, PaymentMode } from '@/types/api';
 
 const FIELD_LABELS: Record<string, string> = {
   expenseDate: 'Date',
@@ -29,15 +29,37 @@ const FIELD_LABELS: Record<string, string> = {
   amount: 'Amount',
   amountPaid: 'Amount paid at purchase',
   paymentMode: 'Payment mode',
+  payments: 'Payments',
   invoiceReference: 'Invoice ref.',
   status: 'Status',
   voidReason: 'Void reason',
 };
 
+/** Audit snapshots store payments as "upi:1000.00,cash:1500.00". */
+function paymentsText(value: string): string {
+  return value
+    .split(',')
+    .map((part) => {
+      const [mode = '', amount = '0'] = part.split(':');
+      return `${PAYMENT_MODE_LABELS[mode as PaymentMode] ?? mode} ${formatInr(amount)}`;
+    })
+    .join(' + ');
+}
+
+/**
+ * Since migration 0010 an edit to the payments also records the summary `paymentMode` (the first
+ * payment's method). When the same entry shows the full "Payments" change, that line is redundant.
+ * Older entries (no `payments` field) keep their "Payment mode" line. Stored records are unchanged.
+ */
+export function hideRedundantChange(change: AuditHistoryEntry['changes'][number], entry: AuditHistoryEntry): boolean {
+  return change.field === 'paymentMode' && entry.changes.some((c) => c.field === 'payments');
+}
+
 function displayValue(field: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   if (field === 'amount' || field === 'amountPaid') return formatInr(String(value));
   if (field === 'expenseDate') return formatDate(String(value));
+  if (field === 'payments') return paymentsText(String(value));
   if (field === 'paymentMode') return PAYMENT_MODE_LABELS[value as PaymentMode] ?? String(value);
   return String(value);
 }
@@ -81,7 +103,7 @@ export function ExpenseDetailPage() {
     <Page width="narrow">
       <PageHeader
         back={{ to: '/expenses', label: 'Expenses' }}
-        title={e.description}
+        title={expenseLabel(e)}
         actions={
           voided ? (
             <Button variant="outline" size="sm" onClick={() => setDialog('restore')}>
@@ -154,7 +176,22 @@ export function ExpenseDetailPage() {
               {e.category.name}
               {!e.category.isActive && <span className="text-muted-foreground"> (archived)</span>}
             </Row>
-            <Row label="Payment mode">{e.paymentMode ? PAYMENT_MODE_LABELS[e.paymentMode] : '—'}</Row>
+            <Row label={e.payments.length > 1 ? 'Payments' : 'Payment mode'}>
+              {e.payments.length === 0 ? (
+                '—'
+              ) : e.payments.length === 1 ? (
+                PAYMENT_MODE_LABELS[e.payments[0]!.paymentMode]
+              ) : (
+                <ul className="space-y-0.5">
+                  {e.payments.map((p, i) => (
+                    <li key={i} className="flex justify-between gap-3 sm:max-w-xs">
+                      <span>{PAYMENT_MODE_LABELS[p.paymentMode]}</span>
+                      <span className="figure">{formatInr(p.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Row>
             <Row label="Invoice ref.">{e.invoiceReference ?? '—'}</Row>
             <Row label="Recorded by">
               {e.createdBy.name} · {formatDateTime(e.createdAt)}
@@ -180,7 +217,7 @@ export function ExpenseDetailPage() {
           <CardTitle>History</CardTitle>
         </CardHeader>
         <CardContent>
-          <AuditHistory history={history} fieldLabels={FIELD_LABELS} display={displayValue} />
+          <AuditHistory history={history} fieldLabels={FIELD_LABELS} display={displayValue} hideChange={hideRedundantChange} />
         </CardContent>
       </Card>
 

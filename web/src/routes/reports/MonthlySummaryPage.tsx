@@ -100,7 +100,7 @@ export function MonthlySummaryPage() {
                   <BarList
                     items={s.paymentModes.map((m) => ({
                       key: m.paymentMode ?? 'none',
-                      label: m.paymentMode ? PAYMENT_MODE_LABELS[m.paymentMode] : 'Nothing paid at purchase',
+                      label: m.paymentMode ? PAYMENT_MODE_LABELS[m.paymentMode] : 'Not paid at purchase',
                       detail: `${m.count} expense(s)`,
                       amount: m.amount,
                     }))}

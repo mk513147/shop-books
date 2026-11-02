@@ -240,4 +240,29 @@ describe.skipIf(!pool)('Excel exports (critical paths)', () => {
     const prev = monthRange(ty, tm - 1);
     expect(prev.from < today).toBe(true);
   });
+
+  it('multi-method payments: listed per method in the expense export and the supplier ledger, counted once', async () => {
+    const cat = (await post(owner, '/categories', { name: 'Split pay' })).category.id;
+    const supplier = (await post(owner, '/suppliers', { name: 'Split Supplier' })).supplier.id;
+    await post(manager, '/expenses', {
+      expenseDate: '2001-01-15',
+      supplierId: supplier,
+      categoryId: cat,
+      description: null,
+      amount: '2500',
+      payments: [
+        { paymentMode: 'upi', amount: '1000' },
+        { paymentMode: 'cash', amount: '1500' },
+      ],
+      invoiceReference: null,
+    });
+    const wb = await download(manager, 'expenses?period=custom&from=2001-01-01&to=2001-01-31');
+    const { rows } = table(wb.getWorksheet('Expenses')!, 'Date');
+    expect(rows[0]).toMatchObject({ Description: null, Category: 'Split pay', Amount: 2500, 'Paid at purchase': 2500, 'Payment methods': 'UPI 1000.00, Cash 1500.00' });
+
+    const ledgerWb = await download(manager, `supplier-ledger?supplierId=${supplier}`);
+    const ledger = table(ledgerWb.getWorksheet('Ledger')!, 'Date').rows.filter((r) => r.Date instanceof Date);
+    expect(ledger.map((r) => r.Type)).toEqual(['Bill', 'Paid at purchase']); // one paid row, not one per method
+    expect(ledger[1]).toMatchObject({ Mode: 'UPI 1000.00, Cash 1500.00', 'Debit (paid)': 2500, Balance: 0 });
+  });
 });

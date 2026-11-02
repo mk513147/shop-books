@@ -1,9 +1,10 @@
 import { loadDatabaseConfig, ConfigError } from '../config/env.js';
 import { loadEnvFiles } from '../config/loadEnvFiles.js';
 import { createPool } from './connection.js';
+import { connectionTarget, operationProblem } from './isolation.js';
 import { getMigrationStatus, MigrationError, runMigrations } from './migrator.js';
 
-const USAGE = 'Usage: db:status | db:migrate [--yes]';
+const USAGE = 'Usage: db:status | db:migrate [--yes] [--confirm-database=<name>]';
 
 async function main(): Promise<number> {
   const [command, ...flags] = process.argv.slice(2);
@@ -21,6 +22,13 @@ async function main(): Promise<number> {
     return 2;
   }
 
+  // Fail closed before connecting anywhere when the URL's target cannot be trusted.
+  const target = connectionTarget(config.databaseUrl);
+  if (command === 'migrate' && target.problem !== null) {
+    console.error(`Refusing to migrate: ${target.problem}. Nothing was changed.`);
+    return 2;
+  }
+
   const pool = createPool(config);
   try {
     if (command === 'status') {
@@ -35,6 +43,14 @@ async function main(): Promise<number> {
       return status.issues.length > 0 ? 1 : 0;
     }
 
+    // Anything but the local dev/test database needs --confirm-database (see operationProblem).
+    const connected = (await pool.query<{ name: string }>('SELECT current_database() AS name')).rows[0]?.name ?? '';
+    const problem = operationProblem(config.nodeEnv, config.databaseUrl, connected, flags);
+    if (problem) {
+      console.error(`Refusing to migrate: ${problem}`);
+      return 2;
+    }
+    console.log(`Migrating database "${connected}" (environment: ${config.nodeEnv}).`);
     const result = await runMigrations(pool, undefined, (file) => console.log(`  applied  ${file.filename}`));
     console.log(
       result.applied.length === 0 ? 'Database is up to date.' : `Applied ${result.applied.length} migration(s).`,

@@ -37,6 +37,9 @@ const MODE_LABELS: Record<PaymentMode, string> = {
   other: 'Other',
 };
 const mode = (m: PaymentMode | null | undefined) => (m ? MODE_LABELS[m] : '');
+/** "UPI 1000.00, Cash 1500.00" for several methods; just the method name for one; empty when unpaid. */
+const paymentMethods = (payments: { paymentMode: PaymentMode; amount: string }[]) =>
+  payments.map((p) => (payments.length > 1 ? `${MODE_LABELS[p.paymentMode]} ${p.amount}` : MODE_LABELS[p.paymentMode])).join(', ');
 
 const TXN_LABELS: Record<TransactionRow['type'], string> = {
   expense: 'Expense',
@@ -120,7 +123,7 @@ export async function exportExpenses(
     { header: 'Invoice ref.', width: 14, type: 'text', value: (e) => e.invoiceReference },
     { header: 'Amount', width: 14, type: 'money', value: (e) => e.amount },
     { header: 'Paid at purchase', width: 15, type: 'money', value: (e) => e.amountPaid },
-    { header: 'Mode', width: 13, type: 'text', value: (e) => mode(e.paymentMode) },
+    { header: 'Payment methods', width: 26, type: 'text', value: (e) => paymentMethods(e.payments) },
     { header: 'Settled by payments', width: 16, type: 'money', value: (e) => e.allocatedPayments },
     { header: 'Outstanding', width: 14, type: 'money', value: (e) => e.outstanding },
     { header: 'Status', width: 10, type: 'text', value: (e) => e.status },
@@ -316,7 +319,7 @@ export async function exportSupplierLedger(
     { header: 'Type', width: 16, type: 'text', value: (e) => TYPES[e.type] },
     { header: 'Reference', width: 16, type: 'text', value: (e) => e.reference },
     { header: 'Description', width: 32, type: 'text', value: (e) => e.description },
-    { header: 'Mode', width: 13, type: 'text', value: (e) => mode(e.paymentMode) },
+    { header: 'Mode', width: 26, type: 'text', value: (e) => (e.payments && e.payments.length > 1 ? paymentMethods(e.payments) : mode(e.paymentMode)) },
     { header: 'Credit (bill)', width: 14, type: 'money', value: (e) => (e.credit === '0.00' ? null : e.credit) },
     { header: 'Debit (paid)', width: 14, type: 'money', value: (e) => (e.debit === '0.00' ? null : e.debit) },
     { header: 'Balance', width: 14, type: 'money', value: (e) => (e.counted ? e.runningBalance : null) },
@@ -523,7 +526,7 @@ export async function buildMonthlyWorkbook(db: Queryable, shopName: string, s: M
     { header: 'Change', width: 9, type: 'percent', value: (c) => c.changePercent },
   ], s.categories, { 2: s.expenses.amount, 4: s.expenses.previous.amount });
   addTableSheet(wb, 'Payment Modes', meta, [
-    { header: 'Mode at purchase', width: 26, type: 'text', value: (m) => (m.paymentMode ? MODE_LABELS[m.paymentMode] : 'Nothing paid at purchase') },
+    { header: 'Mode at purchase', width: 26, type: 'text', value: (m) => (m.paymentMode ? MODE_LABELS[m.paymentMode] : 'Not paid at purchase') },
     { header: 'Expenses', width: 10, type: 'int', value: (m) => m.count },
     { header: 'Amount', width: 15, type: 'money', value: (m) => m.amount },
     { header: 'Paid at purchase', width: 16, type: 'money', value: (m) => m.paidAtPurchase },

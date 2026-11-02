@@ -151,10 +151,14 @@ describe.skipIf(!pool)('Stage 6 release-readiness checks', () => {
         const date = pick(DATES);
         if (op < 0.22) {
           const amount = money(5000);
-          const paid = r() < 0.4 ? '0' : r() < 0.5 ? amount : S((P(amount) * BigInt(Math.floor(r() * 100))) / 100n);
+          const drawnPaid = r() < 0.4 ? '0' : r() < 0.5 ? amount : S((P(amount) * BigInt(Math.floor(r() * 100))) / 100n);
+          const supplierId = r() < 0.85 ? pick(suppliers) : null;
+          // Only a supplier bill may stay unpaid or part-paid; any other expense is paid in full.
+          // (Same random draws, in the same order, as before, so each seed replays its history.)
+          const paid = supplierId === null ? amount : drawnPaid;
           const res = await call(actor(), 'post', '/expenses', {
             expenseDate: date,
-            supplierId: r() < 0.85 ? pick(suppliers) : null,
+            supplierId,
             categoryId: pick(categories),
             description: r() < 0.1 ? '+cmd description' : `Bill ${i}`,
             amount,

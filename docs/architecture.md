@@ -74,18 +74,25 @@ Code: `server/src/modules/{categories,expenses,audit}/`, `server/src/utils/{mone
 | `GET /categories?status=active\|archived\|all` | list (with usage counts) |
 | `POST /categories` | `{name, description?}` → 201; 409 `CATEGORY_NAME_TAKEN` |
 | `PATCH /categories/:id` | `{name?, description?, isActive?}`: rename, archive (`isActive:false`), reactivate |
-| `GET /expenses` | server-side filter/sort/page: `q` (supplier name, originally typed supplier name, description, invoice; `%`/`_` matched literally), `from`, `to`, `categoryId`, `supplierId`, `paymentMode` (`none` = unpaid), `recordedBy`, `status` (`active` default, `voided`, `all`), `minAmount`, `maxAmount`, `sort` (`date`\|`amount`\|`created`), `order`, `page`, `pageSize` (≤ 100). Returns `items`, `pagination`, and `totals` over **all** matching rows **excluding voided** |
+| `GET /expenses` | server-side filter/sort/page: `q` (supplier name, originally typed supplier name, description, invoice; `%`/`_` matched literally), `from`, `to`, `categoryId`, `supplierId`, `paymentMode` (matches **any** payment row of an expense; `none` = nothing paid at purchase), `recordedBy`, `status` (`active` default, `voided`, `all`), `minAmount`, `maxAmount`, `sort` (`date`\|`amount`\|`created`), `order`, `page`, `pageSize` (≤ 100). Returns `items`, `pagination`, and `totals` over **all** matching rows **excluding voided** |
 | `GET /expenses/recorders` | users who have recorded expenses (filter options; names only) |
-| `POST /expenses` | create → 201; optional `Idempotency-Key` header (see below) |
+| `POST /expenses` | create → 201; optional `Idempotency-Key` header (see below). Body: `expenseDate, supplierId, categoryId, description` (optional; empty → `null`), `amount`, `payments: [{amount, paymentMode}]` (0–10 rows; see payment rules), `invoiceReference`. The older single-payment fields `amountPaid` + `paymentMode` are still accepted instead of `payments` (never both). |
 | `GET /expenses/:id` | detail |
-| `PATCH /expenses/:id` | full set of fields + `version` |
+| `PATCH /expenses/:id` | full set of fields (including the complete `payments` list, which replaces the previous one) + `version` |
 | `POST /expenses/:id/void` | `{reason, version}` |
 | `POST /expenses/:id/restore` | `{reason, version}` |
 | `GET /expenses/:id/history` | audit history, newest first, with field-level changes |
 
 **Financial rules** (validated by Zod + service code, and again by database CHECKs):
 - Money is `NUMERIC(14,2)` / decimal strings (`^\d{1,12}(\.\d{1,2})?$`); JS numbers are rejected. Comparisons use integer paise (`BigInt`); sums and `outstanding` are computed in SQL.
-- `amount > 0`; `0 <= amount_paid <= amount`; payment mode required when anything was paid.
+- `amount > 0`; `0 <= amount_paid <= amount`.
+- **Payments at purchase (migration 0010).** An expense can be paid with several methods (e.g. UPI 1000 + Cash 1500). Each row of `expense_payments` has a positive `amount` and a valid `payment_mode`. `amount_paid` is always the **exact sum** of the rows (deferred database constraint trigger, checked at commit); `payment_mode` on the expense mirrors the first row as a summary. Rules, compared in integer paise:
+  - a **supplier bill** may be paid in full, in part or not at all (the remainder stays payable to the supplier and can be settled later by supplier payments);
+  - an expense **without a supplier must be paid in full** (payments = amount);
+  - historic supplier-less part-paid expenses (created before this rule) stay editable as long as neither their amount nor their paid total changes;
+  - payments can never exceed the amount, nor (with supplier-payment allocations) leave less payable than is already allocated.
+  Saving replaces the rows inside the same transaction as the expense update and its audit entry. Responses include `payments` (in entry order) plus `amountPaid`/`paymentMode`. Expense payment rows are **not** supplier payments (`supplier_payments`/allocations are a separate concept).
+- **Description is optional**; lists and labels show the category name when it is empty.
 - Outstanding = `amount - amount_paid`, derived, never stored or editable.
 - An edit that would make `amount` lower than the amount already paid is rejected (the paid amount is never adjusted silently).
 - Expense date: real calendar date, not in the future (Asia/Kolkata), not before 2000.
@@ -96,7 +103,7 @@ Code: `server/src/modules/{categories,expenses,audit}/`, `server/src/utils/{mone
 
 **Voiding** sets `voided_at/by/reason` and bumps the version; every original value is kept. Voided rows are hidden from the default list, visible with `status=voided`/`all`, excluded from totals, and never deleted (database trigger).
 
-**Financial audit.** `recordFinancialAudit()` writes a before/after snapshot (`expenseDate, supplierId, supplierName, categoryId, categoryName, description, amount, amountPaid, paymentMode, invoiceReference, status, voidReason`) in the same transaction as each create/update/void/restore, and for category create/update/archive/reactivate. History is served with a computed list of changed fields. (Snapshots written before migration 0004 have `supplierName` = the typed text and no `supplierId`; they are never rewritten.)
+**Financial audit.** `recordFinancialAudit()` writes a before/after snapshot (`expenseDate, supplierId, supplierName, categoryId, categoryName, description, amount, amountPaid, paymentMode, payments, invoiceReference, status, voidReason`; `payments` is a text summary such as `upi:1000.00,cash:1500.00`, present in entries written after migration 0010 — older entries are shown exactly as recorded) in the same transaction as each create/update/void/restore, and for category create/update/archive/reactivate. History is served with a computed list of changed fields. (Snapshots written before migration 0004 have `supplierName` = the typed text and no `supplierId`; they are never rewritten.)
 
 ## Suppliers and category suggestions (Stage 3A enhancement)
 

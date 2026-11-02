@@ -44,10 +44,13 @@ export function AuditHistory({
   history,
   fieldLabels,
   display,
+  hideChange,
 }: {
   history: UseQueryResult<AuditHistoryEntry[]>;
   fieldLabels: Record<string, string>;
   display: (field: string, value: unknown) => string;
+  /** Hides a change line that another line of the same entry already describes (display only). */
+  hideChange?: (change: AuditHistoryEntry['changes'][number], entry: AuditHistoryEntry) => boolean;
 }) {
   if (history.isPending) return <LoadingState label="Loading history…" />;
   if (history.isError) return <ErrorState error={history.error} onRetry={() => void history.refetch()} />;
@@ -67,7 +70,7 @@ export function AuditHistory({
           {itemText(entry) === null && entry.changes.length > 0 && (
             <ul className="mt-1.5 space-y-0.5">
               {entry.changes
-                .filter((c) => c.field in fieldLabels)
+                .filter((c) => c.field in fieldLabels && !hideChange?.(c, entry))
                 .map((c) => (
                   <li key={c.field} className="break-words">
                     <span className="text-muted-foreground">{fieldLabels[c.field]}:</span>{' '}

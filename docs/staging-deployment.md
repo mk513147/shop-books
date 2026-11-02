@@ -1,6 +1,6 @@
 # Staging: frontend on Vercel, backend on your Windows PC (Cloudflare Tunnel)
 
-**Purpose:** test Shop-Books on an Android phone (installed as a PWA) while the API, PostgreSQL and the bill-document folder stay on your PC. This is a **testing** setup, not production. Use **test data only**.
+**Purpose:** test Shop-Books on an Android phone (installed as a PWA) while the API, PostgreSQL and the bill-document folder stay on your PC. This is a **testing** setup, not production. It serves the **development database `shop_books_dev`** (there is no separate staging database for now; see [database.md → Databases](database.md#databases-and-what-may-touch-them)).
 
 ```
  Android phone (Chrome / installed PWA)
@@ -13,7 +13,7 @@
                                 ▼
                     Windows PC ─ cloudflared ──► http://127.0.0.1:3000   Shop-Books API (Express)
                                                     ├── PostgreSQL localhost:5432  (NOT exposed)
-                                                    └── D:\ShopBooksStaging\documents (NOT exposed)
+                                                    └── <repo>\storage\documents (NOT exposed)
 ```
 
 Only the API port is published, and only through the tunnel. PostgreSQL (5432) and the document folder are never exposed; the API itself serves no static files.
@@ -32,15 +32,16 @@ Only the API port is published, and only through the tunnel. PostgreSQL (5432) a
 
 ## 2. One-time preparation on the PC
 
-### 2.1 A separate staging database (do not use your real data or the development database)
+### Databases (read first)
 
-The development database is still at migration 0004; the current code needs 0001–0009. Create a **separate** database for staging (PowerShell, `psql` path for PostgreSQL 18):
+The tunnel backend uses **`shop_books_dev`**, the same database as `npm run dev:server`, so manual tests in the browser and on the phone see one set of data. That data is **persistent**: nothing automated may reset it.
 
-```powershell
-& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE shop_books_staging OWNER shop_books_app;"
-```
+- **`shop_books_test` is for the automated server tests only and is wiped on every test run.** Never point `.env.staging` (or anything else) at it. The tests refuse to run against any other database, and refuse `SHOP_BOOKS_ENV_FILE`, so they cannot reach the development data.
+- There is **no staging database** for now. To add one later: create e.g. `shop_books_staging`, point `.env.staging` at it with `NODE_ENV=production` (the isolation guard only accepts a `*staging*` database in production mode) and its own `DOCUMENT_STORAGE_DIR`, and migrate it with `--confirm-database=shop_books_staging`.
+- Production will have its own hosted database; it is not configured anywhere in this repository.
+- Earlier (until 2026-11-02) `.env.staging` pointed at `shop_books_test`, and the automated tests wiped that staging data. The bill file left from then, `D:\ShopBooksStaging\documents\b9\…`, is an orphan kept untouched; nothing uses that folder any more.
 
-### 2.2 Backend configuration
+### 2.1 Backend configuration (`.env.staging`, the tunnel profile)
 
 ```powershell
 cd D:\Projects\Shop-Books
@@ -48,23 +49,23 @@ Copy-Item .env.staging.example .env.staging     # gitignored; never commit it
 notepad .env.staging
 ```
 
-Fill in: `DATABASE_URL` (…`/shop_books_staging`), a new `SESSION_SECRET`, your Vercel domain in `FRONTEND_URL`, and `DOCUMENT_STORAGE_DIR`. Keep `HOST=127.0.0.1`, `COOKIE_SECURE=true`, `SESSION_COOKIE_SAMESITE=none`, `TRUST_PROXY=true`, `EMAIL_PROVIDER=none`.
+Fill in: `DATABASE_URL` (…`/shop_books_dev`, the same as `.env.development`), a `SESSION_SECRET` different from development's, and your Vercel domain in `FRONTEND_URL`. Keep `NODE_ENV=development`, `HOST=127.0.0.1`, `COOKIE_SECURE=true`, `SESSION_COOKIE_SAMESITE=none`, `TRUST_PROXY=true`, `EMAIL_PROVIDER=none`, `REPORT_SCHEDULER_ENABLED=false`, and leave `DOCUMENT_STORAGE_DIR` unset (bill files then go to `<repo>\storage\documents`, as with `npm run dev:server`).
 
-`SHOP_BOOKS_ENV_FILE=.env.staging` makes the server, `db:*` commands and the owner CLI read that file instead of `.env.development` (it must be a `.env.<name>` file in the repository root and must exist).
+`SHOP_BOOKS_ENV_FILE=.env.staging` makes the server, `db:*` commands and the owner CLI read that file instead of `.env.development` (it must be a `.env.<name>` file in the repository root and must exist). The automated tests refuse to run while it is set.
 
-### 2.3 Migrate the staging database and create its owner (only this database)
+Only one backend can listen on port 3000: stop `npm run dev:server` before starting the tunnel profile (both use the same database, so nothing is lost).
+
+### 2.2 Migrations and owner (development database)
 
 ```powershell
-$env:SHOP_BOOKS_ENV_FILE = ".env.staging"
-npm run db:status          # must say: Environment: development … and list the staging database's migrations
-npm run db:migrate
-npm run owner:create       # owner for STAGING (use a test e-mail/password)
-Remove-Item Env:SHOP_BOOKS_ENV_FILE
+npm run db:status          # must say: Environment: development, and list shop_books_dev's migrations
+# if anything is PENDING: back up first (see database.md → "Databases and what may touch them"), then
+npm run db:migrate         # prints: Migrating database "shop_books_dev" …
 ```
 
-Check the `db:status` output before migrating: it must be the staging database (the URL comes from `.env.staging`).
+Use the existing development owner account. `owner:create` is only needed for an empty database.
 
-### 2.4 Install cloudflared
+### 2.3 Install cloudflared
 
 ```powershell
 winget install --id Cloudflare.cloudflared
@@ -187,13 +188,13 @@ The web app (`*.vercel.app`) and the API (`*.trycloudflare.com` or your domain) 
 | Backend refuses to start: `SESSION_COOKIE_SAMESITE: "none" requires Secure cookies` | Set `COOKIE_SECURE=true`. |
 | `SHOP_BOOKS_ENV_FILE … not found` | Run commands from the repository root and create `.env.staging`. |
 | 404 on refresh of a page | `web/vercel.json` missing from the deployment, or Root Directory is not `web`. |
-| Features missing / server errors about tables | The staging database is not migrated (`$env:SHOP_BOOKS_ENV_FILE=".env.staging"; npm run db:migrate`). |
+| Features missing / server errors about tables | The development database is not migrated (`npm run db:status`; back up, then `npm run db:migrate`). |
 
 ## 9. Security limitations of this setup
 
 - While the tunnel runs, the API is reachable from the internet by anyone who knows the URL. It is protected by sign-in, account lockout, the per-IP limit, CSRF and CORS, but it is still your PC: run the tunnel only while testing.
 - The Vercel site itself is public (it contains no data; only the API address is visible in its JavaScript).
-- Use a separate staging database and document folder with **test data only**; no real financial records.
+- The tunnel serves `shop_books_dev`: keep **test data only** in it (no real financial records) while the tunnel is used.
 - No e-mail is sent (`EMAIL_PROVIDER=none`); leave monthly reports disabled in staging.
 - Rate limits for uploads/exports are held in memory and reset when the backend restarts.
 - Not verified yet (needs your devices): installing the PWA on Android, signing in from the Vercel domain through a real Cloudflare Tunnel, uploads from the phone camera, viewing/downloading bills on the phone.

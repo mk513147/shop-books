@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Lightbulb } from 'lucide-react';
-import { useRef, useState, type ReactNode } from 'react';
-import { useForm } from 'react-hook-form';
+import { Lightbulb, Plus, X } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { errorMessage } from '@/components/states';
@@ -17,10 +17,14 @@ import { SupplierPicker } from '@/features/suppliers/SupplierPicker';
 import { useLinkSupplierCategory, useSupplier } from '@/features/suppliers/suppliers-api';
 import { ApiError } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
-import { formatInr, MONEY_INPUT, toPaise } from '@/lib/money';
+import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import type { Category, Expense, ExpenseInput, PaymentMode, SupplierRef } from '@/types/api';
 import { PAYMENT_MODE_LABELS, PAYMENT_MODES } from './expenses-api';
+import { isPaymentSplitValid, splitPayments } from './payment-split';
+
+/** Same bound as the server (one row per method is plenty). */
+const MAX_PAYMENT_ROWS = 10;
 
 const money = (label: string) =>
   z.string().trim().min(1, `Enter the ${label}`).regex(MONEY_INPUT, 'Use digits only, e.g. 1250 or 1250.50');
@@ -29,11 +33,11 @@ const money = (label: string) =>
 const schema = z
   .object({
     amount: money('total amount').refine((v) => !MONEY_INPUT.test(v) || toPaise(v) > 0n, 'Must be more than zero'),
-    amountPaid: money('amount paid'),
-    paymentMode: z.string(),
+    payments: z.array(z.object({ amount: z.string(), paymentMode: z.string() })).min(1).max(MAX_PAYMENT_ROWS),
     supplierId: z.string(),
     categoryId: z.string().min(1, 'Choose a category'),
-    description: z.string().trim().min(1, 'Describe the expense').max(500, 'At most 500 characters'),
+    // Optional: the category is shown instead when it is left empty.
+    description: z.string().trim().max(500, 'At most 500 characters'),
     expenseDate: z
       .string()
       .min(1, 'Choose a date')
@@ -41,22 +45,22 @@ const schema = z
     invoiceReference: z.string().trim().max(100, 'At most 100 characters'),
   })
   .superRefine((v, ctx) => {
-    if (!MONEY_INPUT.test(v.amount) || !MONEY_INPUT.test(v.amountPaid)) return;
-    if (toPaise(v.amountPaid) > toPaise(v.amount)) {
-      ctx.addIssue({ code: 'custom', path: ['amountPaid'], message: 'Cannot be more than the total amount' });
-    }
-    if (toPaise(v.amountPaid) > 0n && !v.paymentMode) {
-      ctx.addIssue({ code: 'custom', path: ['paymentMode'], message: 'Choose how it was paid' });
-    }
+    const split = splitPayments(v.amount, v.payments, v.supplierId !== '');
+    split.rowErrors.forEach((e, i) => {
+      if (e.amount) ctx.addIssue({ code: 'custom', path: ['payments', i, 'amount'], message: e.amount });
+      if (e.paymentMode) ctx.addIssue({ code: 'custom', path: ['payments', i, 'paymentMode'], message: e.paymentMode });
+    });
+    if (split.problem) ctx.addIssue({ code: 'custom', path: ['payments'], message: split.problem });
   });
 type FormValues = z.infer<typeof schema>;
+
+const blankRow = (paymentMode = 'cash') => ({ amount: '', paymentMode });
 
 export function toFormValues(expense?: Expense): FormValues {
   if (!expense) {
     return {
       amount: '',
-      amountPaid: '0',
-      paymentMode: '',
+      payments: [blankRow()],
       supplierId: '',
       categoryId: '',
       description: '',
@@ -66,11 +70,10 @@ export function toFormValues(expense?: Expense): FormValues {
   }
   return {
     amount: expense.amount,
-    amountPaid: expense.amountPaid,
-    paymentMode: expense.paymentMode ?? '',
+    payments: expense.payments.length > 0 ? expense.payments.map((p) => ({ amount: p.amount, paymentMode: p.paymentMode })) : [blankRow()],
     supplierId: expense.supplier?.id ?? '',
     categoryId: expense.category.id,
-    description: expense.description,
+    description: expense.description ?? '',
     expenseDate: expense.expenseDate,
     invoiceReference: expense.invoiceReference ?? '',
   };
@@ -81,10 +84,12 @@ function toInput(v: FormValues): ExpenseInput {
     expenseDate: v.expenseDate,
     supplierId: v.supplierId || null,
     categoryId: v.categoryId,
-    description: v.description.trim(),
+    description: v.description.trim() || null,
     amount: v.amount.trim(),
-    amountPaid: v.amountPaid.trim(),
-    paymentMode: (v.paymentMode || null) as PaymentMode | null,
+    // A blank row only survives validation as "not paid yet" on a supplier bill: it is not sent.
+    payments: v.payments
+      .filter((p) => p.amount.trim() !== '')
+      .map((p) => ({ amount: p.amount.trim(), paymentMode: p.paymentMode as PaymentMode })),
     invoiceReference: v.invoiceReference.trim() || null,
   };
 }
@@ -126,6 +131,7 @@ interface ExpenseFormProps {
 
 export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubmit, onDone }: ExpenseFormProps) {
   const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
+  const [paymentsServerError, setPaymentsServerError] = useState<string | null>(null);
   const pending = usePendingFiles();
   // Set once the expense is saved but some files failed to upload: the form then offers a retry.
   const [saved, setSaved] = useState<Expense | null>(null);
@@ -148,23 +154,74 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
     handleSubmit,
     setError,
     setValue,
+    setFocus,
+    getValues,
     watch,
-    formState: { errors, isSubmitting },
+    control,
+    formState: { errors, isSubmitting, submitCount },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: toFormValues(initial) });
+  const { fields, append, remove } = useFieldArray({ control, name: 'payments' });
 
   const amount = watch('amount').trim();
-  const amountPaid = watch('amountPaid').trim();
-  const paymentMode = watch('paymentMode');
+  const rows = watch('payments');
   const categoryId = watch('categoryId');
   const amountValid = MONEY_INPUT.test(amount);
-  const paidValid = MONEY_INPUT.test(amountPaid);
-  // Supplier payments already allocated to this bill (edit only) also reduce what is outstanding.
-  const allocated = initial ? toPaise(initial.allocatedPayments) : 0n;
-  const outstanding =
-    amountValid && paidValid && toPaise(amountPaid) + allocated <= toPaise(amount) ? toPaise(amount) - toPaise(amountPaid) - allocated : null;
-  const unpaid = paidValid && toPaise(amountPaid) === 0n;
+  const hasSupplier = supplier !== null;
+  const split = splitPayments(amount, rows, hasSupplier);
+  const splitOk = isPaymentSplitValid(split);
+  // New expense without a supplier: while the single payment row is untouched it follows the expense
+  // amount (such an expense must be paid in full). Any manual change to the breakdown, or choosing a
+  // supplier, switches this off for good, so later supplier changes never alter payments.
+  const followAmount = useRef(!initial);
+  // Shown once choosing a supplier has reset the untouched default to "not paid yet".
+  const [creditDefaultNote, setCreditDefaultNote] = useState(false);
+  useEffect(() => {
+    if (!followAmount.current || hasSupplier || getValues('payments').length !== 1) return;
+    setValue('payments.0.amount', amountValid && toPaise(amount) > 0n ? amount : '');
+  }, [amount, amountValid, hasSupplier, getValues, setValue]);
+  // Supplier payments already allocated to this bill (edit only) also reduce what is still payable.
+  const supplierPaid = initial ? toPaise(initial.allocatedPayments) : 0n;
+  const showProblem = split.problem !== null && (split.anyEntered || submitCount > 0);
+  const lastIndex = rows.length - 1;
+
+  function addRow() {
+    followAmount.current = false;
+    const used = new Set(rows.map((r) => r.paymentMode));
+    const next = PAYMENT_MODES.find((m) => !used.has(m)) ?? 'cash';
+    // Pre-fill what is still unallocated so the new row usually needs no typing.
+    const rest = split.remaining !== null && split.remaining > 0n ? fromPaise(split.remaining) : '';
+    // Move focus to the new amount field (react-hook-form focuses it once the row is registered).
+    append(blankRow(next), { focusName: `payments.${rows.length}.amount` });
+    if (rest) setValue(`payments.${rows.length}.amount`, rest, { shouldValidate: submitCount > 0 });
+  }
+  function removeRow(index: number) {
+    followAmount.current = false;
+    remove(index);
+    // Keep keyboard and screen-reader users in the list: focus the row above the removed one.
+    setFocus(`payments.${index - 1}.amount`);
+  }
+  function markNotPaid() {
+    followAmount.current = false;
+    setCreditDefaultNote(false);
+    setValue('payments', [blankRow('')], { shouldValidate: submitCount > 0 });
+  }
+  /** Supplier bill paid completely at purchase: an explicit action (the method is still chosen by the user). */
+  function markPaidInFull() {
+    followAmount.current = false;
+    setCreditDefaultNote(false);
+    // Offered only while there is a single row: set its amount in place (same input, so focus can move to its method).
+    setValue('payments.0.amount', amount, { shouldValidate: submitCount > 0 });
+    setFocus('payments.0.paymentMode');
+  }
 
   function selectSupplier(next: SupplierRef | null) {
+    // A new supplier bill starts unpaid: an untouched "paid in full" default is cleared (visibly) and
+    // never comes back. Payments the user entered are never changed by choosing or removing a supplier.
+    if (next !== null && followAmount.current) {
+      followAmount.current = false;
+      setValue('payments', [blankRow('')], { shouldValidate: submitCount > 0 });
+      setCreditDefaultNote(true);
+    }
     // The chosen category is deliberately kept: suggestions never change it automatically.
     setSupplier(next);
     setValue('supplierId', next?.id ?? '', { shouldDirty: true });
@@ -201,6 +258,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           if (inFlight.current || saved) return;
           inFlight.current = true;
           setFormError(null);
+          setPaymentsServerError(null);
           try {
             const expense = await onSubmit(toInput(values), baseVersion.current);
             if (pending.pendingCount === 0) onDone(expense, savedNotice);
@@ -209,6 +267,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
             if (err instanceof ApiError && err.details?.length) {
               for (const d of err.details) {
                 if (d.path in values) setError(d.path as keyof FormValues, { message: d.message });
+                else if (d.path.startsWith('payments')) setPaymentsServerError(d.message);
               }
             }
             setFormError({ message: errorMessage(err), conflict: err instanceof ApiError && err.code === 'VERSION_CONFLICT' });
@@ -243,80 +302,136 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           </Section>
 
           <Section step={2} title="Payment">
-            <Field id="amountPaid" label="Amount paid now" error={errors.amountPaid?.message}>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
-                <Input
-                  id="amountPaid"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  className="figure pl-7"
-                  {...errorProps('amountPaid', errors.amountPaid)}
-                  {...register('amountPaid')}
-                />
-              </div>
-            </Field>
-            <div className="flex gap-2">
-              <Button
-                variant="soft"
-                size="sm"
-                disabled={!amountValid}
-                onClick={() => setValue('amountPaid', amount, { shouldValidate: true })}
-              >
-                Paid in full
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setValue('amountPaid', '0', { shouldValidate: true });
-                  setValue('paymentMode', '', { shouldValidate: true });
-                }}
-              >
-                Not paid yet
-              </Button>
-            </div>
-
-            <fieldset aria-describedby={errors.paymentMode ? 'paymentMode-error' : undefined}>
-              <legend className="mb-1.5 text-sm font-medium">Payment mode</legend>
-              <div className="grid grid-cols-3 gap-2">
-                {PAYMENT_MODES.map((m) => (
-                  <label
-                    key={m}
-                    className={cn(
-                      'flex h-11 cursor-pointer items-center justify-center rounded-lg border px-2 text-center text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring md:h-10',
-                      paymentMode === m ? 'border-primary bg-primary-soft font-medium text-primary-soft-foreground' : 'border-input bg-card hover:bg-accent',
+            <fieldset className="space-y-2">
+              <legend className="mb-1.5 text-sm font-medium">{hasSupplier ? 'Paid now' : 'How it was paid'}</legend>
+              {fields.map((field, i) => {
+                const rowErrors = errors.payments?.[i];
+                return (
+                  <div key={field.id} className="space-y-1" data-testid="payment-row">
+                    <div className="flex items-start gap-2">
+                      <div className="relative min-w-0 flex-1">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
+                        <Input
+                          inputMode="decimal"
+                          autoComplete="off"
+                          placeholder="0.00"
+                          aria-label={`Payment ${i + 1} amount`}
+                          className="figure pl-7"
+                          {...errorProps(`payment-${i}-amount`, rowErrors?.amount)}
+                          {...register(`payments.${i}.amount`, {
+                            onChange: () => {
+                              if (i === 0) followAmount.current = false;
+                              setCreditDefaultNote(false);
+                            },
+                          })}
+                        />
+                      </div>
+                      <Select
+                        aria-label={`Payment ${i + 1} method`}
+                        className="w-40 shrink-0 sm:w-44"
+                        {...errorProps(`payment-${i}-method`, rowErrors?.paymentMode)}
+                        {...register(`payments.${i}.paymentMode`)}
+                      >
+                        <option value="">Method…</option>
+                        {PAYMENT_MODES.map((m) => (
+                          <option key={m} value={m}>
+                            {PAYMENT_MODE_LABELS[m]}
+                          </option>
+                        ))}
+                      </Select>
+                      {i > 0 ? (
+                        <Button variant="ghost" size="icon" className="shrink-0" aria-label={`Remove payment ${i + 1}`} onClick={() => removeRow(i)}>
+                          <X aria-hidden="true" />
+                        </Button>
+                      ) : (
+                        // The first row is never removable; keep its columns aligned with the rows below.
+                        fields.length > 1 && <span className="size-11 shrink-0 md:size-10" aria-hidden="true" />
+                      )}
+                    </div>
+                    {rowErrors?.amount?.message && (
+                      <p id={`payment-${i}-amount-error`} className="text-sm text-destructive">
+                        Payment {i + 1} amount: {rowErrors.amount.message}
+                      </p>
                     )}
-                  >
-                    <input type="radio" value={m} className="sr-only" {...register('paymentMode')} />
-                    {PAYMENT_MODE_LABELS[m]}
-                  </label>
-                ))}
+                    {rowErrors?.paymentMode?.message && (
+                      <p id={`payment-${i}-method-error`} className="text-sm text-destructive">
+                        Payment {i + 1} method: {rowErrors.paymentMode.message}
+                      </p>
+                    )}
+                    {i === lastIndex && split.remaining !== null && split.remaining > 0n && split.anyEntered && (
+                      <button
+                        type="button"
+                        className="text-xs text-primary underline-offset-2 hover:underline"
+                        onClick={() => {
+                          followAmount.current = false;
+                          const own = MONEY_INPUT.test(rows[i]!.amount.trim()) ? toPaise(rows[i]!.amount.trim()) : 0n;
+                          setValue(`payments.${i}.amount`, fromPaise(own + split.remaining!), { shouldValidate: submitCount > 0 });
+                        }}
+                      >
+                        Use remaining {formatInr(fromPaise(split.remaining))}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Button variant="soft" size="sm" disabled={fields.length >= MAX_PAYMENT_ROWS} onClick={addRow}>
+                  <Plus aria-hidden="true" /> Add payment
+                </Button>
+                {hasSupplier && fields.length === 1 && amountValid && toPaise(amount) > 0n && (
+                  <Button variant="secondary" size="sm" onClick={markPaidInFull}>
+                    Paid in full
+                  </Button>
+                )}
+                {hasSupplier && (
+                  <Button variant="secondary" size="sm" onClick={markNotPaid}>
+                    Not paid yet
+                  </Button>
+                )}
               </div>
-              {unpaid && paymentMode && (
-                <button type="button" className="mt-1.5 text-xs text-muted-foreground underline" onClick={() => setValue('paymentMode', '')}>
-                  Clear payment mode
-                </button>
-              )}
-              {errors.paymentMode && (
-                <p id="paymentMode-error" className="mt-1.5 text-sm text-destructive">
-                  {errors.paymentMode.message}
-                </p>
-              )}
-              {!errors.paymentMode && unpaid && !paymentMode && (
-                <p className="mt-1.5 text-xs text-muted-foreground">Not needed while nothing has been paid.</p>
-              )}
+              <p className="text-xs text-muted-foreground" role="status">
+                {hasSupplier &&
+                  (creditDefaultNote ? 'Supplier bills start as not paid yet. ' : '') +
+                    `Anything not paid now stays payable to ${supplier?.name}. Leave the amount blank if nothing was paid.`}
+              </p>
             </fieldset>
 
-            <div className="flex items-center justify-between rounded-lg bg-surface-muted px-3 py-2.5" aria-live="polite">
-              <span className="text-sm text-muted-foreground">
-                Outstanding
-                {allocated > 0n && <span className="block text-xs">after {formatInr(paiseToString(allocated))} of supplier payments</span>}
-              </span>
-              <strong className={cn('figure text-base', outstanding !== null && outstanding > 0n && 'text-warning')}>
-                {outstanding === null ? '—' : formatInr(paiseToString(outstanding))}
-              </strong>
-            </div>
+            <dl className="space-y-1.5 rounded-lg bg-surface-muted px-3 py-2.5 text-sm" aria-live="polite" data-testid="payment-summary">
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">Total expense</dt>
+                <dd className="figure font-medium">{split.total === null ? '—' : formatInr(fromPaise(split.total))}</dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">Total allocated</dt>
+                <dd className="figure font-medium">{formatInr(fromPaise(split.allocated))}</dd>
+              </div>
+              <div className="flex items-center justify-between border-t pt-1.5">
+                <dt className="text-muted-foreground">
+                  Remaining
+                  {supplierPaid > 0n && <span className="block text-xs">after {formatInr(paiseToString(supplierPaid))} of supplier payments</span>}
+                </dt>
+                <dd
+                  className={cn(
+                    'figure text-base font-semibold',
+                    split.remaining !== null && split.remaining > 0n && (hasSupplier ? 'text-warning' : 'text-destructive'),
+                    split.remaining !== null && split.remaining < 0n && 'text-destructive',
+                  )}
+                  data-testid="payment-remaining"
+                >
+                  {split.remaining === null ? '—' : formatInr(fromPaise(split.remaining - supplierPaid))}
+                </dd>
+              </div>
+            </dl>
+            {(showProblem || paymentsServerError) && (
+              <p role="alert" className="text-sm text-destructive">
+                {showProblem ? split.problem : paymentsServerError}
+              </p>
+            )}
+            {!splitOk && submitCount > 0 && !showProblem && !paymentsServerError && !hasSupplier && split.total !== null && !split.anyEntered && (
+              <p role="alert" className="text-sm text-destructive">
+                Enter how the expense was paid.
+              </p>
+            )}
           </Section>
         </div>
 
@@ -417,11 +532,11 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               </div>
             )}
 
-            <Field id="description" label="Description" error={errors.description?.message} className="md:col-span-2">
+            <Field id="description" label="Description (optional)" error={errors.description?.message} className="md:col-span-2">
               <Input
                 id="description"
                 autoComplete="off"
-                placeholder="What was bought or paid for"
+                placeholder="What was bought or paid for (optional)"
                 {...errorProps('description', errors.description)}
                 {...register('description')}
               />

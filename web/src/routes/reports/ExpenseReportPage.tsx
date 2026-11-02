@@ -16,7 +16,7 @@ import { useExpenseReport } from '@/features/reports/reports-api';
 import { useSuppliers } from '@/features/suppliers/suppliers-api';
 import { formatDate } from '@/lib/dates';
 import { formatInr } from '@/lib/money';
-import { cn } from '@/lib/utils';
+import { cn, expenseLabel } from '@/lib/utils';
 import type { PaymentMode } from '@/types/api';
 
 const PAID_LABELS = { paid: 'Fully paid', partly_paid: 'Partly paid', unpaid: 'Not paid yet' } as const;
@@ -143,8 +143,9 @@ export function ExpenseReportPage() {
                 <BarList
                   items={r.paymentModes.map((m) => ({
                     key: m.paymentMode ?? 'none',
-                    label: m.paymentMode ? PAYMENT_MODE_LABELS[m.paymentMode as PaymentMode] : 'Nothing paid at purchase',
-                    detail: `${m.count} expense(s) · ${formatInr(m.paidAtPurchase)} paid`,
+                    label: m.paymentMode ? PAYMENT_MODE_LABELS[m.paymentMode as PaymentMode] : 'Not paid at purchase',
+                    // The unpaid row holds remainders (paid amount is always zero); an expense paid by several methods counts in each method's row.
+                    detail: m.paymentMode ? `${m.count} expense(s) · ${formatInr(m.paidAtPurchase)} paid` : `${m.count} expense(s) with an unpaid part`,
                     amount: m.amount,
                   }))}
                 />
@@ -180,7 +181,7 @@ export function ExpenseReportPage() {
                   <li key={e.id}>
                     <Link to={`/expenses/${e.id}`} className="flex items-start justify-between gap-3 py-2.5 hover:bg-accent/40">
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{e.description}</span>
+                        <span className="block truncate text-sm font-medium">{expenseLabel(e)}</span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {formatDate(e.expenseDate)} · {e.category.name}
                           {e.supplier && ` · ${e.supplier.name}`} · {e.createdBy.name}

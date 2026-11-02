@@ -95,6 +95,12 @@ export interface SupplierListResponse {
 
 export type PaymentMode = 'cash' | 'upi' | 'bank_transfer' | 'card' | 'cheque' | 'other';
 
+/** One payment method's share of an expense. */
+export interface ExpensePayment {
+  paymentMode: PaymentMode;
+  amount: string;
+}
+
 /** Money fields are decimal strings ("1250.00"); never parse them into numbers for arithmetic. */
 export interface Expense {
   id: string;
@@ -103,9 +109,13 @@ export interface Expense {
   /** Supplier text as typed before suppliers existed (migrated expenses only). */
   legacySupplierName: string | null;
   category: { id: string; name: string; isActive: boolean };
-  description: string;
+  /** Optional: null when none was entered (show the category name instead). */
+  description: string | null;
   amount: string;
+  /** Paid at purchase: the exact sum of `payments`. */
   amountPaid: string;
+  /** How the paid-at-purchase amount was made up, one row per payment method. */
+  payments: ExpensePayment[];
   /** Supplier payments allocated to this bill. */
   allocatedPayments: string;
   /** amount - amountPaid - allocatedPayments. */
@@ -147,10 +157,10 @@ export interface ExpenseInput {
   expenseDate: string;
   supplierId: string | null;
   categoryId: string;
-  description: string;
+  description: string | null;
   amount: string;
-  amountPaid: string;
-  paymentMode: PaymentMode | null;
+  /** Must add up to `amount` (a supplier bill may be paid in part or not at all). */
+  payments: ExpensePayment[];
   invoiceReference: string | null;
 }
 
@@ -271,6 +281,8 @@ export interface SupplierLedgerEntry {
   reference: string | null;
   description: string;
   paymentMode: PaymentMode | null;
+  /** Paid-at-purchase entries: per-method breakdown of `debit` (null for other entries). */
+  payments: ExpensePayment[] | null;
   credit: string;
   debit: string;
   runningBalance: string;

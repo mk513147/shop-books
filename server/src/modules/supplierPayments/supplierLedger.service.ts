@@ -1,6 +1,8 @@
 import type { Queryable } from '../../database/connection.js';
 import { NotFoundError } from '../../utils/errors.js';
-import type { PaymentMode } from '../expenses/expenses.schemas.js';
+import { expenseLabelSql } from '../../utils/sql.js';
+import type { PaymentLine, PaymentMode } from '../expenses/expenses.schemas.js';
+import { loadPayments } from '../expenses/expenses.service.js';
 import type { LedgerQuery } from './supplierPayments.schemas.js';
 
 /**
@@ -85,6 +87,12 @@ export interface LedgerEntry {
   reference: string | null;
   description: string;
   paymentMode: PaymentMode | null;
+  /**
+   * "Paid at purchase" entries: how the paid amount was made up, one item per payment method
+   * (e.g. UPI 1000 + Cash 1500). Display detail only: the entry's `debit` is the total, counted once.
+   * Null for bills and supplier payments.
+   */
+  payments: PaymentLine[] | null;
   /** Increases what is owed (bills). Decimal string, "0.00" when not applicable. */
   credit: string;
   /** Reduces what is owed (paid at purchase, payments). */
@@ -144,7 +152,7 @@ export async function getSupplierLedger(db: Queryable, supplierId: string, query
   const entriesCte = `
     WITH entries AS (
       SELECT 'bill'::text AS type, e.id AS source_id, e.expense_date AS entry_date, e.created_at, 1 AS seq,
-             e.invoice_reference AS reference, e.description, NULL::text AS payment_mode,
+             e.invoice_reference AS reference, ${expenseLabelSql('e')} AS description, NULL::text AS payment_mode,
              e.amount AS credit, 0::numeric(14,2) AS debit,
              CASE WHEN e.voided_at IS NULL THEN 'active' ELSE 'voided' END AS status,
              (SELECT COALESCE(sum(a.amount), 0)::numeric(14,2) FROM supplier_payment_allocations a
@@ -152,7 +160,7 @@ export async function getSupplierLedger(db: Queryable, supplierId: string, query
         FROM expenses e WHERE e.supplier_id = $1
       UNION ALL
       SELECT 'paid_at_purchase', e.id, e.expense_date, e.created_at, 2,
-             e.invoice_reference, e.description, e.payment_mode,
+             e.invoice_reference, ${expenseLabelSql('e')}, e.payment_mode,
              0::numeric(14,2), e.amount_paid,
              CASE WHEN e.voided_at IS NULL THEN 'active' ELSE 'voided' END, NULL
         FROM expenses e WHERE e.supplier_id = $1 AND e.amount_paid > 0
@@ -193,12 +201,14 @@ export async function getSupplierLedger(db: Queryable, supplierId: string, query
   }
 
   const truncated = rows.rows.length > LEDGER_LIMIT;
+  const kept = rows.rows.slice(0, LEDGER_LIMIT);
+  const breakdown = await loadPayments(db, kept.filter((r) => r.type === 'paid_at_purchase').map((r) => r.source_id));
   return {
     supplier: { id: supplier.id, name: supplier.name, isActive: supplier.is_active },
     balance: await getSupplierBalance(db, supplierId),
     broughtForward,
     truncated,
-    entries: rows.rows.slice(0, LEDGER_LIMIT).map((r) => ({
+    entries: kept.map((r) => ({
       key: `${r.type}:${r.source_id}`,
       type: r.type,
       sourceId: r.source_id,
@@ -206,6 +216,7 @@ export async function getSupplierLedger(db: Queryable, supplierId: string, query
       reference: r.reference,
       description: r.type === 'paid_at_purchase' ? `Paid at purchase: ${r.description}` : r.description,
       paymentMode: r.payment_mode,
+      payments: r.type === 'paid_at_purchase' ? (breakdown.get(r.source_id) ?? []) : null,
       credit: r.credit,
       debit: r.debit,
       runningBalance: r.running_balance,
@@ -242,7 +253,7 @@ export async function listOpenBills(db: Queryable, supplierId: string): Promise<
     allocated: string;
     payable: string;
   }>(
-    `SELECT e.id, e.expense_date, e.description, e.invoice_reference, e.amount, e.amount_paid, al.allocated,
+    `SELECT e.id, e.expense_date, ${expenseLabelSql('e')} AS description, e.invoice_reference, e.amount, e.amount_paid, al.allocated,
             (e.amount - e.amount_paid - al.allocated)::numeric(14,2) AS payable
        FROM expenses e
        CROSS JOIN LATERAL (SELECT COALESCE(sum(a.amount), 0)::numeric(14,2) AS allocated

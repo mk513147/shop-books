@@ -119,7 +119,7 @@ ${
   s.paymentModes.length
     ? `<tr><td style="padding:16px 24px 4px"><h2 style="margin:0 0 6px;font-size:16px;color:#0f766e">Expenses by payment mode at purchase</h2>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">${s.paymentModes
-        .map((m) => row(`${m.paymentMode ? MODE_LABELS[m.paymentMode] : 'Nothing paid at purchase'} (${m.count})`, formatInr(m.amount)))
+        .map((m) => row(`${m.paymentMode ? MODE_LABELS[m.paymentMode] : 'Not paid at purchase'} (${m.count})`, formatInr(m.amount)))
         .join('')}</table></td></tr>`
     : ''
 }

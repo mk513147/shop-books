@@ -4,7 +4,7 @@ import type { Actor } from '../../middleware/auth.js';
 import { todayInReportingZone } from '../../utils/dates.js';
 import { AppError, NotFoundError, ValidationError, type ErrorDetail } from '../../utils/errors.js';
 import { fromPaise, normaliseMoney, rupees, toPaise } from '../../utils/money.js';
-import { containsPattern } from '../../utils/sql.js';
+import { containsPattern, expenseLabelSql } from '../../utils/sql.js';
 import { listAuditHistory, recordFinancialAudit, type AuditHistoryEntry, type AuditSnapshot } from '../audit/financialAudit.js';
 import { withSessionTransaction } from '../auth/sessionTransaction.js';
 import type { PaymentMode } from '../expenses/expenses.schemas.js';
@@ -176,7 +176,7 @@ interface AllocationRow {
 
 const SELECT_ALLOCATION = `
   SELECT a.id, a.payment_id, a.amount, a.created_at, a.released_at, a.release_reason,
-         e.id AS expense_id, e.expense_date, e.description, e.invoice_reference, e.amount AS expense_amount,
+         e.id AS expense_id, e.expense_date, ${expenseLabelSql('e')} AS description, e.invoice_reference, e.amount AS expense_amount,
          e.voided_at IS NOT NULL AS expense_voided,
          cu.id AS created_by_id, cu.name AS created_by_name, ru.id AS released_by_id, ru.name AS released_by_name
     FROM supplier_payment_allocations a
@@ -276,7 +276,8 @@ async function applyAllocations(
     payable_before_allocations: string;
     description: string;
   }>(
-    `SELECT id, supplier_id, voided_at IS NOT NULL AS voided, (amount - amount_paid)::numeric(14,2) AS payable_before_allocations, description
+    `SELECT id, supplier_id, voided_at IS NOT NULL AS voided, (amount - amount_paid)::numeric(14,2) AS payable_before_allocations,
+            ${expenseLabelSql('expenses')} AS description
        FROM expenses WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
     [ids],
   );

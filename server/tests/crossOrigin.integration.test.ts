@@ -109,7 +109,7 @@ describe.skipIf(!pool)('cross-origin staging arrangement (Vercel web + tunnel AP
       await request(app)
         .post('/api/v1/expenses')
         .set({ ...h, 'Content-Type': 'application/json' })
-        .send({ expenseDate: todayInReportingZone(), supplierId: null, categoryId: cat, description: 'X', amount: '10', amountPaid: '0', paymentMode: null, invoiceReference: null })
+        .send({ expenseDate: todayInReportingZone(), supplierId: null, categoryId: cat, description: 'X', amount: '10', amountPaid: '10', paymentMode: 'cash', invoiceReference: null })
     ).body.expense;
     const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n%%EOF\n');
     const up = await request(app)

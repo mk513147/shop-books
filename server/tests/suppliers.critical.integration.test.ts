@@ -138,7 +138,7 @@ describe.skipIf(!pool)('suppliers, idempotency and backfill (critical paths)', (
 
   it('idempotency: same key + same body creates once (also concurrently); other body is 409', async () => {
     const key = randomUUID();
-    const body = expense({ description: 'Idempotent', amount: '321.5' });
+    const body = expense({ description: 'Idempotent', amount: '321.5', amountPaid: '321.5', paymentMode: 'cash' });
     const first = await send(manager, 'post', '/expenses', body, { 'Idempotency-Key': key });
     expect(first.status).toBe(201);
     const retry = await send(manager, 'post', '/expenses', { ...body, amount: '321.50' }, { 'Idempotency-Key': key });
@@ -146,12 +146,12 @@ describe.skipIf(!pool)('suppliers, idempotency and backfill (critical paths)', (
     expect(retry.headers['idempotent-replayed']).toBe('true');
     expect(retry.body.expense.id).toBe(first.body.expense.id);
 
-    const reused = await send(manager, 'post', '/expenses', { ...body, amount: '999' }, { 'Idempotency-Key': key });
+    const reused = await send(manager, 'post', '/expenses', { ...body, amount: '999', amountPaid: '999' }, { 'Idempotency-Key': key });
     expect(reused.status).toBe(409);
     expect(reused.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
 
     const raceKey = randomUUID();
-    const raceBody = expense({ description: 'Race' });
+    const raceBody = expense({ description: 'Race', amountPaid: '500', paymentMode: 'cash' });
     const results = await Promise.all(
       Array.from({ length: 5 }, () => send(manager, 'post', '/expenses', raceBody, { 'Idempotency-Key': raceKey })),
     );
@@ -166,7 +166,7 @@ describe.skipIf(!pool)('suppliers, idempotency and backfill (critical paths)', (
     // A failed request stores nothing, so the key can be used once the input is fixed.
     const badKey = randomUUID();
     expect((await send(owner, 'post', '/expenses', expense({ amount: '0' }), { 'Idempotency-Key': badKey })).status).toBe(400);
-    expect((await send(owner, 'post', '/expenses', expense(), { 'Idempotency-Key': badKey })).status).toBe(201);
+    expect((await send(owner, 'post', '/expenses', expense({ amountPaid: '500', paymentMode: 'cash' }), { 'Idempotency-Key': badKey })).status).toBe(201);
     expect((await send(owner, 'post', '/expenses', expense(), { 'Idempotency-Key': 'short' })).status).toBe(400);
   });
 

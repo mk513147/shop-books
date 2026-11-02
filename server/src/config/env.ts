@@ -59,7 +59,7 @@ export interface AppConfig extends DatabaseConfig {
 
 const PLACEHOLDER_PATTERN = /change[_-]?me|placeholder|your[_-]/i;
 
-function parseDatabaseName(url: string): string | null {
+export function parseDatabaseName(url: string): string | null {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') return null;
