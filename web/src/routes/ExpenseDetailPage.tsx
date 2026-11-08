@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ReasonDialog } from '@/components/ui/reason-dialog';
+import { useToast } from '@/components/ui/toast';
 import { AuditHistory } from '@/features/audit/AuditHistory';
 import { ExpenseDocuments } from '@/features/documents/ExpenseDocuments';
 import {
@@ -24,7 +25,9 @@ import type { AuditHistoryEntry, PaymentMode } from '@/types/api';
 const FIELD_LABELS: Record<string, string> = {
   expenseDate: 'Date',
   supplierName: 'Supplier',
-  categoryName: 'Category',
+  categoryName: 'Primary category',
+  categories: 'Categories',
+  brands: 'Brands',
   description: 'Description',
   amount: 'Amount',
   amountPaid: 'Amount paid at purchase',
@@ -97,6 +100,7 @@ export function ExpenseDetailPage() {
   const e = expense.data;
   const voided = e.status === 'voided';
   const mutation = dialog === 'restore' ? restoreMutation : voidMutation;
+  const toast = useToast();
   const showLegacy = e.legacySupplierName !== null && e.legacySupplierName !== e.supplier?.name;
 
   return (
@@ -172,9 +176,37 @@ export function ExpenseDetailPage() {
               )}
               {showLegacy && <span className="block text-xs text-muted-foreground">Originally typed as “{e.legacySupplierName}”</span>}
             </Row>
-            <Row label="Category">
-              {e.category.name}
-              {!e.category.isActive && <span className="text-muted-foreground"> (archived)</span>}
+            <Row label={(e.categories?.length ?? 1) > 1 ? 'Categories' : 'Category'}>
+              <ul className="flex flex-wrap gap-1.5" data-testid="expense-categories">
+                {(e.categories?.length ? e.categories : [e.category]).map((c, i, all) => (
+                  <li key={c.id}>
+                    <Badge tone={i === 0 && all.length > 1 ? 'accent' : 'neutral'}>
+                      {c.name}
+                      {!c.isActive && ' (archived)'}
+                      {i === 0 && all.length > 1 && ' · primary'}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+              {(e.categories?.length ?? 1) > 1 && (
+                <span className="mt-1 block text-xs text-muted-foreground">Labels only: the amount is counted once, under the primary category.</span>
+              )}
+            </Row>
+            <Row label="Brands">
+              {e.brands?.length ? (
+                <ul className="flex flex-wrap gap-1.5" data-testid="expense-brands">
+                  {e.brands.map((b) => (
+                    <li key={b.id}>
+                      <Badge tone="neutral">
+                        {b.name}
+                        {!b.isActive && ' (archived)'}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                '—'
+              )}
             </Row>
             <Row label={e.payments.length > 1 ? 'Payments' : 'Payment mode'}>
               {e.payments.length === 0 ? (
@@ -237,7 +269,17 @@ export function ExpenseDetailPage() {
           setDialog(null);
           mutation.reset();
         }}
-        onConfirm={(reason) => mutation.mutate({ id: e.id, reason, version: e.version }, { onSuccess: () => setDialog(null) })}
+        onConfirm={(reason) =>
+          mutation.mutate(
+            { id: e.id, reason, version: e.version },
+            {
+              onSuccess: () => {
+                toast({ title: dialog === 'restore' ? 'Expense restored' : 'Expense voided', tone: 'success' });
+                setDialog(null);
+              },
+            },
+          )
+        }
       />
     </Page>
   );

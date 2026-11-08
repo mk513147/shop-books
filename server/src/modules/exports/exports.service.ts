@@ -71,6 +71,7 @@ const fileDates = (p: { from: string; to: string; preset?: string }) => (p.prese
 const EXPENSE_NOTES = [
   'Totals include active expenses only; voided expenses are listed with status "voided" and are not counted.',
   'Supplier payments settle expenses and are never counted as additional expenses.',
+  'An expense may have several categories and brands. They are labels only: each expense is listed and counted once, with its full amount.',
 ];
 
 // --- 1. Expenses --------------------------------------------------------------------------------
@@ -86,6 +87,7 @@ export async function exportExpenses(
     from: period.from,
     to: period.to,
     categoryId: f.categoryId,
+    brandId: f.brandId,
     supplierId: f.supplierId,
     paymentMode: f.paymentMode,
     recordedBy: f.recordedBy,
@@ -129,6 +131,9 @@ export async function exportExpenses(
     { header: 'Status', width: 10, type: 'text', value: (e) => e.status },
     { header: 'Documents', width: 11, type: 'int', value: (e) => e.documentCount },
     { header: 'Recorded by', width: 16, type: 'text', value: (e) => e.createdBy.name },
+    // Added at the end so the existing column positions stay unchanged.
+    { header: 'All categories', width: 26, type: 'text', value: (e) => e.categories.map((c) => c.name).join(', ') },
+    { header: 'Brands', width: 22, type: 'text', value: (e) => e.brands.map((b) => b.name).join(', ') },
   ];
   addTableSheet(wb, 'Expenses', meta, columns, list.items, {
     label: 'Total (active)',
@@ -151,7 +156,7 @@ export async function exportCategories(
 ): Promise<ExportResult> {
   const r = await categoryBreakdown(db, { ...f, from: period.from, to: period.to }, period.previous);
   const wb = newWorkbook(shopName);
-  const rows = r.rows.filter((c) => c.count > 0 || c.previousCount > 0);
+  const rows = r.rows.filter((c) => c.count > 0 || c.previousCount > 0 || c.taggedCount > 0);
   addTableSheet(
     wb,
     'Categories',
@@ -160,7 +165,13 @@ export async function exportCategories(
       title: 'Category-wise expenses',
       period: periodText(period),
       filters: [...filterLabels, ...(period.previous ? [['Compared with', `${period.previous.from} to ${period.previous.to}`] as [string, string]] : [])],
-      notes: ['Active expenses only. Share = category ÷ period total (truncated to one decimal). Archived categories are kept.'],
+      notes: [
+        'Active expenses only. Share = category ÷ period total (truncated to one decimal). Archived categories are kept.',
+        'An expense with several categories is counted once, under its primary (first) category, so the amounts add up to the expense total. "Tagged" counts every expense that carries the category in any position.',
+        ...(f.categoryId
+          ? ['A category is selected, so only that category is listed: Amount = expenses where it is the primary category (0 if it is only ever a secondary one); Tagged = expenses carrying it in any position; Share = of all expenses matching the other filters.']
+          : []),
+      ],
     },
     [
       { header: 'Category', width: 26, type: 'text', value: (c) => c.name },
@@ -170,6 +181,7 @@ export async function exportCategories(
       { header: 'Share', width: 9, type: 'percent', value: (c) => c.percent },
       { header: 'Previous period', width: 16, type: 'money', value: (c) => c.previousAmount },
       { header: 'Change', width: 9, type: 'percent', value: (c) => c.changePercent },
+      { header: 'Tagged (any position)', width: 12, type: 'int', value: (c) => c.taggedCount },
     ],
     rows,
     { 3: r.total, 5: r.previousTotal },

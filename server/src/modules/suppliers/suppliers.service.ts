@@ -21,8 +21,10 @@ export interface Supplier {
   notes: string | null;
   isActive: boolean;
   version: number;
-  /** Linked categories (suggestions only), including archived ones, sorted by name. */
+  /** Default categories (pre-selected on new expenses), including archived ones, sorted by name. */
   categories: CategoryRef[];
+  /** Default brands (pre-selected on new expenses), including archived ones, sorted by name. */
+  brands: CategoryRef[];
   expenseCount: number;
   /** Derived (Stage 3C): still owed on active bills, and payments not yet allocated to bills. */
   payable: string;
@@ -40,6 +42,7 @@ interface SupplierRow {
   is_active: boolean;
   version: number;
   categories: CategoryRef[];
+  brands: CategoryRef[];
   expense_count: number;
   payable: string;
   unallocated: string;
@@ -51,6 +54,9 @@ const SUPPLIER_COLUMNS = `s.id, s.name, s.phone, s.address, s.notes, s.is_active
   COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name, 'isActive', c.is_active) ORDER BY lower(c.name))
               FROM supplier_categories sc JOIN expense_categories c ON c.id = sc.category_id
              WHERE sc.supplier_id = s.id), '[]'::json) AS categories,
+  COALESCE((SELECT json_agg(json_build_object('id', b.id, 'name', b.name, 'isActive', b.is_active) ORDER BY lower(b.name))
+              FROM supplier_brands sb JOIN brands b ON b.id = sb.brand_id
+             WHERE sb.supplier_id = s.id), '[]'::json) AS brands,
   (SELECT count(*)::int FROM expenses e WHERE e.supplier_id = s.id) AS expense_count,
   (SELECT b.payable FROM supplier_balances b WHERE b.supplier_id = s.id) AS payable,
   (SELECT b.unallocated FROM supplier_balances b WHERE b.supplier_id = s.id) AS unallocated`;
@@ -65,6 +71,7 @@ function toSupplier(row: SupplierRow): Supplier {
     isActive: row.is_active,
     version: row.version,
     categories: row.categories,
+    brands: row.brands,
     expenseCount: row.expense_count,
     payable: row.payable,
     unallocated: row.unallocated,
@@ -175,6 +182,54 @@ async function loadCategories(
   return found;
 }
 
+/** Share-locks the brands and checks they exist and are active (only active brands can be newly linked). */
+async function loadBrands(client: Queryable, ids: string[]): Promise<Map<string, CategoryRef>> {
+  if (ids.length === 0) return new Map();
+  const result = await client.query<{ id: string; name: string; is_active: boolean }>(
+    `SELECT id, name, is_active FROM brands WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE`,
+    [ids],
+  );
+  const found = new Map(result.rows.map((r) => [r.id, { id: r.id, name: r.name, isActive: r.is_active }]));
+  const problems = ids.flatMap((id) => {
+    const b = found.get(id);
+    if (!b) return ['A selected brand no longer exists'];
+    if (!b.isActive) return [`“${b.name}” is archived and cannot be linked`];
+    return [];
+  });
+  if (problems.length > 0) throw new ValidationError(problems.map((message) => ({ path: 'brandIds', message })));
+  return found;
+}
+
+/** Supplier default brands (migration 0012): only pre-select brands on NEW expenses. */
+async function linkBrand(client: pg.PoolClient, supplierId: string, brand: CategoryRef, actor: Actor): Promise<void> {
+  await client.query(`INSERT INTO supplier_brands (supplier_id, brand_id, created_by) VALUES ($1, $2, $3)`, [
+    supplierId,
+    brand.id,
+    actor.userId,
+  ]);
+  await recordFinancialAudit(client, {
+    entityType: 'supplier',
+    entityId: supplierId,
+    action: 'link_brand',
+    actorUserId: actor.userId,
+    before: { brandId: brand.id, brandName: brand.name, linked: false },
+    after: { brandId: brand.id, brandName: brand.name, linked: true },
+  });
+}
+
+/** Removing a default never touches saved expenses. */
+async function unlinkBrand(client: pg.PoolClient, supplierId: string, brand: CategoryRef, actor: Actor): Promise<void> {
+  await client.query(`DELETE FROM supplier_brands WHERE supplier_id = $1 AND brand_id = $2`, [supplierId, brand.id]);
+  await recordFinancialAudit(client, {
+    entityType: 'supplier',
+    entityId: supplierId,
+    action: 'unlink_brand',
+    actorUserId: actor.userId,
+    before: { brandId: brand.id, brandName: brand.name, linked: true },
+    after: { brandId: brand.id, brandName: brand.name, linked: false },
+  });
+}
+
 async function link(client: pg.PoolClient, supplierId: string, category: CategoryRef, actor: Actor): Promise<void> {
   await client.query(
     `INSERT INTO supplier_categories (supplier_id, category_id, created_by) VALUES ($1, $2, $3)`,
@@ -218,6 +273,7 @@ export async function createSupplier(db: Database, input: SupplierCreateInput, a
   return withNameCheck(() =>
     withSessionTransaction(db, actor.sessionId, async (client) => {
       const categories = await loadCategories(client, input.categoryIds);
+      const brands = await loadBrands(client, input.brandIds);
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO suppliers (name, phone, address, notes, created_by, updated_by)
          VALUES ($1, $2, $3, $4, $5, $5) RETURNING id`,
@@ -233,6 +289,7 @@ export async function createSupplier(db: Database, input: SupplierCreateInput, a
         after: snapshot({ ...input, is_active: true }),
       });
       for (const category of categories.values()) await link(client, id, category, actor);
+      for (const brand of brands.values()) await linkBrand(client, id, brand, actor);
       return toSupplier(await selectSupplier(client, id));
     }),
   );
@@ -276,12 +333,18 @@ export async function updateSupplier(
       const wanted = new Set(changes.categoryIds ?? current);
       const toAdd = [...wanted].filter((cid) => !current.has(cid));
       const toRemove = before.categories.filter((c) => !wanted.has(c.id));
-      if (toAdd.length > 0 && !next.is_active) {
-        throw new AppError(409, 'SUPPLIER_ARCHIVED', 'Reactivate this supplier before linking categories to it.');
+      const currentBrands = new Set(before.brands.map((b) => b.id));
+      const wantedBrands = new Set(changes.brandIds ?? currentBrands);
+      const brandsToAdd = [...wantedBrands].filter((bid) => !currentBrands.has(bid));
+      const brandsToRemove = before.brands.filter((b) => !wantedBrands.has(b.id));
+      if ((toAdd.length > 0 || brandsToAdd.length > 0) && !next.is_active) {
+        throw new AppError(409, 'SUPPLIER_ARCHIVED', 'Reactivate this supplier before linking categories or brands to it.');
       }
       const added = await loadCategories(client, toAdd);
+      const addedBrands = await loadBrands(client, brandsToAdd);
 
-      if (!detailsChanged && toAdd.length === 0 && toRemove.length === 0) return toSupplier(before);
+      const linksChanged = toAdd.length + toRemove.length + brandsToAdd.length + brandsToRemove.length > 0;
+      if (!detailsChanged && !linksChanged) return toSupplier(before);
 
       await client.query(
         `UPDATE suppliers SET name = $2, phone = $3, address = $4, notes = $5, is_active = $6,
@@ -301,6 +364,8 @@ export async function updateSupplier(
       }
       for (const category of toRemove) await unlink(client, id, category, actor);
       for (const category of added.values()) await link(client, id, category, actor);
+      for (const brand of brandsToRemove) await unlinkBrand(client, id, brand, actor);
+      for (const brand of addedBrands.values()) await linkBrand(client, id, brand, actor);
       return toSupplier(await selectSupplier(client, id));
     }),
   );

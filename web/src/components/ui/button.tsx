@@ -1,4 +1,5 @@
 import { cva, type VariantProps } from 'class-variance-authority';
+import { Loader2 } from 'lucide-react';
 import type { ButtonHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -32,8 +33,26 @@ export const buttonVariants = cva(
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+    VariantProps<typeof buttonVariants> {
+  /**
+   * A request started by this button is running: shows a spinner, disables the button (no double
+   * submissions) and marks it busy for assistive technology. Pass the in-progress label
+   * ("Saving…") as children. Always derive it from the request state, so it clears on failure too.
+   */
+  loading?: boolean;
+}
 
-export function Button({ className, variant, size, type = 'button', ...props }: ButtonProps) {
-  return <button type={type} className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+export function Button({ className, variant, size, type = 'button', loading = false, disabled, children, ...props }: ButtonProps) {
+  return (
+    <button
+      type={type}
+      className={cn(buttonVariants({ variant, size }), className)}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...props}
+    >
+      {loading && <Loader2 className="animate-spin" aria-hidden="true" data-testid="button-spinner" />}
+      {children}
+    </button>
+  );
 }

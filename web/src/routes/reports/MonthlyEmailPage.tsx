@@ -145,7 +145,7 @@ function SettingsCard({ settings, email }: { settings: Settings; email: EmailInf
         {save.isError && <p role="alert" className="text-sm text-destructive">{errorMessage(save.error)}</p>}
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">{settings.updatedBy ? `Last changed by ${settings.updatedBy}, ${formatDateTime(settings.updatedAt)}` : 'Default settings'}</span>
-          <Button size="sm" disabled={!dirty || save.isPending || !/^\d{2}:\d{2}$/.test(draft.deliveryTime)} onClick={() => save.mutate()}>
+          <Button size="sm" loading={save.isPending} disabled={!dirty || !/^\d{2}:\d{2}$/.test(draft.deliveryTime)} onClick={() => save.mutate()}>
             {save.isPending ? 'Saving…' : 'Save'}
           </Button>
         </div>
@@ -203,7 +203,7 @@ function RecipientsCard({ recipients }: { recipients: Recipient[] }) {
         >
           <Input type="email" inputMode="email" aria-label="E-mail address" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input aria-label="Name (optional)" placeholder="Name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button type="submit" disabled={add.isPending || !email.trim()}>
+          <Button type="submit" loading={add.isPending} disabled={!email.trim()}>
             <UserPlus aria-hidden="true" /> Add
           </Button>
         </form>
@@ -259,7 +259,7 @@ function SendNowCard() {
           <Button size="sm" variant="outline" disabled={show.isPending} onClick={() => show.mutate()}>
             <Eye aria-hidden="true" /> {show.isPending ? 'Preparing…' : 'Preview e-mail'}
           </Button>
-          <Button size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
+          <Button size="sm" loading={run.isPending} onClick={() => run.mutate()}>
             <Send aria-hidden="true" /> {run.isPending ? 'Queuing…' : 'Send to recipients'}
           </Button>
         </div>
@@ -356,7 +356,7 @@ function HistoryCard() {
             <Button variant="outline" onClick={() => setConfirm(null)} disabled={retry.isPending}>
               Cancel
             </Button>
-            <Button disabled={retry.isPending} onClick={() => confirm && retry.mutate(confirm.id)}>
+            <Button loading={retry.isPending} onClick={() => confirm && retry.mutate(confirm.id)}>
               {retry.isPending ? 'Queuing…' : 'Retry'}
             </Button>
           </DialogActions>

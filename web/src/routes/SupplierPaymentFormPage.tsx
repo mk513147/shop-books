@@ -224,7 +224,7 @@ export function NewSupplierPaymentPage() {
           <Link to={supplier ? `/suppliers/${supplier.id}` : '/supplier-payments'} className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
             Cancel
           </Link>
-          <Button type="submit" size="lg" className={cn('md:min-w-44')} disabled={isSubmitting}>
+          <Button type="submit" size="lg" className={cn('md:min-w-44')} loading={isSubmitting}>
             {isSubmitting ? 'Saving…' : 'Record payment'}
           </Button>
         </div>

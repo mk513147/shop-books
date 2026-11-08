@@ -50,7 +50,9 @@ const ALLOCATED_LATERAL = `CROSS JOIN LATERAL (
 export interface ExpenseFilters {
   from: string;
   to: string;
+  /** Expenses carrying this category in ANY position (each expense still counted once). */
   categoryId?: string | undefined;
+  brandId?: string | undefined;
   supplierId?: string | undefined;
   /** 'none' = nothing paid at purchase (no mode). */
   paymentMode?: PaymentMode | 'none' | undefined;
@@ -60,7 +62,13 @@ export interface ExpenseFilters {
 /** WHERE conditions on alias `e` for every filter EXCEPT the date range and status. */
 function expenseConditions(f: Omit<ExpenseFilters, 'from' | 'to'>, bind: Bind): string[] {
   const where: string[] = [];
-  if (f.categoryId) where.push(`e.category_id = ${bind(f.categoryId)}`);
+  // EXISTS keeps one row per expense: an expense with several categories/brands is counted once.
+  if (f.categoryId) {
+    where.push(`EXISTS (SELECT 1 FROM expense_category_links xl WHERE xl.expense_id = e.id AND xl.category_id = ${bind(f.categoryId)})`);
+  }
+  if (f.brandId) {
+    where.push(`EXISTS (SELECT 1 FROM expense_brands xb WHERE xb.expense_id = e.id AND xb.brand_id = ${bind(f.brandId)})`);
+  }
   if (f.supplierId) where.push(`e.supplier_id = ${bind(f.supplierId)}`);
   if (f.paymentMode === 'none') where.push('NOT EXISTS (SELECT 1 FROM expense_payments xp WHERE xp.expense_id = e.id)');
   else if (f.paymentMode) {
@@ -135,11 +143,27 @@ export interface CategoryRow {
   previousAmount: string;
   previousCount: number;
   changePercent: string | null;
+  /**
+   * Active expenses in the period that carry this category in ANY position (primary or not).
+   * A count only: amounts stay with the primary category, so nothing is counted twice.
+   */
+  taggedCount: number;
 }
 
 /**
  * Category breakdown for the period plus the previous equivalent period, in ONE query.
  * Archived categories with expenses are kept (historical reporting); nothing is merged.
+ *
+ * An expense may carry several categories (migration 0012). There is no allocation of money to
+ * categories, so each expense's amount is attributed ONCE, to its primary (first) category: the
+ * category amounts add up exactly to the expense total. `taggedCount` additionally shows how many
+ * expenses carry the category at all.
+ *
+ * With `categoryId` set, ONLY that category is listed (no other primaries appear as if they were
+ * the selected one): `amount`/`count` are the expenses where it is the PRIMARY category (0 when it
+ * is only ever secondary), `taggedCount` the expenses carrying it in any position, and `percent`
+ * its share of ALL active expenses matching the other filters. `total` is then the listed
+ * category's own amount. The API and the Excel export both use this function, so they agree.
  */
 export async function categoryBreakdown(
   db: Queryable,
@@ -150,24 +174,53 @@ export async function categoryBreakdown(
   const bind = binder(params);
   const cur = `e.expense_date BETWEEN ${bind(f.from)}::date AND ${bind(f.to)}::date`;
   const prev = previous ? `e.expense_date BETWEEN ${bind(previous.from)}::date AND ${bind(previous.to)}::date` : 'false';
-  const where = ['e.voided_at IS NULL', `(${cur} OR ${prev})`, ...expenseConditions({ ...f, categoryId: undefined }, bind)];
-  if (f.categoryId) where.push(`e.category_id = ${bind(f.categoryId)}`);
+  const { categoryId, ...otherFilters } = f;
+  const where = ['e.voided_at IS NULL', `(${cur} OR ${prev})`, ...expenseConditions(otherFilters, bind)];
+  // Only the selected category's link rows are read, so no other category can show up.
+  if (categoryId) where.push(`l.category_id = ${bind(categoryId)}`);
+  const primary = 'l.position = 1';
   const rows = (
-    await db.query<{ id: string; name: string; is_active: boolean; amount: string; count: number; prev_amount: string; prev_count: number }>(
+    await db.query<{
+      id: string;
+      name: string;
+      is_active: boolean;
+      amount: string;
+      count: number;
+      prev_amount: string;
+      prev_count: number;
+      tagged_count: number;
+    }>(
       `SELECT c.id, c.name, c.is_active,
-              COALESCE(sum(e.amount) FILTER (WHERE ${cur}), 0)::numeric(20,2) AS amount,
-              count(*) FILTER (WHERE ${cur})::int AS count,
-              COALESCE(sum(e.amount) FILTER (WHERE ${prev}), 0)::numeric(20,2) AS prev_amount,
-              count(*) FILTER (WHERE ${prev})::int AS prev_count
-         FROM expenses e JOIN expense_categories c ON c.id = e.category_id
+              COALESCE(sum(e.amount) FILTER (WHERE ${primary} AND ${cur}), 0)::numeric(20,2) AS amount,
+              count(*) FILTER (WHERE ${primary} AND ${cur})::int AS count,
+              COALESCE(sum(e.amount) FILTER (WHERE ${primary} AND ${prev}), 0)::numeric(20,2) AS prev_amount,
+              count(*) FILTER (WHERE ${primary} AND ${prev})::int AS prev_count,
+              count(*) FILTER (WHERE ${cur})::int AS tagged_count
+         FROM expenses e
+         JOIN expense_category_links l ON l.expense_id = e.id
+         JOIN expense_categories c ON c.id = l.category_id
         WHERE ${where.join(' AND ')}
         GROUP BY c.id, c.name, c.is_active
-        ORDER BY sum(e.amount) FILTER (WHERE ${cur}) DESC NULLS LAST, lower(c.name)`,
+        ORDER BY sum(e.amount) FILTER (WHERE ${primary} AND ${cur}) DESC NULLS LAST, count(*) FILTER (WHERE ${cur}) DESC, lower(c.name)`,
       params,
     )
   ).rows;
   const total = rows.reduce((s, r) => s + toPaise(r.amount), 0n);
   const previousTotal = rows.reduce((s, r) => s + toPaise(r.prev_amount), 0n);
+  // Share base: the listed categories' total, or (for one selected category) every active expense
+  // matching the other filters, so the share stays meaningful and never exceeds 100 %.
+  let shareBase = total;
+  if (categoryId) {
+    const gp: unknown[] = [];
+    const gbind = binder(gp);
+    const gcur = `e.expense_date BETWEEN ${gbind(f.from)}::date AND ${gbind(f.to)}::date`;
+    const grand = await db.query<{ amount: string }>(
+      `SELECT COALESCE(sum(e.amount), 0)::numeric(20,2) AS amount FROM expenses e
+        WHERE ${['e.voided_at IS NULL', gcur, ...expenseConditions(otherFilters, gbind)].join(' AND ')}`,
+      gp,
+    );
+    shareBase = toPaise(grand.rows[0]!.amount);
+  }
   return {
     total: fromPaiseString(total),
     previousTotal: fromPaiseString(previousTotal),
@@ -177,10 +230,11 @@ export async function categoryBreakdown(
       isActive: r.is_active,
       amount: r.amount,
       count: r.count,
-      percent: total === 0n ? null : tenthsString((toPaise(r.amount) * 1000n) / total),
+      percent: shareBase === 0n ? null : tenthsString((toPaise(r.amount) * 1000n) / shareBase),
       previousAmount: r.prev_amount,
       previousCount: r.prev_count,
       changePercent: previous ? percentChange(r.amount, r.prev_amount) : null,
+      taggedCount: r.tagged_count,
     })),
   };
 }

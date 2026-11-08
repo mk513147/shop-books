@@ -99,7 +99,7 @@ function EditDialog({ payment, open, onClose }: { payment: SupplierPaymentDetail
           <Button variant="outline" onClick={close} disabled={update.isPending}>
             Cancel
           </Button>
-          <Button type="submit" form="edit-payment" disabled={update.isPending}>
+          <Button type="submit" form="edit-payment" loading={update.isPending}>
             {update.isPending ? 'Saving…' : 'Save changes'}
           </Button>
         </DialogActions>
@@ -174,7 +174,8 @@ function AllocateDialog({ payment, open, onClose }: { payment: SupplierPaymentDe
             Cancel
           </Button>
           <Button
-            disabled={allocate.isPending || allocations.length === 0 || invalid}
+            loading={allocate.isPending}
+            disabled={allocations.length === 0 || invalid}
             onClick={() =>
               allocate.mutate(
                 { id: payment.id, allocations, idempotencyKey: key },
@@ -195,7 +196,7 @@ function AllocateDialog({ payment, open, onClose }: { payment: SupplierPaymentDe
               )
             }
           >
-            {allocate.isPending ? 'Saving…' : 'Allocate'}
+            {allocate.isPending ? 'Allocating…' : 'Allocate'}
           </Button>
         </DialogActions>
       }

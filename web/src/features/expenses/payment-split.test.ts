@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPaymentSplitValid, splitPayments } from './payment-split';
+import { isPaymentSplitValid, paymentStatusOf, splitPayments } from './payment-split';
 
 const row = (amount: string, paymentMode = 'cash') => ({ amount, paymentMode });
 
@@ -37,7 +37,8 @@ describe('splitPayments', () => {
     expect(splitPayments('100', [row('0')], false).rowErrors[0]!.amount).toBe('Must be more than zero');
     expect(splitPayments('100', [row('-5')], false).rowErrors[0]!.amount).toBeDefined();
     expect(splitPayments('100', [row('1.234')], false).rowErrors[0]!.amount).toBeDefined();
-    expect(splitPayments('100', [row('')], false).rowErrors[0]!.amount).toBe('Enter the amount');
+    // A blank row next to others is an amount error.
+    expect(splitPayments('100', [row('50'), row('')], false).rowErrors[1]!.amount).toBe('Enter the amount');
     const noMethod = splitPayments('100', [row('100', '')], false);
     expect(noMethod.rowErrors[0]!.paymentMode).toBe('Choose a method');
     expect(isPaymentSplitValid(noMethod)).toBe(false);
@@ -63,7 +64,19 @@ describe('splitPayments', () => {
     expect(splitPayments('500', [row('200'), row('')], true).rowErrors[1]!.amount).toBe('Enter the amount');
   });
 
-  it('a supplier-less expense cannot be left unpaid', () => {
-    expect(isPaymentSplitValid(splitPayments('500', [row('', '')], false))).toBe(false);
+  it('a supplier-less expense cannot be left unpaid, and says why', () => {
+    const s = splitPayments('500', [row('', '')], false);
+    expect(isPaymentSplitValid(s)).toBe(false);
+    expect(s.rowErrors[0]).toEqual({});
+    expect(s.problem).toMatch(/without a supplier must be paid in full/);
+  });
+
+  it('derives the payment status from the rows (fully paid / partially paid / not paid yet)', () => {
+    expect(paymentStatusOf(splitPayments('', [row('')], true))).toBeNull();
+    expect(paymentStatusOf(splitPayments('500', [row('500')], false))).toBe('full');
+    expect(paymentStatusOf(splitPayments('500', [row('200'), row('300', 'upi')], true))).toBe('full');
+    expect(paymentStatusOf(splitPayments('500', [row('200')], true))).toBe('partial');
+    expect(paymentStatusOf(splitPayments('500', [row('', '')], true))).toBe('none');
+    expect(paymentStatusOf(splitPayments('500', [row('', '')], false))).toBe('none');
   });
 });

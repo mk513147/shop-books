@@ -1,6 +1,7 @@
 import { FileSpreadsheet, Loader2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { ApiError, apiBaseUrl } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
@@ -51,6 +52,7 @@ export function ExportButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
+  const toast = useToast();
 
   async function download() {
     if (inFlight.current) return;
@@ -75,8 +77,11 @@ export function ExportButton({
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      toast({ title: 'Excel file ready', description: a.download, tone: 'success' });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not download the file. Check your connection and try again.');
+      const message = err instanceof ApiError ? err.message : 'Could not download the file. Check your connection and try again.';
+      setError(message);
+      toast({ title: 'Export failed', description: message, tone: 'error' });
     } finally {
       inFlight.current = false;
       setBusy(false);

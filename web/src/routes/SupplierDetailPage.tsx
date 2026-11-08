@@ -166,12 +166,29 @@ export function SupplierDetailPage() {
           )}
           {s.notes && <p className="break-words text-muted-foreground">{s.notes}</p>}
           {s.categories.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {s.categories.map((c) => (
-                <Badge key={c.id} tone={c.isActive ? 'accent' : 'neutral'}>
-                  {c.name}
-                </Badge>
-              ))}
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Usual categories</p>
+              <div className="flex flex-wrap gap-1">
+                {s.categories.map((c) => (
+                  <Badge key={c.id} tone={c.isActive ? 'accent' : 'neutral'}>
+                    {c.name}
+                    {!c.isActive && ' (archived)'}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+          {(s.brands?.length ?? 0) > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Brands supplied</p>
+              <div className="flex flex-wrap gap-1">
+                {s.brands.map((b) => (
+                  <Badge key={b.id} tone={b.isActive ? 'accent' : 'neutral'}>
+                    {b.name}
+                    {!b.isActive && ' (archived)'}
+                  </Badge>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>

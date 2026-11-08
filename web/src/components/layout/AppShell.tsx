@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { navItemsFor, type NavItem } from '@/app/navigation';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuth } from '@/features/auth/auth-context';
+import { useLiveUpdates } from '@/features/sync/useLiveUpdates';
 import { cn } from '@/lib/utils';
 
 function Brand() {
@@ -156,6 +157,8 @@ function BottomNav({ items }: { items: NavItem[] }) {
 export function AppShell() {
   const { user } = useAuth();
   const items = navItemsFor(user?.role);
+  // Changes made on other phones refresh this one, with a small notification (Features 1 and 3).
+  useLiveUpdates();
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_minmax(0,1fr)]">

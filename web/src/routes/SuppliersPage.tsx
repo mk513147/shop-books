@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { useToast } from '@/components/ui/toast';
 import { AuditHistory } from '@/features/audit/AuditHistory';
 import { SupplierFormDialog } from '@/features/suppliers/SupplierForm';
 import { useSupplierHistory, useSuppliers, useUpdateSupplier } from '@/features/suppliers/suppliers-api';
@@ -72,6 +73,7 @@ function SupplierActions({ supplier, open }: { supplier: Supplier; open: (d: Dia
 
 export function ArchiveDialog({ supplier, onClose }: { supplier: Supplier | null; onClose: () => void }) {
   const update = useUpdateSupplier();
+  const toast = useToast();
   const archiving = supplier?.isActive ?? true;
   const close = () => {
     update.reset();
@@ -90,13 +92,21 @@ export function ArchiveDialog({ supplier, onClose }: { supplier: Supplier | null
           </Button>
           <Button
             variant={archiving ? 'destructive' : 'default'}
-            disabled={update.isPending}
+            loading={update.isPending}
             onClick={() =>
               supplier &&
-              update.mutate({ id: supplier.id, version: supplier.version, isActive: !supplier.isActive }, { onSuccess: close })
+              update.mutate(
+                { id: supplier.id, version: supplier.version, isActive: !supplier.isActive },
+                {
+                  onSuccess: () => {
+                    toast({ title: archiving ? 'Supplier archived' : 'Supplier reactivated', description: supplier.name, tone: 'success' });
+                    close();
+                  },
+                },
+              )
             }
           >
-            {update.isPending ? 'Working…' : archiving ? 'Archive' : 'Reactivate'}
+            {update.isPending ? (archiving ? 'Archiving…' : 'Reactivating…') : archiving ? 'Archive' : 'Reactivate'}
           </Button>
         </DialogActions>
       }

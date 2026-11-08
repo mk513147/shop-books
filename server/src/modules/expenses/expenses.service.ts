@@ -14,13 +14,25 @@ interface PersonRef {
   name: string;
 }
 
+/** A category or brand as shown on an expense. */
+export interface ClassRef {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 export interface Expense {
   id: string;
   expenseDate: string;
   supplier: { id: string; name: string; isActive: boolean } | null;
   /** Supplier text as typed before suppliers existed (migrated expenses only); read-only history. */
   legacySupplierName: string | null;
+  /** The PRIMARY category: the first of `categories` (reports attribute the amount to it). */
   category: { id: string; name: string; isActive: boolean };
+  /** Every category of the expense in the user's order (first = primary); labels, not allocations. */
+  categories: ClassRef[];
+  /** Brands the expense relates to, in the user's order (labels only; may be empty). */
+  brands: ClassRef[];
   /** Optional free text; null when none was given (clients then show the category name). */
   description: string | null;
   /** Money: decimal strings, e.g. "1250.00". */
@@ -102,9 +114,10 @@ const SELECT_EXPENSE = `
     LEFT JOIN users vu ON vu.id = e.voided_by
     CROSS JOIN LATERAL (${ALLOCATED_SQL}) al`;
 
-type ExpenseRowWithPayments = ExpenseRow & { payments: PaymentLine[] };
+type ExpenseRowWithPayments = ExpenseRow & { payments: PaymentLine[]; categories: ClassRef[]; brands: ClassRef[] };
 
 function toExpense(row: ExpenseRowWithPayments): Expense {
+  const primary = { id: row.category_id, name: row.category_name, isActive: row.category_active };
   return {
     id: row.id,
     expenseDate: row.expense_date,
@@ -112,7 +125,9 @@ function toExpense(row: ExpenseRowWithPayments): Expense {
       ? { id: row.supplier_id, name: row.supplier_name ?? '', isActive: row.supplier_active ?? false }
       : null,
     legacySupplierName: row.legacy_supplier_name,
-    category: { id: row.category_id, name: row.category_name, isActive: row.category_active },
+    category: primary,
+    categories: row.categories.length > 0 ? row.categories : [primary],
+    brands: row.brands,
     description: row.description,
     amount: row.amount,
     amountPaid: row.amount_paid,
@@ -142,6 +157,9 @@ function snapshot(row: ExpenseRowWithPayments): AuditSnapshot {
     supplierName: row.supplier_name,
     categoryId: row.category_id,
     categoryName: row.category_name,
+    // All categories / brands by name, in order ("Transport, Packaging"); labels, not allocations.
+    categories: row.categories.map((c) => c.name).join(', ') || row.category_name,
+    brands: row.brands.length ? row.brands.map((b) => b.name).join(', ') : null,
     description: row.description,
     amount: row.amount,
     amountPaid: row.amount_paid,
@@ -170,18 +188,87 @@ export async function loadPayments(client: Queryable, ids: string[]): Promise<Ma
   return byExpense;
 }
 
+export interface Classification {
+  categories: ClassRef[];
+  brands: ClassRef[];
+}
+
+/** Categories and brands of the given expenses, each in the order the user chose. */
+export async function loadClassification(client: Queryable, ids: string[]): Promise<Map<string, Classification>> {
+  const byExpense = new Map<string, Classification>(ids.map((id) => [id, { categories: [], brands: [] }]));
+  if (ids.length === 0) return byExpense;
+  const result = await client.query<{ expense_id: string; kind: 'category' | 'brand'; id: string; name: string; is_active: boolean }>(
+    `SELECT l.expense_id, 'category' AS kind, c.id, c.name, c.is_active, l.position
+       FROM expense_category_links l JOIN expense_categories c ON c.id = l.category_id
+      WHERE l.expense_id = ANY($1::uuid[])
+     UNION ALL
+     SELECT eb.expense_id, 'brand' AS kind, b.id, b.name, b.is_active, eb.position
+       FROM expense_brands eb JOIN brands b ON b.id = eb.brand_id
+      WHERE eb.expense_id = ANY($1::uuid[])
+     ORDER BY expense_id, kind, position`,
+    [ids],
+  );
+  for (const r of result.rows) {
+    const entry = byExpense.get(r.expense_id)!;
+    (r.kind === 'category' ? entry.categories : entry.brands).push({ id: r.id, name: r.name, isActive: r.is_active });
+  }
+  return byExpense;
+}
+
 async function selectExpense(client: Queryable, id: string, lock = false): Promise<ExpenseRowWithPayments> {
   if (lock) await client.query(`SELECT 1 FROM expenses WHERE id = $1 FOR UPDATE`, [id]);
   const result = await client.query<ExpenseRow>(`${SELECT_EXPENSE} WHERE e.id = $1`, [id]);
   const row = result.rows[0];
   if (!row) throw new NotFoundError('Expense not found');
-  return { ...row, payments: (await loadPayments(client, [id])).get(id) ?? [] };
+  const classes = (await loadClassification(client, [id])).get(id)!;
+  return { ...row, ...classes, payments: (await loadPayments(client, [id])).get(id) ?? [] };
 }
 
 /** Order-sensitive identity of a payment list, for change detection. */
 const paymentsKey = (payments: PaymentLine[]): string => payments.map((p) => `${p.paymentMode}:${p.amount}`).join(',');
 
 const paidTotal = (input: ExpenseInput): bigint => input.payments.reduce((sum, p) => sum + toPaise(p.amount), 0n);
+
+/** The final, ordered category and brand ids to store for an expense. */
+interface ClassificationIds {
+  categoryIds: string[];
+  brandIds: string[];
+}
+
+/**
+ * What an UPDATE stores. A request that only names `categoryId` (an older frontend) sets the
+ * primary category and must not wipe what that client does not know about: the expense's other
+ * categories stay (in their order), and omitted brands stay. Only explicit arrays replace them,
+ * so an empty `brandIds: []` is the way to clear brands on purpose.
+ */
+function resolveClassificationForUpdate(input: ExpenseInput, current: ExpenseRowWithPayments): ClassificationIds {
+  let categoryIds = input.categoryIds;
+  if (input.categoriesFromLegacy) {
+    const primary = input.categoryIds[0]!;
+    // Position 1 was the old primary: the legacy client replaced it. Positions 2+ are kept.
+    const secondary = current.categories.slice(1).map((c) => c.id).filter((cid) => cid !== primary);
+    categoryIds = [primary, ...secondary];
+  }
+  return { categoryIds, brandIds: input.brandIds ?? current.brands.map((b) => b.id) };
+}
+
+/** Replaces the category and brand links of an expense (inside the caller's transaction). */
+async function writeClassification(client: Queryable, expenseId: string, { categoryIds, brandIds }: ClassificationIds): Promise<void> {
+  await client.query(`DELETE FROM expense_category_links WHERE expense_id = $1`, [expenseId]);
+  await client.query(
+    `INSERT INTO expense_category_links (expense_id, category_id, position)
+     SELECT $1, id, ord FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord)`,
+    [expenseId, categoryIds],
+  );
+  await client.query(`DELETE FROM expense_brands WHERE expense_id = $1`, [expenseId]);
+  if (brandIds.length > 0) {
+    await client.query(
+      `INSERT INTO expense_brands (expense_id, brand_id, position)
+       SELECT $1, id, ord FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord)`,
+      [expenseId, brandIds],
+    );
+  }
+}
 
 /** Replaces the allocation rows of an expense (inside the caller's transaction). */
 async function writePayments(client: Queryable, expenseId: string, payments: PaymentLine[]): Promise<void> {
@@ -270,18 +357,32 @@ function assertAllocationsKept(input: ExpenseInput, current: ExpenseRow): void {
   }
 }
 
-/** New expenses (and category changes) may only use an ACTIVE category. Share-locks it meanwhile. */
-async function assertCategoryUsable(client: Queryable, categoryId: string): Promise<void> {
-  const result = await client.query<{ is_active: boolean }>(
-    `SELECT is_active FROM expense_categories WHERE id = $1 FOR SHARE`,
-    [categoryId],
+/**
+ * Newly chosen categories / brands must exist and be ACTIVE; ones the expense already carries
+ * (`keep`) may stay even if archived since. All of them are share-locked meanwhile, so none can be
+ * archived halfway through the write.
+ */
+async function assertClassesUsable(
+  client: Queryable,
+  table: 'expense_categories' | 'brands',
+  ids: string[],
+  keep: Set<string>,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const result = await client.query<{ id: string; name: string; is_active: boolean }>(
+    `SELECT id, name, is_active FROM ${table} WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE`,
+    [ids],
   );
-  const row = result.rows[0];
-  if (!row || !row.is_active) {
-    throw new ValidationError([
-      { path: 'categoryId', message: row ? 'This category is archived; choose an active one' : 'Category not found' },
-    ]);
-  }
+  const found = new Map(result.rows.map((r) => [r.id, r]));
+  const what = table === 'brands' ? 'brand' : 'category';
+  const path = table === 'brands' ? 'brandIds' : 'categoryIds';
+  const issues: ErrorDetail[] = ids.flatMap((id) => {
+    const row = found.get(id);
+    if (!row) return [{ path, message: `A selected ${what} does not exist` }];
+    if (!row.is_active && !keep.has(id)) return [{ path, message: `“${row.name}” is archived; choose an active ${what}` }];
+    return [];
+  });
+  if (issues.length > 0) throw new ValidationError(issues);
 }
 
 /** New expenses (and supplier changes) may only use an ACTIVE supplier. Share-locks it meanwhile. */
@@ -309,7 +410,10 @@ function normalised(input: ExpenseInput): ExpenseInput {
 const primaryMode = (input: ExpenseInput): PaymentMode | null => input.payments[0]?.paymentMode ?? null;
 
 async function insertExpense(client: Queryable, input: ExpenseInput, actor: Actor): Promise<Expense> {
-  await assertCategoryUsable(client, input.categoryId);
+  // Lock order (unchanged in spirit): categories, brands, then supplier, all FOR SHARE.
+  await assertClassesUsable(client, 'expense_categories', input.categoryIds, new Set());
+  const brandIds = input.brandIds ?? [];
+  await assertClassesUsable(client, 'brands', brandIds, new Set());
   if (input.supplierId) await assertSupplierUsable(client, input.supplierId);
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO expenses (expense_date, supplier_id, category_id, description, amount, amount_paid,
@@ -319,7 +423,7 @@ async function insertExpense(client: Queryable, input: ExpenseInput, actor: Acto
     [
       input.expenseDate,
       input.supplierId,
-      input.categoryId,
+      input.categoryIds[0],
       input.description,
       input.amount,
       fromPaise(paidTotal(input)),
@@ -329,6 +433,7 @@ async function insertExpense(client: Queryable, input: ExpenseInput, actor: Acto
     ],
   );
   await writePayments(client, inserted.rows[0]!.id, input.payments);
+  await writeClassification(client, inserted.rows[0]!.id, { categoryIds: input.categoryIds, brandIds });
   const row = await selectExpense(client, inserted.rows[0]!.id);
   await recordFinancialAudit(client, {
     entityType: 'expense',
@@ -400,14 +505,20 @@ export async function updateExpense(
     const current = await lockForChange(client, id, expectedVersion, false);
     validateFinancials(input, current);
     assertAllocationsKept(input, current);
-    if (input.categoryId !== current.category_id) await assertCategoryUsable(client, input.categoryId);
+    // Categories / brands the expense already has may stay even if archived since; new ones must be active.
+    const currentCategoryIds = current.categories.map((c) => c.id);
+    const currentBrandIds = current.brands.map((b) => b.id);
+    const next = resolveClassificationForUpdate(input, current);
+    await assertClassesUsable(client, 'expense_categories', next.categoryIds, new Set(currentCategoryIds));
+    await assertClassesUsable(client, 'brands', next.brandIds, new Set(currentBrandIds));
     // An archived supplier may stay on an existing expense, but cannot be newly chosen.
     if (input.supplierId && input.supplierId !== current.supplier_id) await assertSupplierUsable(client, input.supplierId);
 
     const unchanged =
       input.expenseDate === current.expense_date &&
       input.supplierId === current.supplier_id &&
-      input.categoryId === current.category_id &&
+      next.categoryIds.join(',') === currentCategoryIds.join(',') &&
+      next.brandIds.join(',') === currentBrandIds.join(',') &&
       input.description === current.description &&
       input.amount === current.amount &&
       paymentsKey(input.payments) === paymentsKey(current.payments) &&
@@ -424,7 +535,7 @@ export async function updateExpense(
         id,
         input.expenseDate,
         input.supplierId,
-        input.categoryId,
+        next.categoryIds[0],
         input.description,
         input.amount,
         fromPaise(paidTotal(input)),
@@ -434,6 +545,7 @@ export async function updateExpense(
       ],
     );
     await writePayments(client, id, input.payments);
+    await writeClassification(client, id, next);
     const after = await selectExpense(client, id);
     await recordFinancialAudit(client, {
       entityType: 'expense',
@@ -544,7 +656,13 @@ export async function listExpenses(db: Queryable, query: ExpenseListQuery): Prom
   }
   if (query.from) where.push(`e.expense_date >= ${bind(query.from)}::date`);
   if (query.to) where.push(`e.expense_date <= ${bind(query.to)}::date`);
-  if (query.categoryId) where.push(`e.category_id = ${bind(query.categoryId)}`);
+  // Any position; EXISTS keeps one row per expense, so totals never count an expense twice.
+  if (query.categoryId) {
+    where.push(`EXISTS (SELECT 1 FROM expense_category_links xl WHERE xl.expense_id = e.id AND xl.category_id = ${bind(query.categoryId)})`);
+  }
+  if (query.brandId) {
+    where.push(`EXISTS (SELECT 1 FROM expense_brands xb WHERE xb.expense_id = e.id AND xb.brand_id = ${bind(query.brandId)})`);
+  }
   if (query.supplierId) where.push(`e.supplier_id = ${bind(query.supplierId)}`);
   if (query.paymentMode === 'none') where.push('NOT EXISTS (SELECT 1 FROM expense_payments xp WHERE xp.expense_id = e.id)');
   else if (query.paymentMode) {
@@ -576,9 +694,11 @@ export async function listExpenses(db: Queryable, query: ExpenseListQuery): Prom
   );
 
   const s = summary.rows[0]!;
-  const payments = await loadPayments(db, rows.rows.map((r) => r.id));
+  const ids = rows.rows.map((r) => r.id);
+  const payments = await loadPayments(db, ids);
+  const classes = await loadClassification(db, ids);
   return {
-    items: rows.rows.map((r) => toExpense({ ...r, payments: payments.get(r.id) ?? [] })),
+    items: rows.rows.map((r) => toExpense({ ...r, ...classes.get(r.id)!, payments: payments.get(r.id) ?? [] })),
     pagination: {
       page: query.page,
       pageSize: query.pageSize,

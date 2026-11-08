@@ -73,8 +73,8 @@ export function CustomerFormDialog({
           <Button variant="outline" onClick={close} disabled={mutation.isPending}>
             Cancel
           </Button>
-          <Button type="submit" form="customer-form" disabled={mutation.isPending}>
-            {mutation.isPending ? 'Saving…' : customer ? 'Save changes' : 'Add customer'}
+          <Button type="submit" form="customer-form" loading={mutation.isPending}>
+            {mutation.isPending ? (customer ? 'Updating…' : 'Saving…') : customer ? 'Save changes' : 'Add customer'}
           </Button>
         </DialogActions>
       }

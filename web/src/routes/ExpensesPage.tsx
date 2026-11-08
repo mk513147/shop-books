@@ -9,15 +9,16 @@ import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { useBrands } from '@/features/brands/brands-api';
 import { useCategories } from '@/features/categories/categories-api';
 import { PAYMENT_MODE_LABELS, PAYMENT_MODES, useExpenseList, useRecorders } from '@/features/expenses/expenses-api';
 import { useSuppliers } from '@/features/suppliers/suppliers-api';
 import { formatDate } from '@/lib/dates';
 import { formatInr, MONEY_INPUT } from '@/lib/money';
-import { cn, expenseLabel } from '@/lib/utils';
+import { categorySummary, cn, expenseLabel } from '@/lib/utils';
 import type { Expense } from '@/types/api';
 
-const FILTER_KEYS = ['q', 'from', 'to', 'categoryId', 'supplierId', 'paymentMode', 'recordedBy', 'status', 'minAmount', 'maxAmount'] as const;
+const FILTER_KEYS = ['q', 'from', 'to', 'categoryId', 'brandId', 'supplierId', 'paymentMode', 'recordedBy', 'status', 'minAmount', 'maxAmount'] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 type Filters = Record<FilterKey, string>;
 
@@ -41,6 +42,7 @@ function FilterForm({ formId, initial, onApply }: { formId: string; initial: Fil
   const [f, setF] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const categories = useCategories('all');
+  const brands = useBrands('all');
   const suppliers = useSuppliers({ status: 'all', pageSize: 100 });
   const recorders = useRecorders();
   const set = (key: FilterKey) => (e: { target: { value: string } }) => setF({ ...f, [key]: e.target.value });
@@ -87,6 +89,17 @@ function FilterForm({ formId, initial, onApply }: { formId: string; initial: Fil
             <option key={c.id} value={c.id}>
               {c.name}
               {c.isActive ? '' : ' (archived)'}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field id="f-brand" label="Brand">
+        <Select id="f-brand" value={f.brandId} onChange={set('brandId')}>
+          <option value="">All brands</option>
+          {brands.data?.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+              {b.isActive ? '' : ' (archived)'}
             </option>
           ))}
         </Select>
@@ -296,7 +309,7 @@ export function ExpensesPage() {
                         {e.documentCount > 0 && <Paperclip className="size-3.5 shrink-0 text-muted-foreground" aria-label={`${e.documentCount} document(s)`} />}
                       </p>
                       {(e.supplier ?? e.description) && (
-                        <p className="truncate text-sm text-muted-foreground">{e.supplier?.name ?? e.category.name}</p>
+                        <p className="truncate text-sm text-muted-foreground">{e.supplier?.name ?? categorySummary(e)}</p>
                       )}
                     </div>
                     <div className="shrink-0 text-right">
@@ -307,7 +320,7 @@ export function ExpensesPage() {
                   <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span className="truncate">
                       {formatDate(e.expenseDate)}
-                      {e.supplier ? ` · ${e.category.name}` : ''} · {e.createdBy.name}
+                      {e.supplier ? ` · ${categorySummary(e)}` : ''} · {e.createdBy.name}
                     </span>
                     <StatusBadge status={e.status} />
                   </div>
@@ -353,7 +366,9 @@ export function ExpensesPage() {
                       {e.status === 'voided' && <Badge tone="danger" className="mt-1">Voided</Badge>}
                     </td>
                     <td className="px-4 py-3">{e.supplier?.name ?? '—'}</td>
-                    <td className="px-4 py-3">{e.category.name}</td>
+                    <td className="px-4 py-3" title={e.categories?.map((c) => c.name).join(', ')}>
+                      {categorySummary(e)}
+                    </td>
                     <td className={cn('figure whitespace-nowrap px-4 py-3 text-right font-medium', e.status === 'voided' && 'line-through')}>
                       {formatInr(e.amount)}
                     </td>

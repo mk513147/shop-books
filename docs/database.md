@@ -114,6 +114,10 @@ Behaviour:
 | `0007_customers` | `customers`, `customer_transactions`, view `customer_balances`, ledger triggers, audit + idempotency extensions (Stage 3D). |
 | `0008_reporting_indexes` | four indexes for the dashboard and reports (Stage 4). |
 | `0009_monthly_reports` | `report_settings`, `report_recipients`, `report_jobs`, `report_deliveries`, `report_delivery_attempts`, audit extensions (Stage 5). |
+| `0010_expense_payments` | `expense_payments` (several payment methods per expense), optional description. |
+| `0011_document_upload_queue` | `document_upload_queue` (bill documents waiting for the desktop storage agent). |
+| `0012_expense_classification` | `brands`, `supplier_brands`, `expense_category_links` (several categories per expense; backfilled), `expense_brands`; audit extensions. |
+| `0013_salesmen` | `salesmen` (standalone directory); audit entity `salesman`. |
 
 ### `0002_auth` tables
 
@@ -249,7 +253,7 @@ Additive; no existing row is changed (only the audit entity list and idempotency
 
 ### Migration order and verification
 
-`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010` → `0011`.
+`0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` → `0009` → `0010` → `0011` → `0012` → `0013`.
 
 **Status on 2026-11-02 (verified with `db:status` / `schema_migrations`):** `shop_books_dev` and `shop_books_test` both have 0001–0010. 0010 was applied to `shop_books_dev` after a backup (`D:\ShopBooksBackups\shop_books_dev_before_0010_2026-11-02_214312.dump`); a row-by-row comparison showed every existing table unchanged apart from the new `schema_migrations` row and the backfilled `expense_payments` rows. No production database exists yet.
 
@@ -258,6 +262,29 @@ History of the earlier migrations: 0005–0009 were applied (via `runMigrations`
 ### `0011_document_upload_queue`
 
 Additive; no existing row changes. `document_upload_queue (document_id PK → expense_documents, content bytea ≤ 10 MB, queued_at, attempts, last_attempt_at, last_error)` holds bill documents uploaded while the document storage (desktop agent) was unreachable, written in the same transaction as their `expense_documents` row. A `BEFORE INSERT OR UPDATE` trigger requires the bytes to match the document's `size_bytes` and `sha256` and forbids changing them. Rows are deleted only after the storage confirmed delivery (the document row is never deleted). Applied so far only to `shop_books_test` (by the test suite). Rollback when the queue is empty: drop the trigger, `check_document_upload_queue()` and the table.
+
+### `0012_expense_classification`
+
+Additive; no existing row is changed or deleted (verified by the upgrade test, which also checks the backfill). Categories and brands are **labels**: no money is allocated to them, and an expense is counted once in every total.
+
+| Table | Purpose and constraints |
+|---|---|
+| `brands` | master data (manufacturers): `name` (trimmed, single spaces, 1–80), `is_active`, `created/updated_*`; `brands_active_name_unique` (case-insensitive among active brands, like categories); never deleted (trigger) |
+| `supplier_brands` | supplier ⇄ brand **defaults** (PK `(supplier_id, brand_id)`), the counterpart of the existing `supplier_categories` (reused, not duplicated) |
+| `expense_category_links` | expense ⇄ category, ordered: PK `(expense_id, category_id)` (no duplicates), `position ≥ 1` unique per expense. **Backfill:** every existing expense gets its current `category_id` at position 1 |
+| `expense_brands` | expense ⇄ brand, ordered: PK `(expense_id, brand_id)`, `position` unique per expense |
+
+- `expenses.category_id` is kept as the **primary** category (the first one selected). A deferred constraint trigger (`check_expense_primary_category`, on `expenses` and `expense_category_links`) requires the position-1 link to equal it at commit, so old code paths and reports that read `category_id` stay correct.
+- Category reports attribute each expense's amount to its primary category only (`amount`/`count`), so category amounts add up to the expense total; `taggedCount` counts expenses carrying the category in any position. Category/brand **filters** match any position with `EXISTS` (one row per expense).
+- Supplier defaults only pre-select categories/brands on **new** expenses in the web form; the links saved on an expense never follow later default changes. Archived brands/categories are never newly linked or auto-selected; existing links stay.
+- Audit: entity `brand`; actions `link_brand`/`unlink_brand` (on the supplier). Expense snapshots now also carry `categories` and `brands` (names, in order).
+- Rollback (only before multi-category data matters): drop the two constraint triggers and `check_expense_primary_category()`, the four tables, and restore the 0009 audit CHECK lists.
+
+### `0013_salesmen`
+
+Additive. `salesmen (name 1–120, phone (same rule as suppliers), notes ≤ 1000, is_active, version, created/updated_*)`; names may repeat; never deleted (trigger); audit entity `salesman`. A standalone directory: **no link to any other table** (no sales, orders, commissions or targets). Rollback: drop the table and restore the 0012 audit entity list.
+
+**Status:** 0012 and 0013 have been applied only to `shop_books_test` (by the automated tests). Apply to `shop_books_dev` / production with the normal procedure (backup first, `db:status`, `db:migrate`), then spot-check that `SELECT count(*) FROM expenses` equals `SELECT count(*) FROM expense_category_links`.
 
 ### `0008_reporting_indexes` (Stage 4)
 

@@ -4,8 +4,11 @@ import type { Database } from '../database/connection.js';
 import { requireAuth, requireCsrf, requirePasswordCurrent, requireRole } from '../middleware/auth.js';
 import { requireJson, verifyOrigin } from '../middleware/requestGuards.js';
 import { createAuthRouter, createLoginHandler } from '../modules/auth/auth.routes.js';
+import { createBrandsRouter } from '../modules/brands/brands.routes.js';
 import { createCategoriesRouter } from '../modules/categories/categories.routes.js';
+import { createSyncRouter } from '../modules/sync/sync.routes.js';
 import { createCustomersRouter } from '../modules/customers/customers.routes.js';
+import { createSalesmenRouter } from '../modules/salesmen/salesmen.routes.js';
 import { createExportsRouter } from '../modules/exports/exports.routes.js';
 import { createExpensesRouter } from '../modules/expenses/expenses.routes.js';
 import type { DocumentStorage } from '../modules/documents/storage.js';
@@ -72,10 +75,14 @@ export function createApiRouter({ db, config, storage, emailSender, onReportQueu
   );
   // Financial modules: owner AND managers (managers are not read-only).
   router.use('/categories', createCategoriesRouter({ db }));
+  router.use('/brands', createBrandsRouter({ db }));
+  // Change feed for live updates across devices (read-only; no amounts or other figures).
+  router.use('/sync', createSyncRouter({ db }));
   router.use('/expenses', createExpensesRouter({ db, storage }));
   router.use('/suppliers', createSuppliersRouter({ db }));
   router.use('/supplier-payments', createSupplierPaymentsRouter({ db }));
   router.use('/customers', createCustomersRouter({ db }));
+  router.use('/salesmen', createSalesmenRouter({ db }));
   router.use('/reports', createReportsRouter({ db }));
   router.use('/exports', createExportsRouter({ db, shopName: config.shopName }));
 

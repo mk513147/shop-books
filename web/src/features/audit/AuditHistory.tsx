@@ -11,8 +11,10 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   restore: 'Restored',
   archive: 'Archived',
   reactivate: 'Reactivated',
-  link_category: 'Category suggestion added',
-  unlink_category: 'Category suggestion removed',
+  link_category: 'Usual category added',
+  unlink_category: 'Usual category removed',
+  link_brand: 'Brand added',
+  unlink_brand: 'Brand removed',
   import: 'Created from existing expenses',
   document_add: 'Document attached',
   document_remove: 'Document removed',
@@ -28,6 +30,9 @@ function itemText(entry: AuditHistoryEntry): string | null {
     case 'link_category':
     case 'unlink_category':
       return String(a.categoryName ?? '');
+    case 'link_brand':
+    case 'unlink_brand':
+      return String(a.brandName ?? '');
     case 'document_add':
     case 'document_remove':
       return String(a.fileName ?? '');

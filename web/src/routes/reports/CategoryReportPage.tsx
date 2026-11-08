@@ -21,7 +21,7 @@ export function CategoryReportPage() {
   const period = usePeriodParams('this_month');
   const report = useCategoryReport(period.query ?? { period: 'this_month' });
   const r = report.data;
-  const shown = r?.rows.filter((c) => c.count > 0 || c.previousCount > 0) ?? [];
+  const shown = r?.rows.filter((c) => c.count > 0 || c.previousCount > 0 || c.taggedCount > 0) ?? [];
 
   return (
     <Page>
@@ -66,6 +66,9 @@ export function CategoryReportPage() {
                       <th className="px-2 py-2 text-right font-medium">Amount</th>
                       <th className="px-2 py-2 text-right font-medium">Count</th>
                       <th className="px-2 py-2 text-right font-medium">Share</th>
+                      <th className="px-2 py-2 text-right font-medium" title="Expenses carrying this category in any position">
+                        Tagged
+                      </th>
                       <th className="px-4 py-2 text-right font-medium">vs previous</th>
                     </tr>
                   </thead>
@@ -78,6 +81,7 @@ export function CategoryReportPage() {
                         <td className="figure px-2 py-2 text-right">{formatInr(c.amount)}</td>
                         <td className="figure px-2 py-2 text-right">{c.count}</td>
                         <td className="figure px-2 py-2 text-right">{c.percent ?? '—'}%</td>
+                        <td className="figure px-2 py-2 text-right">{c.taggedCount}</td>
                         <td className="px-4 py-2 text-right">
                           <Change value={c.changePercent} />
                           <span className="block text-xs text-muted-foreground">{formatInr(c.previousAmount)}</span>
@@ -92,6 +96,8 @@ export function CategoryReportPage() {
           </div>
           <p className="text-xs text-muted-foreground">
             Shares are of active (not voided) expenses in the period, truncated to one decimal. Archived categories stay listed when they have expenses.
+            An expense with several categories is counted once, under its primary (first) category, so the amounts add up to the expense total;
+            “Tagged” is how many expenses carry the category at all.
           </p>
           <GeneratedNote />
         </div>

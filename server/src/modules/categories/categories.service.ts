@@ -27,7 +27,7 @@ interface CategoryRow {
 }
 
 const CATEGORY_COLUMNS = `c.id, c.name, c.description, c.is_active, c.created_at, c.updated_at,
-  (SELECT count(*)::int FROM expenses e WHERE e.category_id = c.id) AS expense_count`;
+  (SELECT count(*)::int FROM expense_category_links l WHERE l.category_id = c.id) AS expense_count`;
 
 function toCategory(row: CategoryRow): Category {
   return {

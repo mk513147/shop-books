@@ -84,7 +84,7 @@ function CreateUserForm({ onCreated }: { onCreated: (value: TemporaryPassword) =
       <Field id="new-email" label="Email" error={errors.email?.message}>
         <Input id="new-email" type="email" autoComplete="off" {...errorProps('new-email', errors.email)} {...register('email')} />
       </Field>
-      <Button type="submit" disabled={createUser.isPending}>
+      <Button type="submit" loading={createUser.isPending}>
         {createUser.isPending ? 'Adding…' : 'Add manager'}
       </Button>
       {createUser.isError && (

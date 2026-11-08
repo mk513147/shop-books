@@ -73,7 +73,7 @@ export function LoginPage() {
                 {formError}
               </p>
             )}
-            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" size="lg" className="w-full" loading={isSubmitting}>
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
             <p className="text-xs text-muted-foreground">Forgotten your password? Ask the shop owner to reset it.</p>

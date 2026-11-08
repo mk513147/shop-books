@@ -179,11 +179,11 @@ export function CustomerTxnDialog({
             {confirming ? 'Back' : 'Cancel'}
           </Button>
           {confirming ? (
-            <Button variant="destructive" disabled={record.isPending} onClick={() => void send(confirming)}>
+            <Button variant="destructive" loading={record.isPending} onClick={() => void send(confirming)}>
               {record.isPending ? 'Saving…' : `Refund ${formatInr(confirming.amount.trim())}`}
             </Button>
           ) : (
-            <Button type="submit" form="customer-txn-form" disabled={record.isPending || overLimit}>
+            <Button type="submit" form="customer-txn-form" loading={record.isPending} disabled={overLimit}>
               {record.isPending ? 'Saving…' : copy.submit}
             </Button>
           )}

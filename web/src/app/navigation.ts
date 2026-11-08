@@ -1,4 +1,4 @@
-import { BookOpen, LayoutDashboard, ReceiptText, Tags, Truck, UserCog, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { BadgeCheck, BookOpen, Factory, LayoutDashboard, ReceiptText, Tags, Truck, UserCog, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Role } from '@/types/api';
 
 export interface NavItem {
@@ -23,7 +23,9 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/suppliers', label: 'Suppliers', icon: Truck, mobileTab: true },
   { to: '/supplier-payments', label: 'Supplier payments', icon: Wallet },
   { to: '/categories', label: 'Categories', icon: Tags },
+  { to: '/brands', label: 'Brands', icon: Factory },
   { to: '/customers', label: 'Customers', icon: Users },
+  { to: '/salesmen', label: 'Salesmen', icon: BadgeCheck },
   { to: '/reports', label: 'Reports', icon: BookOpen },
   { to: '/users', label: 'Users', icon: UserCog, role: 'owner' },
 ];

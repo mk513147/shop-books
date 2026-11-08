@@ -1,5 +1,5 @@
 /**
- * Upgrade safety of migrations 0005–0011 on a database that already holds Stage 3A data (not just
+ * Upgrade safety of migrations 0005–0013 on a database that already holds Stage 3A data (not just
  * an empty one). Runs in a throw-away schema of the test database, which is dropped afterwards.
  */
 import { randomBytes } from 'node:crypto';
@@ -14,7 +14,7 @@ import { connectTestDatabase } from './helpers.js';
 const pool = await connectTestDatabase();
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../src/database/migrations');
 
-describe.skipIf(!pool)('migrations 0005–0011 on an existing 0004 database', () => {
+describe.skipIf(!pool)('migrations 0005–0013 on an existing 0004 database', () => {
   const db = pool!;
   const schema = `up_${randomBytes(4).toString('hex')}`;
   let schemaPool: pg.Pool;
@@ -81,7 +81,7 @@ describe.skipIf(!pool)('migrations 0005–0011 on an existing 0004 database', ()
     const before = await snapshot();
 
     const applied = await runMigrations(schemaPool, MIGRATIONS_DIR);
-    expect(applied.applied).toEqual(['0005', '0006', '0007', '0008', '0009', '0010', '0011']);
+    expect(applied.applied).toEqual(['0005', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013']);
     expect(await snapshot()).toEqual(before);
 
     // 0010: every expense that was paid at purchase gets exactly one matching payment allocation;
@@ -102,6 +102,16 @@ describe.skipIf(!pool)('migrations 0005–0011 on an existing 0004 database', ()
     expect(byId[s1]).toMatchObject({ payable: '1300.00', unallocated: '0.00', total_payments: '0.00' });
     expect(byId[s2]).toMatchObject({ payable: '0.00' });
     expect((await q(`SELECT count(*)::int AS n FROM customer_balances`)).rows[0].n).toBe(0);
+    // 0012: every existing expense keeps its category as its one (primary) category link; no brands.
+    expect(
+      (await q(
+        `SELECT count(*)::int AS n FROM expenses e
+          WHERE (SELECT count(*) FROM expense_category_links l WHERE l.expense_id = e.id) <> 1
+             OR NOT EXISTS (SELECT 1 FROM expense_category_links l WHERE l.expense_id = e.id AND l.position = 1 AND l.category_id = e.category_id)`,
+      )).rows[0].n,
+    ).toBe(0);
+    expect((await q(`SELECT count(*)::int AS n FROM expense_category_links`)).rows[0].n).toBe((await q(`SELECT count(*)::int AS n FROM expenses`)).rows[0].n);
+    expect((await q(`SELECT count(*)::int AS n FROM expense_brands`)).rows[0].n).toBe(0);
     // 0009: reports start switched off, with the default schedule.
     expect((await q(`SELECT enabled, delivery_day, to_char(delivery_time, 'HH24:MI') AS t, include_excel FROM report_settings`)).rows).toEqual([
       { enabled: false, delivery_day: 1, t: '08:00', include_excel: true },

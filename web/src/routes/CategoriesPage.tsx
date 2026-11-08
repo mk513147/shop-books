@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
 import { useCategories, useCreateCategory, useUpdateCategory } from '@/features/categories/categories-api';
 import type { Category } from '@/types/api';
 
@@ -60,7 +61,7 @@ function CategoryForm({
         <Input id={`${idPrefix}-description`} autoComplete="off" {...register('description')} />
       </Field>
       <div className="flex gap-2">
-        <Button type="submit" className="flex-1 md:flex-none" disabled={isSubmitting}>
+        <Button type="submit" className="flex-1 md:flex-none" loading={isSubmitting}>
           {isSubmitting ? 'Saving…' : submitLabel}
         </Button>
         {onCancel && (
@@ -82,6 +83,12 @@ function CategoryRow({ category }: { category: Category }) {
   const [editing, setEditing] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const update = useUpdateCategory();
+  const toast = useToast();
+  const setActive = (isActive: boolean) =>
+    update.mutate(
+      { id: category.id, isActive },
+      { onSuccess: () => toast({ title: isActive ? 'Category reactivated' : 'Category archived', description: category.name, tone: 'success' }) },
+    );
 
   if (editing) {
     return (
@@ -93,6 +100,7 @@ function CategoryRow({ category }: { category: Category }) {
           onCancel={() => setEditing(false)}
           onSubmit={async (v) => {
             await update.mutateAsync({ id: category.id, ...v });
+            toast({ title: 'Category updated', description: v.name, tone: 'success' });
             setEditing(false);
           }}
         />
@@ -121,13 +129,13 @@ function CategoryRow({ category }: { category: Category }) {
         <Button
           size="sm"
           variant="outline"
-          disabled={update.isPending}
+          loading={update.isPending}
           onClick={() => {
             if (category.isActive) setConfirmArchive(true);
-            else update.mutate({ id: category.id, isActive: true });
+            else setActive(true);
           }}
         >
-          {category.isActive ? 'Archive' : 'Reactivate'}
+          {update.isPending ? (category.isActive ? 'Archiving…' : 'Reactivating…') : category.isActive ? 'Archive' : 'Reactivate'}
         </Button>
       </div>
       <Dialog
@@ -144,7 +152,7 @@ function CategoryRow({ category }: { category: Category }) {
               variant="destructive"
               onClick={() => {
                 setConfirmArchive(false);
-                update.mutate({ id: category.id, isActive: false });
+                setActive(false);
               }}
             >
               Archive
@@ -153,8 +161,8 @@ function CategoryRow({ category }: { category: Category }) {
         }
       >
         <p className="text-sm">
-          Its {category.expenseCount} existing expense(s) keep this category and supplier suggestions stay linked, but it can no
-          longer be chosen for new expenses.
+          Its {category.expenseCount} existing expense(s) keep this category and supplier defaults stay linked, but it can no
+          longer be chosen for new expenses or pre-selected automatically.
         </p>
       </Dialog>
     </li>
@@ -164,6 +172,7 @@ function CategoryRow({ category }: { category: Category }) {
 export function CategoriesPage() {
   const categories = useCategories('all');
   const create = useCreateCategory();
+  const toast = useToast();
   const active = categories.data?.filter((c) => c.isActive) ?? [];
   const archived = categories.data?.filter((c) => !c.isActive) ?? [];
 
@@ -184,7 +193,10 @@ export function CategoriesPage() {
             idPrefix="new-category"
             initial={{ name: '', description: '' }}
             submitLabel="Add"
-            onSubmit={(v) => create.mutateAsync(v)}
+            onSubmit={async (v) => {
+              await create.mutateAsync(v);
+              toast({ title: 'Category added', description: v.name, tone: 'success' });
+            }}
           />
         </CardContent>
       </Card>

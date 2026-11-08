@@ -1,12 +1,15 @@
 import { Route, Routes } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { ProtectedRoute, RequireRole } from '@/components/layout/ProtectedRoute';
+import { BrandsPage } from '@/routes/BrandsPage';
 import { CategoriesPage } from '@/routes/CategoriesPage';
 import { ChangePasswordPage } from '@/routes/ChangePasswordPage';
 import { CustomerDetailPage } from '@/routes/CustomerDetailPage';
 import { CustomerLedgerPage } from '@/routes/CustomerLedgerPage';
 import { CustomersPage } from '@/routes/CustomersPage';
 import { CustomerTransactionPage } from '@/routes/CustomerTransactionPage';
+import { SalesmanDetailPage } from '@/routes/SalesmanDetailPage';
+import { SalesmenPage } from '@/routes/SalesmenPage';
 import { DashboardPage } from '@/routes/DashboardPage';
 import { ExpenseDetailPage } from '@/routes/ExpenseDetailPage';
 import { EditExpensePage, NewExpensePage } from '@/routes/ExpenseFormPage';
@@ -44,6 +47,7 @@ export function AppRoutes() {
           <Route path="/expenses/:id" element={<ExpenseDetailPage />} />
           <Route path="/expenses/:id/edit" element={<EditExpensePage />} />
           <Route path="/categories" element={<CategoriesPage />} />
+          <Route path="/brands" element={<BrandsPage />} />
           <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
           <Route path="/suppliers/:id/ledger" element={<SupplierLedgerPage />} />
@@ -54,6 +58,8 @@ export function AppRoutes() {
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/customers/:id/ledger" element={<CustomerLedgerPage />} />
           <Route path="/customers/:id/transactions/:txnId" element={<CustomerTransactionPage />} />
+          <Route path="/salesmen" element={<SalesmenPage />} />
+          <Route path="/salesmen/:id" element={<SalesmanDetailPage />} />
           <Route path="/reports" element={<ReportsHomePage />} />
           <Route path="/reports/expenses" element={<ExpenseReportPage />} />
           <Route path="/reports/categories" element={<CategoryReportPage />} />

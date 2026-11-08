@@ -144,7 +144,7 @@ export function ExpenseDocuments({ expenseId, voided }: { expenseId: string; voi
         <div className="space-y-3 border-t pt-4">
           <DocumentPicker pending={pending} maxCount={remaining} />
           {pending.pendingCount > 0 && (
-            <Button size="sm" disabled={pending.uploading} onClick={() => void uploadSelected()}>
+            <Button size="sm" loading={pending.uploading} onClick={() => void uploadSelected()}>
               <Upload aria-hidden="true" />
               {pending.uploading ? 'Uploading…' : `Upload ${pending.pendingCount} file${pending.pendingCount === 1 ? '' : 's'}`}
             </Button>

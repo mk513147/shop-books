@@ -7,11 +7,15 @@ export type AuditEntityType =
   | 'supplier_payment'
   | 'customer'
   | 'customer_transaction'
+  /** Salesmen directory (migration 0013). */
+  | 'salesman'
   /** Monthly e-mail report configuration and manual actions (Stage 5). */
   | 'report_settings'
   | 'report_recipient'
   | 'report_job'
-  | 'report_delivery';
+  | 'report_delivery'
+  /** Brand master data (migration 0012). */
+  | 'brand';
 /** 'import' is written only by migrations (no actor); the application never records it. */
 export type AuditAction =
   | 'create'
@@ -33,7 +37,10 @@ export type AuditAction =
   /** Allocation released (reason required; recorded on the payment AND on the expense). */
   | 'release_allocation'
   /** Owner re-queued a failed report delivery. */
-  | 'retry';
+  | 'retry'
+  /** Supplier default brand added / removed (migration 0012). */
+  | 'link_brand'
+  | 'unlink_brand';
 type RecordableAction = Exclude<AuditAction, 'import'>;
 export type AuditSnapshot = Record<string, string | number | boolean | null>;
 

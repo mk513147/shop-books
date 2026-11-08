@@ -44,9 +44,10 @@ async function send(res: Response, shopName: string, result: ExportResult): Prom
 /** Human-readable filter lines for the workbook header (names looked up by id; never raw SQL). */
 async function labels(db: Queryable, f: Record<string, unknown>): Promise<[string, string][]> {
   const out: [string, string][] = [];
-  const name = async (table: 'expense_categories' | 'suppliers' | 'users' | 'customers', id: unknown) =>
+  const name = async (table: 'expense_categories' | 'brands' | 'suppliers' | 'users' | 'customers', id: unknown) =>
     (await db.query<{ name: string }>(`SELECT name FROM ${table} WHERE id = $1`, [id])).rows[0]?.name ?? 'Unknown';
-  if (f.categoryId) out.push(['Category', await name('expense_categories', f.categoryId)]);
+  if (f.categoryId) out.push(['Category (any position)', await name('expense_categories', f.categoryId)]);
+  if (f.brandId) out.push(['Brand', await name('brands', f.brandId)]);
   if (f.supplierId) out.push(['Supplier', await name('suppliers', f.supplierId)]);
   if (f.recordedBy) out.push(['Recorded by', await name('users', f.recordedBy)]);
   if (f.paymentMode) out.push(['Payment mode', f.paymentMode === 'none' ? 'Nothing paid at purchase' : String(f.paymentMode)]);
@@ -93,7 +94,9 @@ export function createExportsRouter({ db, shopName }: { db: Database; shopName: 
 
   router.get('/categories', async (req, res) => {
     const q = expenseReportQuerySchema.parse(req.query);
-    await send(res, shopName, await exportCategories(db, shopName, resolvePeriod(q), q, await labels(db, q)));
+    // In the category export a selected category is "the category listed", not "any position".
+    const filterLabels = (await labels(db, q)).map(([k, v]): [string, string] => [k === 'Category (any position)' ? 'Category' : k, v]);
+    await send(res, shopName, await exportCategories(db, shopName, resolvePeriod(q), q, filterLabels));
   });
 
   router.get('/suppliers', async (req, res) => {

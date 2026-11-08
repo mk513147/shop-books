@@ -93,7 +93,7 @@ export function ChangePasswordPage() {
                 {formError}
               </p>
             )}
-            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+            <Button type="submit" size="lg" className="w-full" loading={isSubmitting}>
               {isSubmitting ? 'Saving…' : 'Change password'}
             </Button>
             {!forced && (

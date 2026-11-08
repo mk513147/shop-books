@@ -83,6 +83,8 @@ export interface CategoryRow {
   previousAmount: string;
   previousCount: number;
   changePercent: string | null;
+  /** Expenses carrying the category in any position (amount stays with the primary category). */
+  taggedCount: number;
 }
 
 export interface ExpenseReport {

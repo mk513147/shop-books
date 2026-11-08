@@ -1,5 +1,4 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Check, Plus } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -8,12 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { MultiSelect } from '@/components/ui/multi-select';
 import { Textarea } from '@/components/ui/select';
-import { useCategories, useCreateCategory } from '@/features/categories/categories-api';
+import { useToast } from '@/components/ui/toast';
+import { useBrands } from '@/features/brands/brands-api';
+import { useCategories } from '@/features/categories/categories-api';
+import { useBrandCreator, useCategoryCreator } from '@/features/classification/useOptionCreators';
 import { ApiError } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
-import type { Category, Supplier } from '@/types/api';
+import type { ClassRef, Supplier } from '@/types/api';
 import { useCreateSupplier, useUpdateSupplier } from './suppliers-api';
 
 // Mirrors the server rules for fast feedback; the server re-validates everything.
@@ -28,130 +29,11 @@ const schema = z.object({
 });
 type Values = z.infer<typeof schema>;
 
-type CategoryOption = Pick<Category, 'id' | 'name' | 'isActive'>;
-
-/**
- * Multi-select of GLOBAL categories with inline creation. A new category is a normal shared
- * category (POST /categories); an existing name (any letter case) is selected instead of duplicated.
- */
-function CategoryChooser({
-  selected,
-  onChange,
-  linkedArchived,
-}: {
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  /** Already-linked categories that have since been archived (can be removed, not added). */
-  linkedArchived: CategoryOption[];
-}) {
-  const id = useId();
-  const categories = useCategories('active');
-  const create = useCreateCategory();
-  const [newName, setNewName] = useState('');
-  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const options: CategoryOption[] = [...(categories.data ?? []), ...linkedArchived];
-
-  const toggle = (cid: string) => onChange(selected.includes(cid) ? selected.filter((x) => x !== cid) : [...selected, cid]);
-
-  async function addCategory() {
-    const name = newName.trim().replace(/\s+/g, ' ');
-    if (!name) {
-      inputRef.current?.focus();
-      return;
-    }
-    const existing = categories.data?.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    if (existing) {
-      if (!selected.includes(existing.id)) onChange([...selected, existing.id]);
-      setNote({ text: `“${existing.name}” already exists, so it was selected.`, error: false });
-      setNewName('');
-      return;
-    }
-    try {
-      const { category } = (await create.mutateAsync({ name, description: null })) as { category: Category };
-      onChange([...selected, category.id]);
-      setNote({ text: `Created “${category.name}” (available for every supplier) and selected it.`, error: false });
-      setNewName('');
-    } catch (err) {
-      if (err instanceof ApiError && err.code === 'CATEGORY_NAME_TAKEN') {
-        // Created by someone else a moment ago: pick theirs.
-        const fresh = (await categories.refetch()).data?.find((c) => c.name.toLowerCase() === name.toLowerCase());
-        if (fresh) {
-          onChange([...selected, fresh.id]);
-          setNote({ text: `“${fresh.name}” already exists, so it was selected.`, error: false });
-          setNewName('');
-          return;
-        }
-      }
-      setNote({ text: errorMessage(err), error: true });
-    }
-  }
-
-  return (
-    <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">Categories usually bought from this supplier</legend>
-      <p className="text-xs text-muted-foreground">
-        Optional. These are suggested first when recording an expense; any category can still be used.
-      </p>
-      {categories.isPending && <p className="text-sm text-muted-foreground">Loading categories…</p>}
-      {options.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {options.map((c) => {
-            const on = selected.includes(c.id);
-            if (!c.isActive && !on) return null;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                aria-pressed={on}
-                onClick={() => toggle(c.id)}
-                className={cn(
-                  'inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  on ? 'border-primary bg-primary-soft text-primary-soft-foreground' : 'border-input bg-card hover:bg-accent',
-                )}
-              >
-                {on && <Check className="size-3.5" aria-hidden="true" />}
-                {c.name}
-                {!c.isActive && <span className="text-xs text-muted-foreground">(archived)</span>}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <div className="space-y-1.5 pt-1">
-        <Label htmlFor={`${id}-new`} className="text-xs text-muted-foreground">
-          New category
-        </Label>
-        <div className="flex gap-2">
-          <Input
-            id={`${id}-new`}
-            ref={inputRef}
-            value={newName}
-            maxLength={80}
-            autoComplete="off"
-            placeholder="e.g. Packaging"
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void addCategory();
-              }
-            }}
-          />
-          <Button variant="outline" className="shrink-0" disabled={create.isPending} onClick={() => void addCategory()}>
-            <Plus aria-hidden="true" />
-            Add
-          </Button>
-        </div>
-        {note && (
-          <p role={note.error ? 'alert' : 'status'} className={cn('text-xs', note.error ? 'text-destructive' : 'text-muted-foreground')}>
-            {note.text}
-          </p>
-        )}
-      </div>
-    </fieldset>
-  );
-}
+/** Active options plus already-linked ones that were archived since (they can be removed, not added). */
+const withLinked = (active: ClassRef[] | undefined, linked: ClassRef[]) => [
+  ...(active ?? []),
+  ...linked.filter((l) => !l.isActive && !(active ?? []).some((a) => a.id === l.id)),
+];
 
 interface SupplierFormDialogProps {
   open: boolean;
@@ -165,25 +47,29 @@ interface SupplierFormDialogProps {
 
 export function SupplierFormDialog({ open, supplier, initialName = '', onClose, onSaved }: SupplierFormDialogProps) {
   const formId = useId();
+  // Lifted from the form so the footer's submit button can show progress and block double taps.
+  const [saving, setSaving] = useState(false);
   return (
     <Dialog
       open={open}
       title={supplier ? 'Edit supplier' : 'Add supplier'}
-      onClose={onClose}
+      onClose={() => {
+        if (!saving) onClose();
+      }}
       size="md"
       footer={
         <DialogActions>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" disabled={saving} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form={formId}>
-            {supplier ? 'Save changes' : 'Save supplier'}
+          <Button type="submit" form={formId} loading={saving}>
+            {saving ? (supplier ? 'Updating…' : 'Saving…') : supplier ? 'Save changes' : 'Save supplier'}
           </Button>
         </DialogActions>
       }
     >
       {/* Mounted per opening: starts from the data shown when it was opened. */}
-      {open && <SupplierForm formId={formId} supplier={supplier} initialName={initialName} onSaved={onSaved} />}
+      {open && <SupplierForm formId={formId} supplier={supplier} initialName={initialName} onSaved={onSaved} onSavingChange={setSaving} />}
     </Dialog>
   );
 }
@@ -193,20 +79,28 @@ function SupplierForm({
   supplier,
   initialName,
   onSaved,
+  onSavingChange,
 }: {
   formId: string;
   supplier: Supplier | undefined;
   initialName: string;
   onSaved: (supplier: Supplier) => void;
+  onSavingChange: (saving: boolean) => void;
 }) {
   // Frozen at opening, like the expense form: if someone else saves meanwhile, our save gets a 409
   // instead of silently overwriting their change (and our typed edits are not reset by a refetch).
   const [base] = useState(supplier);
   const create = useCreateSupplier();
   const update = useUpdateSupplier();
+  const toast = useToast();
   const inFlight = useRef(false);
   const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
   const [categoryIds, setCategoryIds] = useState<string[]>(base?.categories.map((c) => c.id) ?? []);
+  const [brandIds, setBrandIds] = useState<string[]>(base?.brands.map((b) => b.id) ?? []);
+  const categories = useCategories('active');
+  const brands = useBrands('active');
+  const categoryCreator = useCategoryCreator();
+  const brandCreator = useBrandCreator();
   const {
     register,
     handleSubmit,
@@ -228,8 +122,10 @@ function SupplierForm({
       noValidate
       className="space-y-4"
       onSubmit={handleSubmit(async (v) => {
+        // Synchronous guard: a double tap must not send twice.
         if (inFlight.current) return;
         inFlight.current = true;
+        onSavingChange(true);
         setFormError(null);
         const input = {
           name: v.name.trim(),
@@ -237,13 +133,16 @@ function SupplierForm({
           address: v.address.trim() || null,
           notes: v.notes.trim() || null,
           categoryIds,
+          brandIds,
         };
         try {
           const saved = base
             ? await update.mutateAsync({ id: base.id, version: base.version, ...input })
             : await create.mutateAsync(input);
+          toast({ title: base ? 'Supplier updated' : 'Supplier added', description: saved.name, tone: 'success' });
           onSaved(saved);
         } catch (err) {
+          // Everything typed stays in the form; only the error is shown.
           if (err instanceof ApiError && err.details?.length) {
             for (const d of err.details) if (d.path in v) setError(d.path as keyof Values, { message: d.message });
           }
@@ -251,6 +150,7 @@ function SupplierForm({
           setFormError({ message: errorMessage(err), conflict: err instanceof ApiError && err.code === 'VERSION_CONFLICT' });
         } finally {
           inFlight.current = false;
+          onSavingChange(false);
         }
       })}
     >
@@ -274,10 +174,31 @@ function SupplierForm({
       <Field id={`${formId}-notes`} label="Notes (optional)" error={errors.notes?.message}>
         <Textarea id={`${formId}-notes`} rows={2} className="min-h-16" {...errorProps(`${formId}-notes`, errors.notes)} {...register('notes')} />
       </Field>
-      <CategoryChooser
+      <MultiSelect
+        label="Brands supplied"
+        noun="brand"
+        hint="Optional. Pre-selected (and removable) when this supplier is chosen for a new expense."
+        options={withLinked(brands.data, base?.brands ?? [])}
+        selected={brandIds}
+        onChange={setBrandIds}
+        onCreate={brandCreator.create}
+        creating={brandCreator.creating}
+        note={brandCreator.note}
+        loading={brands.isPending}
+        testId="supplier-brands"
+      />
+      <MultiSelect
+        label="Associated expense categories"
+        noun="category"
+        hint="Optional. Pre-selected (and removable) when this supplier is chosen for a new expense; any category can still be used. New categories are shared by every supplier."
+        options={withLinked(categories.data, base?.categories ?? [])}
         selected={categoryIds}
         onChange={setCategoryIds}
-        linkedArchived={base?.categories.filter((c) => !c.isActive) ?? []}
+        onCreate={categoryCreator.create}
+        creating={categoryCreator.creating}
+        note={categoryCreator.note}
+        loading={categories.isPending}
+        testId="supplier-categories"
       />
       {formError && (
         <div role="alert" className="space-y-2 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">

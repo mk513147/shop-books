@@ -62,6 +62,24 @@ export interface SupplierRef {
   isActive: boolean;
 }
 
+/** A category or brand as attached to an expense or supplier. */
+export interface ClassRef {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+/** Brand (manufacturer): master data independent of suppliers and categories. */
+export interface Brand {
+  id: string;
+  name: string;
+  isActive: boolean;
+  expenseCount: number;
+  supplierCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -70,8 +88,10 @@ export interface Supplier {
   notes: string | null;
   isActive: boolean;
   version: number;
-  /** Linked categories: suggestions only, never a restriction. */
-  categories: { id: string; name: string; isActive: boolean }[];
+  /** Default categories: pre-selected on NEW expenses for this supplier, never a restriction. */
+  categories: ClassRef[];
+  /** Default brands: pre-selected on NEW expenses for this supplier. */
+  brands: ClassRef[];
   expenseCount: number;
   /** Derived: still owed on active bills / payments not yet allocated to bills. */
   payable: string;
@@ -86,6 +106,7 @@ export interface SupplierInput {
   address: string | null;
   notes: string | null;
   categoryIds: string[];
+  brandIds: string[];
 }
 
 export interface SupplierListResponse {
@@ -108,7 +129,12 @@ export interface Expense {
   supplier: SupplierRef | null;
   /** Supplier text as typed before suppliers existed (migrated expenses only). */
   legacySupplierName: string | null;
-  category: { id: string; name: string; isActive: boolean };
+  /** Primary category: the first of `categories`. */
+  category: ClassRef;
+  /** All categories, first = primary. Labels only: the amount is never split or repeated. */
+  categories: ClassRef[];
+  /** Brands, in the order chosen (may be empty). */
+  brands: ClassRef[];
   /** Optional: null when none was entered (show the category name instead). */
   description: string | null;
   amount: string;
@@ -158,7 +184,9 @@ export interface ExpenseDocument {
 export interface ExpenseInput {
   expenseDate: string;
   supplierId: string | null;
-  categoryId: string;
+  /** At least one; the first is the primary category. */
+  categoryIds: string[];
+  brandIds: string[];
   description: string | null;
   amount: string;
   /** Must add up to `amount` (a supplier bill may be paid in part or not at all). */
@@ -181,6 +209,8 @@ export type AuditAction =
   | 'reactivate'
   | 'link_category'
   | 'unlink_category'
+  | 'link_brand'
+  | 'unlink_brand'
   | 'import'
   | 'document_add'
   | 'document_remove'
@@ -406,4 +436,30 @@ export interface CustomerTxnInput {
   description: string | null;
   reference: string | null;
   notes: string | null;
+}
+
+// --- Salesmen (standalone directory; migration 0013) ---------------------------------------------
+
+export interface Salesman {
+  id: string;
+  name: string;
+  phone: string | null;
+  notes: string | null;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: PersonRef;
+  updatedBy: PersonRef;
+}
+
+export interface SalesmanInput {
+  name: string;
+  phone: string | null;
+  notes: string | null;
+}
+
+export interface SalesmanListResponse {
+  items: Salesman[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }

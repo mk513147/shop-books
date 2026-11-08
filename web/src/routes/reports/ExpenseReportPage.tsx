@@ -5,6 +5,7 @@ import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/states';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
+import { useBrands } from '@/features/brands/brands-api';
 import { useCategories } from '@/features/categories/categories-api';
 import { PAYMENT_MODE_LABELS, PAYMENT_MODES, useExpenseList, useRecorders } from '@/features/expenses/expenses-api';
 import { ExportButton } from '@/features/exports/ExportButton';
@@ -26,12 +27,14 @@ export function ExpenseReportPage() {
   const p = period.params;
   const filters = {
     categoryId: p.get('categoryId') ?? undefined,
+    brandId: p.get('brandId') ?? undefined,
     supplierId: p.get('supplierId') ?? undefined,
     paymentMode: p.get('paymentMode') ?? undefined,
     recordedBy: p.get('recordedBy') ?? undefined,
   };
   const report = useExpenseReport({ ...(period.query ?? { period: 'this_month' }), ...filters });
   const categories = useCategories('all');
+  const brands = useBrands('all');
   const suppliers = useSuppliers({ status: 'all', pageSize: 100 });
   const recorders = useRecorders();
   const page = Math.max(1, Number(p.get('page')) || 1);
@@ -65,6 +68,15 @@ export function ExpenseReportPage() {
             <option key={c.id} value={c.id}>
               {c.name}
               {c.isActive ? '' : ' (archived)'}
+            </option>
+          ))}
+        </Select>
+        <Select aria-label="Brand" value={filters.brandId ?? ''} onChange={(e) => period.set({ brandId: e.target.value })}>
+          <option value="">All brands</option>
+          {brands.data?.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+              {b.isActive ? '' : ' (archived)'}
             </option>
           ))}
         </Select>

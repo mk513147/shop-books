@@ -19,6 +19,7 @@ export const dashboardQuerySchema = z.object(periodQueryShape);
 export const expenseReportQuerySchema = z.object({
   ...periodQueryShape,
   categoryId: z.uuid().optional(),
+  brandId: z.uuid().optional(),
   supplierId: z.uuid().optional(),
   paymentMode: z.enum([...PAYMENT_MODES, 'none']).optional(),
   recordedBy: z.uuid().optional(),

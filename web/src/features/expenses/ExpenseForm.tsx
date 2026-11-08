@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Lightbulb, Plus, X } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
@@ -7,21 +8,25 @@ import { z } from 'zod';
 import { errorMessage } from '@/components/states';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select';
 import { Select } from '@/components/ui/select';
+import { useToast } from '@/components/ui/toast';
+import { useBrands } from '@/features/brands/brands-api';
+import { useBrandCreator, useCategoryCreator } from '@/features/classification/useOptionCreators';
 import { DocumentPicker, usePendingFiles } from '@/features/documents/DocumentPicker';
 import { MAX_DOCUMENTS_PER_EXPENSE } from '@/features/documents/limits';
 import { SupplierFormDialog } from '@/features/suppliers/SupplierForm';
 import { SupplierPicker } from '@/features/suppliers/SupplierPicker';
-import { useLinkSupplierCategory, useSupplier } from '@/features/suppliers/suppliers-api';
-import { ApiError } from '@/lib/api-client';
+import { ApiError, apiRequest } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import type { Category, Expense, ExpenseInput, PaymentMode, SupplierRef } from '@/types/api';
+import type { Category, Expense, ExpenseInput, PaymentMode, Supplier, SupplierRef } from '@/types/api';
 import { PAYMENT_MODE_LABELS, PAYMENT_MODES } from './expenses-api';
-import { isPaymentSplitValid, splitPayments } from './payment-split';
+import { isPaymentSplitValid, paymentStatusOf, splitPayments, type PaymentStatus } from './payment-split';
 
 /** Same bound as the server (one row per method is plenty). */
 const MAX_PAYMENT_ROWS = 10;
@@ -35,7 +40,9 @@ const schema = z
     amount: money('total amount').refine((v) => !MONEY_INPUT.test(v) || toPaise(v) > 0n, 'Must be more than zero'),
     payments: z.array(z.object({ amount: z.string(), paymentMode: z.string() })).min(1).max(MAX_PAYMENT_ROWS),
     supplierId: z.string(),
-    categoryId: z.string().min(1, 'Choose a category'),
+    // Ordered; the first is the primary category. Labels only: the amount is never split.
+    categoryIds: z.array(z.string()).min(1, 'Choose at least one category').max(20, 'At most 20 categories'),
+    brandIds: z.array(z.string()).max(50, 'At most 50 brands'),
     // Optional: the category is shown instead when it is left empty.
     description: z.string().trim().max(500, 'At most 500 characters'),
     expenseDate: z
@@ -62,7 +69,8 @@ export function toFormValues(expense?: Expense): FormValues {
       amount: '',
       payments: [blankRow()],
       supplierId: '',
-      categoryId: '',
+      categoryIds: [],
+      brandIds: [],
       description: '',
       expenseDate: todayInKolkata(),
       invoiceReference: '',
@@ -70,9 +78,12 @@ export function toFormValues(expense?: Expense): FormValues {
   }
   return {
     amount: expense.amount,
-    payments: expense.payments.length > 0 ? expense.payments.map((p) => ({ amount: p.amount, paymentMode: p.paymentMode })) : [blankRow()],
+    // An unpaid bill loads as one blank row ("Not paid yet"): editing never marks it paid by itself.
+    payments: expense.payments.length > 0 ? expense.payments.map((p) => ({ amount: p.amount, paymentMode: p.paymentMode })) : [blankRow('')],
     supplierId: expense.supplier?.id ?? '',
-    categoryId: expense.category.id,
+    // The selections saved on THIS expense (never the supplier's current defaults).
+    categoryIds: (expense.categories?.length ? expense.categories : [expense.category]).map((c) => c.id),
+    brandIds: (expense.brands ?? []).map((b) => b.id),
     description: expense.description ?? '',
     expenseDate: expense.expenseDate,
     invoiceReference: expense.invoiceReference ?? '',
@@ -83,10 +94,11 @@ function toInput(v: FormValues): ExpenseInput {
   return {
     expenseDate: v.expenseDate,
     supplierId: v.supplierId || null,
-    categoryId: v.categoryId,
+    categoryIds: v.categoryIds,
+    brandIds: v.brandIds,
     description: v.description.trim() || null,
     amount: v.amount.trim(),
-    // A blank row only survives validation as "not paid yet" on a supplier bill: it is not sent.
+    // A lone blank row means "not paid yet": it is not sent.
     payments: v.payments
       .filter((p) => p.amount.trim() !== '')
       .map((p) => ({ amount: p.amount.trim(), paymentMode: p.paymentMode as PaymentMode })),
@@ -95,6 +107,24 @@ function toInput(v: FormValues): ExpenseInput {
 }
 
 const paiseToString = (p: bigint) => `${p / 100n}.${(p % 100n).toString().padStart(2, '0')}`;
+
+interface Defaults {
+  categoryIds: string[];
+  brandIds: string[];
+}
+const NO_DEFAULTS: Defaults = { categoryIds: [], brandIds: [] };
+/** A supplier's ACTIVE default categories and brands (archived ones are never auto-selected). */
+export const defaultsOf = (s: Supplier): Defaults => ({
+  categoryIds: s.categories.filter((c) => c.isActive).map((c) => c.id),
+  brandIds: (s.brands ?? []).filter((b) => b.isActive).map((b) => b.id),
+});
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+
+const STATUS_OPTIONS: { value: PaymentStatus; label: string }[] = [
+  { value: 'full', label: 'Paid in full' },
+  { value: 'partial', label: 'Part paid' },
+  { value: 'none', label: 'Not paid yet' },
+];
 
 function Section({ step, title, children, className }: { step: number; title: string; children: ReactNode; className?: string }) {
   return (
@@ -133,6 +163,8 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
   const [paymentsServerError, setPaymentsServerError] = useState<string | null>(null);
   const pending = usePendingFiles();
+  const toast = useToast();
+  const queryClient = useQueryClient();
   // Set once the expense is saved but some files failed to upload: the form then offers a retry.
   const [saved, setSaved] = useState<Expense | null>(null);
   const savedNotice = initial ? 'Changes saved.' : 'Expense saved.';
@@ -146,9 +178,6 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   const baseVersion = useRef(initial?.version);
   const [supplier, setSupplier] = useState<SupplierRef | null>(initial?.supplier ?? null);
   const [addSupplier, setAddSupplier] = useState<{ name: string } | null>(null);
-  const [dismissedLink, setDismissedLink] = useState<string | null>(null);
-  const linkCategory = useLinkSupplierCategory();
-  const supplierDetail = useSupplier(supplier?.id ?? null);
   const {
     register,
     handleSubmit,
@@ -164,24 +193,30 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
 
   const amount = watch('amount').trim();
   const rows = watch('payments');
-  const categoryId = watch('categoryId');
+  const categoryIds = watch('categoryIds');
+  const brandIds = watch('brandIds');
   const amountValid = MONEY_INPUT.test(amount);
+  const amountPositive = amountValid && toPaise(amount) > 0n;
   const hasSupplier = supplier !== null;
   const split = splitPayments(amount, rows, hasSupplier);
   const splitOk = isPaymentSplitValid(split);
-  // New expense without a supplier: while the single payment row is untouched it follows the expense
-  // amount (such an expense must be paid in full). Any manual change to the breakdown, or choosing a
-  // supplier, switches this off for good, so later supplier changes never alter payments.
+
+  // ---- Payment status (derived from the rows; see paymentStatusOf) -------------------------------
+  // New expense: the single payment row follows the expense amount ("Paid in full" by default) until
+  // the user changes the breakdown or picks another status. Choosing a supplier never changes it.
   const followAmount = useRef(!initial);
-  // Shown once choosing a supplier has reset the untouched default to "not paid yet".
-  const [creditDefaultNote, setCreditDefaultNote] = useState(false);
+  // "Part paid" chosen while no part amount is typed yet (the derived status would say "Not paid").
+  const [partialIntent, setPartialIntent] = useState(false);
   useEffect(() => {
-    if (!followAmount.current || hasSupplier || getValues('payments').length !== 1) return;
-    setValue('payments.0.amount', amountValid && toPaise(amount) > 0n ? amount : '');
-  }, [amount, amountValid, hasSupplier, getValues, setValue]);
+    if (!followAmount.current || getValues('payments').length !== 1) return;
+    setValue('payments.0.amount', amountPositive ? amount : '', { shouldValidate: submitCount > 0 });
+  }, [amount, amountPositive, getValues, setValue, submitCount]);
+  const derivedStatus = paymentStatusOf(split);
+  const status: PaymentStatus | null = partialIntent && derivedStatus !== 'full' ? 'partial' : derivedStatus;
+
   // Supplier payments already allocated to this bill (edit only) also reduce what is still payable.
   const supplierPaid = initial ? toPaise(initial.allocatedPayments) : 0n;
-  const showProblem = split.problem !== null && (split.anyEntered || submitCount > 0);
+  const showProblem = split.problem !== null && (split.anyEntered || submitCount > 0 || status !== 'full');
   const lastIndex = rows.length - 1;
 
   function addRow() {
@@ -200,52 +235,159 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
     // Keep keyboard and screen-reader users in the list: focus the row above the removed one.
     setFocus(`payments.${index - 1}.amount`);
   }
-  function markNotPaid() {
+  function choosePaidInFull() {
+    setPartialIntent(false);
+    const validate = { shouldValidate: submitCount > 0 };
+    if (rows.length === 1) {
+      followAmount.current = true;
+      setValue('payments.0.amount', amount, validate);
+      if (!rows[0]!.paymentMode) setValue('payments.0.paymentMode', 'cash', validate);
+    } else if (split.remaining !== null && split.remaining > 0n) {
+      // Several methods: the last row takes whatever is still unpaid.
+      const last = rows[lastIndex]!;
+      const own = MONEY_INPUT.test(last.amount.trim()) ? toPaise(last.amount.trim()) : 0n;
+      setValue(`payments.${lastIndex}.amount`, fromPaise(own + split.remaining), validate);
+    }
+  }
+  function choosePartial() {
     followAmount.current = false;
-    setCreditDefaultNote(false);
+    setPartialIntent(true);
+    // Coming from "paid in full": clear the single row so the amount paid now can be typed.
+    if (derivedStatus === 'full' && rows.length === 1) {
+      setValue('payments.0.amount', '', { shouldValidate: submitCount > 0 });
+      if (!rows[0]!.paymentMode) setValue('payments.0.paymentMode', 'cash');
+    }
+    setFocus('payments.0.amount');
+  }
+  function chooseNotPaid() {
+    followAmount.current = false;
+    setPartialIntent(false);
     setValue('payments', [blankRow('')], { shouldValidate: submitCount > 0 });
   }
-  /** Supplier bill paid completely at purchase: an explicit action (the method is still chosen by the user). */
-  function markPaidInFull() {
-    followAmount.current = false;
-    setCreditDefaultNote(false);
-    // Offered only while there is a single row: set its amount in place (same input, so focus can move to its method).
-    setValue('payments.0.amount', amount, { shouldValidate: submitCount > 0 });
-    setFocus('payments.0.paymentMode');
+
+  // ---- Categories and brands, with supplier defaults ----------------------------------------------
+  const brandsQuery = useBrands('active');
+  const categoryCreator = useCategoryCreator();
+  const brandCreator = useBrandCreator();
+  // The defaults applied automatically for the current supplier (null: none, or editing an expense,
+  // whose saved selections always count as the user's own).
+  const autoApplied = useRef<Defaults | null>(null);
+  const [supplierDefaults, setSupplierDefaults] = useState<Defaults>(NO_DEFAULTS);
+  // `defaults: null` = loading the new supplier's defaults FAILED (the dialog then only asks what to do
+  // with the previous supplier's pre-selected items).
+  const [replaceAsk, setReplaceAsk] = useState<{ next: SupplierRef | null; defaults: Defaults | null } | null>(null);
+  const [loadingDefaults, setLoadingDefaults] = useState(false);
+  // Set when the chosen supplier's defaults could not be loaded (cleared on success or another supplier).
+  const [defaultsError, setDefaultsError] = useState<SupplierRef | null>(null);
+  const supplierSeq = useRef(0);
+
+  const categoryOptions: MultiSelectOption[] = [...categories];
+  for (const c of initial?.categories ?? (initial ? [initial.category] : [])) {
+    if (!categoryOptions.some((o) => o.id === c.id)) categoryOptions.push(c);
+  }
+  const brandOptions: MultiSelectOption[] = [...(brandsQuery.data ?? [])];
+  for (const b of initial?.brands ?? []) if (!brandOptions.some((o) => o.id === b.id)) brandOptions.push(b);
+
+  /** True when replacing the selections would throw away something the user chose. */
+  function selectionsModified(): boolean {
+    const current = { categoryIds: getValues('categoryIds'), brandIds: getValues('brandIds') };
+    if (current.categoryIds.length === 0 && current.brandIds.length === 0) return false;
+    const auto = autoApplied.current;
+    return !(auto && sameSet(current.categoryIds, auto.categoryIds) && sameSet(current.brandIds, auto.brandIds));
   }
 
-  function selectSupplier(next: SupplierRef | null) {
-    // A new supplier bill starts unpaid: an untouched "paid in full" default is cleared (visibly) and
-    // never comes back. Payments the user entered are never changed by choosing or removing a supplier.
-    if (next !== null && followAmount.current) {
-      followAmount.current = false;
-      setValue('payments', [blankRow('')], { shouldValidate: submitCount > 0 });
-      setCreditDefaultNote(true);
-    }
-    // The chosen category is deliberately kept: suggestions never change it automatically.
+  function applySupplier(next: SupplierRef | null, defaults: Defaults, replace: boolean) {
     setSupplier(next);
     setValue('supplierId', next?.id ?? '', { shouldDirty: true });
-    linkCategory.reset();
+    setSupplierDefaults(defaults);
+    setDefaultsError(null);
+    if (replace) {
+      // Only these two fields change; amount, payments, status, description, date and files never do.
+      const validate = { shouldValidate: submitCount > 0, shouldDirty: true };
+      setValue('categoryIds', defaults.categoryIds, validate);
+      setValue('brandIds', defaults.brandIds, validate);
+      autoApplied.current = defaults;
+    } else {
+      // The user kept their own selections: from now on they are theirs, not the previous supplier's.
+      autoApplied.current = null;
+    }
   }
 
-  // Category options: the supplier's usual (active) categories first, then all other categories.
-  const options = [...categories];
-  if (initial && !options.some((c) => c.id === initial.category.id)) {
-    options.push({ ...initial.category, description: null, expenseCount: 0, createdAt: '', updatedAt: '' });
+  /**
+   * The new supplier is chosen but its defaults could not be loaded. Nothing is guessed: the
+   * previous supplier's pre-selected items are never kept silently ('remove' drops exactly those;
+   * anything the user added themselves stays) and nothing else on the form changes. 'keep' is the
+   * user's explicit decision to keep their current selections as their own.
+   */
+  function applyDefaultsFailure(next: SupplierRef, action: 'remove' | 'keep') {
+    setSupplier(next);
+    setValue('supplierId', next.id, { shouldDirty: true });
+    setSupplierDefaults(NO_DEFAULTS);
+    if (action === 'remove') {
+      const previous = autoApplied.current;
+      if (previous) {
+        const validate = { shouldValidate: submitCount > 0, shouldDirty: true };
+        setValue('categoryIds', getValues('categoryIds').filter((id) => !previous.categoryIds.includes(id)), validate);
+        setValue('brandIds', getValues('brandIds').filter((id) => !previous.brandIds.includes(id)), validate);
+      }
+    }
+    autoApplied.current = null;
+    setDefaultsError(next);
   }
-  const linked = supplierDetail.data?.id === supplier?.id ? (supplierDetail.data?.categories ?? []) : [];
-  const suggestedIds = new Set(linked.filter((c) => c.isActive).map((c) => c.id));
-  const suggested = options.filter((c) => suggestedIds.has(c.id));
-  const others = options.filter((c) => !suggestedIds.has(c.id));
-  const chosenCategory = options.find((c) => c.id === categoryId);
 
-  const offerLink =
-    supplier !== null &&
-    supplierDetail.data?.id === supplier.id &&
-    supplierDetail.data.isActive &&
-    chosenCategory?.isActive === true &&
-    !suggestedIds.has(chosenCategory.id) &&
-    dismissedLink !== `${supplier.id}:${chosenCategory.id}`;
+  function handleDefaultsFailure(next: SupplierRef) {
+    const previous = autoApplied.current;
+    const current = { categoryIds: getValues('categoryIds'), brandIds: getValues('brandIds') };
+    if (previous && !(sameSet(current.categoryIds, previous.categoryIds) && sameSet(current.brandIds, previous.brandIds))) {
+      // The previous supplier's defaults were edited by hand: ask what to do with them.
+      setReplaceAsk({ next, defaults: null });
+      return;
+    }
+    // Untouched previous defaults are dropped; the user's own (or saved) selections are left alone.
+    applyDefaultsFailure(next, 'remove');
+  }
+
+  /** `force` re-loads the defaults of the supplier that is already chosen (the "Try again" button). */
+  async function selectSupplier(next: SupplierRef | null, detail?: Supplier, force = false) {
+    if (!force && (next?.id ?? null) === (supplier?.id ?? null)) return;
+    const seq = ++supplierSeq.current;
+    let defaults: Defaults | null = NO_DEFAULTS;
+    if (next) {
+      try {
+        setLoadingDefaults(true);
+        const full: Supplier =
+          detail ??
+          (await queryClient.fetchQuery<Supplier>({
+            queryKey: ['suppliers', 'detail', next.id],
+            queryFn: ({ signal }) => apiRequest<{ supplier: Supplier }>(`/suppliers/${next.id}`, { signal }).then((r) => r.supplier),
+            staleTime: 10_000,
+          }));
+        defaults = defaultsOf(full);
+      } catch {
+        defaults = null;
+      } finally {
+        if (seq === supplierSeq.current) setLoadingDefaults(false);
+      }
+    }
+    if (seq !== supplierSeq.current) return; // a newer choice was made meanwhile
+    if (defaults === null) {
+      if (next) handleDefaultsFailure(next);
+      return;
+    }
+    // Ask only when the user's own choices would be replaced by something different.
+    const differs = !sameSet(getValues('categoryIds'), defaults.categoryIds) || !sameSet(getValues('brandIds'), defaults.brandIds);
+    if (selectionsModified() && differs) {
+      setReplaceAsk({ next, defaults });
+      return;
+    }
+    applySupplier(next, defaults, true);
+  }
+
+  const supplierName = supplier?.name ?? 'this supplier';
+  const suggestedCategoryIds = new Set(supplierDefaults.categoryIds);
+  const suggestedBrandIds = new Set(supplierDefaults.brandIds);
+  const categoryError = errors.categoryIds?.message ?? (errors.categoryIds as { root?: { message?: string } } | undefined)?.root?.message;
+  const brandError = errors.brandIds?.message;
 
   return (
     <>
@@ -264,6 +406,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
             if (pending.pendingCount === 0) onDone(expense, savedNotice);
             else await finishUploads(expense);
           } catch (err) {
+            // Everything typed stays in the form; only the errors are shown.
             if (err instanceof ApiError && err.details?.length) {
               for (const d of err.details) {
                 if (d.path in values) setError(d.path as keyof FormValues, { message: d.message });
@@ -271,6 +414,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               }
             }
             setFormError({ message: errorMessage(err), conflict: err instanceof ApiError && err.code === 'VERSION_CONFLICT' });
+            toast({ title: initial ? 'Changes not saved' : 'Expense not saved', description: errorMessage(err), tone: 'error' });
           } finally {
             inFlight.current = false;
           }
@@ -297,13 +441,46 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               </div>
             </Field>
             <p className="figure text-sm text-muted-foreground" aria-live="polite">
-              {amountValid && toPaise(amount) > 0n ? formatInr(amount) : 'Enter the full bill amount, including anything still unpaid.'}
+              {amountPositive ? formatInr(amount) : 'Enter the full bill amount, including anything still unpaid.'}
             </p>
           </Section>
 
           <Section step={2} title="Payment">
+            {status !== null && (
+              <div className="space-y-1.5">
+                <p id="payment-status-label" className="text-sm font-medium">
+                  Payment status
+                </p>
+                <div role="radiogroup" aria-labelledby="payment-status-label" className="grid grid-cols-3 gap-1 rounded-lg bg-surface-muted p-1" data-testid="payment-status">
+                  {STATUS_OPTIONS.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={status === o.value}
+                      onClick={() => (o.value === 'full' ? choosePaidInFull() : o.value === 'partial' ? choosePartial() : chooseNotPaid())}
+                      className={cn(
+                        'h-10 rounded-md px-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        status === o.value ? 'bg-card text-foreground shadow-card' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground" role="status">
+                  {status === 'full' && 'The whole amount was paid now.'}
+                  {status !== 'full' &&
+                    (hasSupplier
+                      ? `Anything not paid now stays payable to ${supplier?.name}.`
+                      : 'Choose the supplier below: an unpaid or part-paid bill stays payable to them.')}
+                  {status === 'partial' && split.allocated === 0n && ' Enter the amount paid now.'}
+                </p>
+              </div>
+            )}
+
             <fieldset className="space-y-2">
-              <legend className="mb-1.5 text-sm font-medium">{hasSupplier ? 'Paid now' : 'How it was paid'}</legend>
+              <legend className="mb-1.5 text-sm font-medium">{status === 'none' ? 'Paid now (nothing yet)' : 'How it was paid'}</legend>
               {fields.map((field, i) => {
                 const rowErrors = errors.payments?.[i];
                 return (
@@ -321,7 +498,6 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                           {...register(`payments.${i}.amount`, {
                             onChange: () => {
                               if (i === 0) followAmount.current = false;
-                              setCreditDefaultNote(false);
                             },
                           })}
                         />
@@ -378,22 +554,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                 <Button variant="soft" size="sm" disabled={fields.length >= MAX_PAYMENT_ROWS} onClick={addRow}>
                   <Plus aria-hidden="true" /> Add payment
                 </Button>
-                {hasSupplier && fields.length === 1 && amountValid && toPaise(amount) > 0n && (
-                  <Button variant="secondary" size="sm" onClick={markPaidInFull}>
-                    Paid in full
-                  </Button>
-                )}
-                {hasSupplier && (
-                  <Button variant="secondary" size="sm" onClick={markNotPaid}>
-                    Not paid yet
-                  </Button>
-                )}
               </div>
-              <p className="text-xs text-muted-foreground" role="status">
-                {hasSupplier &&
-                  (creditDefaultNote ? 'Supplier bills start as not paid yet. ' : '') +
-                    `Anything not paid now stays payable to ${supplier?.name}. Leave the amount blank if nothing was paid.`}
-              </p>
             </fieldset>
 
             <dl className="space-y-1.5 rounded-lg bg-surface-muted px-3 py-2.5 text-sm" aria-live="polite" data-testid="payment-summary">
@@ -450,89 +611,26 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               <SupplierPicker
                 id="supplier"
                 value={supplier}
-                onChange={selectSupplier}
+                onChange={(next) => void selectSupplier(next)}
                 onAddSupplier={(name) => setAddSupplier({ name })}
                 invalid={Boolean(errors.supplierId)}
                 describedBy={errors.supplierId ? 'supplier-error' : undefined}
               />
-            </Field>
-
-            <Field
-              id="categoryId"
-              label="Category"
-              error={errors.categoryId?.message}
-              hint={
-                supplier && suggested.length > 0
-                  ? `Suggested for ${supplier.name} are listed first. Any category can be chosen.`
-                  : undefined
-              }
-            >
-              {/* Controlled: the options move between the Suggested/All groups when the supplier
-                  changes, and an uncontrolled <select> would then silently show a different choice. */}
-              <Select id="categoryId" value={categoryId} {...errorProps('categoryId', errors.categoryId)} {...register('categoryId')}>
-                <option value="">Choose a category…</option>
-                {suggested.length > 0 ? (
-                  <>
-                    <optgroup label={`Suggested for ${supplier?.name ?? 'this supplier'}`}>
-                      {suggested.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="All categories">
-                      {others.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                          {c.isActive ? '' : ' (archived)'}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </>
-                ) : (
-                  others.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                      {c.isActive ? '' : ' (archived)'}
-                    </option>
-                  ))
-                )}
-              </Select>
-              {categories.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No categories yet.{' '}
-                  <Link to="/categories" className="text-primary underline">
-                    Create one first
-                  </Link>
-                  .
-                </p>
+              {loadingDefaults && <p className="text-xs text-muted-foreground">Loading the supplier’s usual brands and categories…</p>}
+              {defaultsError && supplier?.id === defaultsError.id && (
+                <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="defaults-error">
+                  <p>
+                    Could not load the usual brands and categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose
+                    them below, or try again. Everything else you entered is unchanged.
+                  </p>
+                  <Button size="sm" variant="outline" loading={loadingDefaults} onClick={() => void selectSupplier(supplier, undefined, true)}>
+                    {loadingDefaults ? 'Loading…' : 'Try again'}
+                  </Button>
+                </div>
               )}
             </Field>
 
-            {offerLink && chosenCategory && supplier && (
-              <div role="status" className="flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary-soft/60 p-3 text-sm md:col-span-2 md:flex-row md:items-center">
-                <Lightbulb className="hidden size-4 shrink-0 text-primary md:block" aria-hidden="true" />
-                <p className="flex-1">
-                  Suggest <strong>{chosenCategory.name}</strong> for <strong>{supplier.name}</strong> next time?
-                  {linkCategory.isError && <span className="block text-destructive">{errorMessage(linkCategory.error)}</span>}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="soft"
-                    disabled={linkCategory.isPending}
-                    onClick={() => linkCategory.mutate({ id: supplier.id, categoryId: chosenCategory.id })}
-                  >
-                    {linkCategory.isPending ? 'Saving…' : 'Add suggestion'}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setDismissedLink(`${supplier.id}:${chosenCategory.id}`)}>
-                    Not now
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <Field id="description" label="Description (optional)" error={errors.description?.message} className="md:col-span-2">
+            <Field id="description" label="Description (optional)" error={errors.description?.message}>
               <Input
                 id="description"
                 autoComplete="off"
@@ -541,6 +639,57 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                 {...register('description')}
               />
             </Field>
+
+            <div className="md:col-span-2">
+              <MultiSelect
+                label="Categories"
+                noun="category"
+                options={categoryOptions}
+                selected={categoryIds}
+                onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+                suggestedIds={suggestedCategoryIds}
+                suggestedLabel={`Usual for ${supplierName}`}
+                onCreate={categoryCreator.create}
+                creating={categoryCreator.creating}
+                note={categoryCreator.note}
+                firstBadge="Primary"
+                hint={
+                  <>
+                    Choose one or more. The first is the primary category (used for category totals); the amount is never split or counted twice.
+                    {categories.length === 0 && (
+                      <>
+                        {' '}
+                        No categories yet: type a name to add one, or{' '}
+                        <Link to="/categories" className="text-primary underline">
+                          manage categories
+                        </Link>
+                        .
+                      </>
+                    )}
+                  </>
+                }
+                error={categoryError}
+                testId="expense-categories"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <MultiSelect
+                label="Brands (optional)"
+                noun="brand"
+                options={brandOptions}
+                selected={brandIds}
+                onChange={(ids) => setValue('brandIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+                suggestedIds={suggestedBrandIds}
+                suggestedLabel={`Usual for ${supplierName}`}
+                onCreate={brandCreator.create}
+                creating={brandCreator.creating}
+                note={brandCreator.note}
+                loading={brandsQuery.isPending}
+                error={brandError}
+                testId="expense-brands"
+              />
+            </div>
 
             <Field id="expenseDate" label="Expense date" error={errors.expenseDate?.message}>
               <Input id="expenseDate" type="date" max={todayInKolkata()} {...errorProps('expenseDate', errors.expenseDate)} {...register('expenseDate')} />
@@ -573,7 +722,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               the errors above). The expense is stored; you can retry now or add documents later from its details page.
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button size="sm" disabled={pending.uploading} onClick={() => void finishUploads(saved)}>
+              <Button size="sm" loading={pending.uploading} onClick={() => void finishUploads(saved)}>
                 {pending.uploading ? 'Uploading…' : 'Retry upload'}
               </Button>
               <Button
@@ -603,19 +752,64 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
             Cancel
           </Link>
-          <Button type="submit" size="lg" className="md:min-w-44" disabled={isSubmitting || saved !== null}>
-            {pending.uploading ? 'Uploading files…' : isSubmitting ? 'Saving…' : submitLabel}
+          <Button type="submit" size="lg" className="md:min-w-44" loading={isSubmitting || pending.uploading} disabled={saved !== null}>
+            {pending.uploading ? 'Uploading files…' : isSubmitting ? (initial ? 'Updating…' : 'Saving…') : submitLabel}
           </Button>
         </div>
       </form>
+
+      <Dialog
+        open={replaceAsk !== null}
+        title={replaceAsk?.defaults === null ? 'Remove the previous supplier’s brands and categories?' : 'Replace brands and categories?'}
+        size="sm"
+        onClose={() => setReplaceAsk(null)}
+        footer={
+          <DialogActions>
+            <Button variant="outline" onClick={() => setReplaceAsk(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (replaceAsk?.next && replaceAsk.defaults === null) applyDefaultsFailure(replaceAsk.next, 'keep');
+                else if (replaceAsk?.defaults) applySupplier(replaceAsk.next, replaceAsk.defaults, false);
+                setReplaceAsk(null);
+              }}
+            >
+              Keep my selections
+            </Button>
+            <Button
+              onClick={() => {
+                if (replaceAsk?.next && replaceAsk.defaults === null) applyDefaultsFailure(replaceAsk.next, 'remove');
+                else if (replaceAsk?.defaults) applySupplier(replaceAsk.next, replaceAsk.defaults, true);
+                setReplaceAsk(null);
+              }}
+            >
+              {replaceAsk?.defaults === null ? 'Remove them' : replaceAsk?.next ? `Use ${replaceAsk.next.name}’s` : 'Clear them'}
+            </Button>
+          </DialogActions>
+        }
+      >
+        <p className="text-sm">
+          {replaceAsk?.defaults === null
+            ? `The usual brands and categories of ${replaceAsk.next?.name ?? 'the new supplier'} could not be loaded. Brands and categories that came from the previous supplier are still selected. Remove those (anything you added yourself stays), or keep your selections as they are?`
+            : replaceAsk?.next
+              ? `You changed the brands or categories of this expense. Replace them with the usual ones for ${replaceAsk.next.name}?`
+              : 'You changed the brands or categories of this expense. Clear them along with the supplier?'}
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Cancel keeps the current supplier and everything entered. Amounts, payments, description, date and bill photos are never changed
+          here.
+        </p>
+      </Dialog>
 
       <SupplierFormDialog
         open={addSupplier !== null}
         initialName={addSupplier?.name ?? ''}
         onClose={() => setAddSupplier(null)}
         onSaved={(created) => {
-          selectSupplier({ id: created.id, name: created.name, isActive: created.isActive });
           setAddSupplier(null);
+          void selectSupplier({ id: created.id, name: created.name, isActive: created.isActive }, created);
         }}
       />
     </>

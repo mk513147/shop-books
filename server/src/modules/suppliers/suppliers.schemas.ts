@@ -28,6 +28,11 @@ const categoryIdsSchema = z
   .max(100, 'Too many categories')
   .transform((ids) => [...new Set(ids)]);
 
+const brandIdsSchema = z
+  .array(z.uuid('Invalid brand'))
+  .max(200, 'Too many brands')
+  .transform((ids) => [...new Set(ids)]);
+
 const detailFields = {
   name: nameSchema,
   phone: phoneSchema,
@@ -35,12 +40,16 @@ const detailFields = {
   notes: optionalText(1000, 'Notes'),
 };
 
-export const supplierCreateSchema = z.strictObject({ ...detailFields, categoryIds: categoryIdsSchema.default([]) });
+export const supplierCreateSchema = z.strictObject({
+  ...detailFields,
+  categoryIds: categoryIdsSchema.default([]),
+  brandIds: brandIdsSchema.default([]),
+});
 export type SupplierCreateInput = z.infer<typeof supplierCreateSchema>;
 
 /**
- * PATCH: any subset of the fields, plus the version the client last saw. `categoryIds`, when sent,
- * is the complete desired set of linked categories.
+ * PATCH: any subset of the fields, plus the version the client last saw. `categoryIds` / `brandIds`,
+ * when sent, are the complete desired sets of default categories / brands.
  */
 export const supplierUpdateSchema = z
   .strictObject({
@@ -50,6 +59,8 @@ export const supplierUpdateSchema = z
     notes: optionalText(1000, 'Notes').optional(),
     isActive: z.boolean().optional(),
     categoryIds: categoryIdsSchema.optional(),
+    /** When sent: the complete desired set of default brands. */
+    brandIds: brandIdsSchema.optional(),
     version: z.number().int().positive(),
   })
   .refine((v) => Object.keys(v).length > 1, 'Nothing to update');

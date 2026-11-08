@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogActions } from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/toast';
 import { AuditHistory } from '@/features/audit/AuditHistory';
 import { CustomerBalances } from '@/features/customers/CustomerBalances';
 import { CustomerFormDialog } from '@/features/customers/CustomerFormDialog';
@@ -35,6 +36,7 @@ export function CustomerDetailPage() {
   const dues = useOpenDues(id);
   const ledger = useCustomerLedger(id, {});
   const update = useUpdateCustomer();
+  const toast = useToast();
   const [txn, setTxn] = useState<{ type: CustomerTxnType; dueId?: string } | null>(null);
   const [dialog, setDialog] = useState<'edit' | 'archive' | 'history' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -210,10 +212,20 @@ export function CustomerDetailPage() {
             </Button>
             <Button
               variant={c.isActive ? 'destructive' : 'default'}
-              disabled={update.isPending}
-              onClick={() => update.mutate({ id: c.id, version: c.version, isActive: !c.isActive }, { onSuccess: () => setDialog(null) })}
+              loading={update.isPending}
+              onClick={() =>
+                update.mutate(
+                  { id: c.id, version: c.version, isActive: !c.isActive },
+                  {
+                    onSuccess: () => {
+                      toast({ title: c.isActive ? 'Customer archived' : 'Customer reactivated', description: c.name, tone: 'success' });
+                      setDialog(null);
+                    },
+                  },
+                )
+              }
             >
-              {update.isPending ? 'Working…' : c.isActive ? 'Archive' : 'Reactivate'}
+              {update.isPending ? (c.isActive ? 'Archiving…' : 'Reactivating…') : c.isActive ? 'Archive' : 'Reactivate'}
             </Button>
           </DialogActions>
         }

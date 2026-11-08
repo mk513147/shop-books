@@ -10,10 +10,18 @@ interface ReasonDialogProps {
   description: string;
   confirmLabel: string;
   pending?: boolean;
+  /** Button text while the request runs; defaults to the confirm verb + "ing" ("Voiding…"). */
+  pendingLabel?: string;
   error?: string | null;
   destructive?: boolean;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
+}
+
+/** "Void expense" -> "Voiding…", "Remove document" -> "Removing…". */
+function progressive(label: string): string {
+  const verb = label.split(' ')[0] ?? label;
+  return `${verb.endsWith('e') ? verb.slice(0, -1) : verb}ing…`;
 }
 
 /** Confirmation that requires a written reason (void / restore). */
@@ -23,6 +31,7 @@ export function ReasonDialog({
   description,
   confirmLabel,
   pending = false,
+  pendingLabel,
   error,
   destructive = false,
   onConfirm,
@@ -55,8 +64,8 @@ export function ReasonDialog({
           <Button variant="outline" onClick={onCancel} disabled={pending}>
             Cancel
           </Button>
-          <Button type="submit" form={formId} variant={destructive ? 'destructive' : 'default'} disabled={pending}>
-            {pending ? 'Working…' : confirmLabel}
+          <Button type="submit" form={formId} variant={destructive ? 'destructive' : 'default'} loading={pending}>
+            {pending ? (pendingLabel ?? progressive(confirmLabel)) : confirmLabel}
           </Button>
         </DialogActions>
       }

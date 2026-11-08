@@ -40,8 +40,8 @@ export function splitPayments(amount: string, rows: PaymentRowInput[], supplierC
   let allocated = 0n;
   let anyEntered = false;
 
-  // A lone blank row on a supplier bill means "not paid yet" (credit) and is ignored.
-  const ignoreBlankOnly = supplierCredit && rows.length === 1 && rows[0]!.amount.trim() === '';
+  // A lone blank row means "not paid yet" and is ignored (allowed only on a supplier bill; see below).
+  const ignoreBlankOnly = rows.length === 1 && rows[0]!.amount.trim() === '';
 
   rows.forEach((row, i) => {
     const value = row.amount.trim();
@@ -62,10 +62,27 @@ export function splitPayments(amount: string, rows: PaymentRowInput[], supplierC
     if (remaining! < 0n) {
       problem = `The payments total ${inr(allocated)}, which is ${inr(-remaining!)} more than the expense amount ${inr(total)}.`;
     } else if (remaining! > 0n && !supplierCredit) {
-      problem = `The payments total ${inr(allocated)}, but the expense amount is ${inr(total)}. ${inr(remaining!)} is still unallocated; the payments must add up to the full amount.`;
+      problem =
+        allocated === 0n
+          ? `An expense without a supplier must be paid in full. Choose the supplier if this bill is not paid yet (it then stays payable to them), or enter how it was paid.`
+          : `The payments total ${inr(allocated)}, but the expense amount is ${inr(total)}. ${inr(remaining!)} is still unallocated; the payments must add up to the full amount (or choose the supplier if the rest is still owed).`;
     }
   }
   return { total, allocated, remaining, anyEntered, rowErrors, problem };
+}
+
+export type PaymentStatus = 'full' | 'partial' | 'none';
+
+/**
+ * Payment status DERIVED from the payment rows (never stored separately), so the status shown
+ * always matches the payments that will be saved: nothing paid → 'none', everything → 'full',
+ * anything in between → 'partial'. Null while the expense amount is unknown.
+ */
+export function paymentStatusOf(split: PaymentSplit): PaymentStatus | null {
+  if (split.total === null) return null;
+  if (split.allocated === 0n && !split.anyEntered) return 'none';
+  if (split.remaining !== null && split.remaining <= 0n) return 'full';
+  return 'partial';
 }
 
 /** True when every row is valid and the totals are consistent: the form may be submitted. */
