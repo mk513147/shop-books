@@ -125,7 +125,7 @@ Behaviour:
 - `users_single_owner`: unique partial index, so the database itself refuses a second owner, even under concurrent inserts.
 - `users_owner_active`: the owner row can never be inactive, so there is always an active owner.
 
-**`sessions`**: `id uuid` PK; `user_id` → `users` (cascade); `token_hash bytea` UNIQUE, exactly 32 bytes (SHA-256 of the cookie token; the token itself is never stored); `created_at`, `last_seen_at` (idle timeout), `absolute_expires_at`; `revoked_at` + `revoked_reason` (both set or both null; reason from a fixed list); `ip inet`, `user_agent`. Partial index on live sessions per user.
+**`sessions`**: `id uuid` PK; `user_id` → `users` (cascade); `token_hash bytea` UNIQUE, exactly 32 bytes (SHA-256 of the cookie token; the token itself is never stored); `created_at`, `last_seen_at` (idle timeout, 30 days), `absolute_expires_at` (rolling expiry: 30 days ahead of the last renewal, never beyond `created_at` + 90 days); `revoked_at` + `revoked_reason` (both set or both null; reason from a fixed list); `ip inet`, `user_agent`. Partial index on live sessions per user.
 
 **`auth_events`**: append-only access log: `event_type` (fixed list), `user_id`, `actor_user_id`, `email_attempted`, `ip`, `user_agent`, `details jsonb`, `created_at`. Indexed per user and for per-IP failure counting. Never contains passwords, hashes or tokens. *(Retention policy not decided yet; see testing plan / open decisions.)*
 

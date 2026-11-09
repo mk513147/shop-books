@@ -1,0 +1,20 @@
+{
+  "name": "shop-books-render-keepalive-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker (Free plan) whose only job is a scheduled GET to the Render health endpoint. Not part of the Shop-Books application.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.158.0"
+  }
+}

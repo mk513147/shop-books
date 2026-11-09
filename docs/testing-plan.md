@@ -61,7 +61,7 @@ Note: the auth, expenses, suppliers, documents, supplier-payments, customers, re
 - [ ] Future financial routes mounted below `requirePasswordCurrent` are reachable by managers and owners (managers are **not** read-only).
 
 ### Sessions
-- [ ] Idle timeout boundary (just under / just over 12 h) and absolute timeout boundary (7 days).
+- [ ] Idle timeout boundary (30 days), rolling renewal and the 90-day hard maximum age (covered in `server/tests/sessions.rolling.integration.test.ts`).
 - [ ] `last_seen_at` is touched at most once per minute.
 - [ ] Revocation on: logout, password change (all sessions, new one issued), owner reset, deactivation, "sign out everywhere".
 - [ ] A revoked session cannot be revived by re-sending the old cookie.
@@ -185,7 +185,7 @@ Note: the auth, expenses, suppliers, documents, supplier-payments, customers, re
 
 ### Retention cleanup (when implemented; policy in [maintenance.md](maintenance.md))
 - [ ] Sessions ended more than 90 days ago are deleted; ended less than 90 days ago are kept.
-- [ ] **Active sessions are never deleted**, including the boundary cases just inside the 12-hour idle and 7-day absolute limits.
+- [ ] **Active sessions are never deleted**, including the boundary cases just inside the 30-day idle limit and the rolling expiry.
 - [ ] `auth_events` older than 12 months deleted, newer kept.
 - [ ] Batching: large volumes processed in bounded batches; interrupting and re-running converges (idempotent).
 

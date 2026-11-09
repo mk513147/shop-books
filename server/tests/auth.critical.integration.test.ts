@@ -88,14 +88,14 @@ describe.skipIf(!pool)('authentication and access control (critical paths)', () 
     expect((await agent.get('/api/v1/auth/me')).status).toBe(401); // revoked server-side
   });
 
-  it('expires sessions after 12 h idle and after the 7-day absolute limit', async () => {
+  it('expires sessions after 30 days idle and when the rolling expiry has passed', async () => {
     const idle = await signIn(OWNER.email, OWNER.password);
-    await db.query(`UPDATE sessions SET last_seen_at = now() - interval '12 hours 1 minute' WHERE revoked_at IS NULL`);
+    await db.query(`UPDATE sessions SET last_seen_at = now() - interval '30 days 1 minute' WHERE revoked_at IS NULL`);
     expect((await idle.agent.get('/api/v1/auth/me')).status).toBe(401);
 
     const absolute = await signIn(OWNER.email, OWNER.password);
     await db.query(
-      `UPDATE sessions SET created_at = now() - interval '8 days', absolute_expires_at = now() - interval '1 second'
+      `UPDATE sessions SET created_at = now() - interval '31 days', absolute_expires_at = now() - interval '1 second'
         WHERE revoked_at IS NULL`,
     );
     expect((await absolute.agent.get('/api/v1/auth/me')).status).toBe(401);

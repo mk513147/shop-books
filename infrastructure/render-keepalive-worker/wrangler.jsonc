@@ -1,0 +1,24 @@
+{
+  // Render keep-alive Worker. Its ONLY job: a scheduled GET to the Render health endpoint.
+  // No secrets, no bindings, no database. See README.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shop-books-render-keepalive",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // Cron Trigger: every five minutes (12 runs/hour, 288/day, ~8,640 per 30 days).
+  // Cron expressions are evaluated in UTC; "*/5" is timezone-independent.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
+  // Target lives in configuration, not in code. It is not a secret.
+  "vars": {
+    "TARGET_URL": "https://shop-books-api.onrender.com/api/v1/health"
+  },
+
+  // Workers Logs: structured console output is kept and searchable in the dashboard.
+  "observability": {
+    "enabled": true
+  }
+}

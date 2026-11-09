@@ -21,7 +21,7 @@ Managers' passwords are reset by the owner in the web app (**Users → Reset pas
 
 | Data | Retention | Rule |
 |---|---|---|
-| `sessions`: expired or revoked | **90 days** after it ended | Delete when `revoked_at < now() - 90 days`, or (not revoked and) `absolute_expires_at < now() - 90 days`, or (not revoked and) idle-expired with `last_seen_at < now() - 90 days - 12 hours`. |
+| `sessions`: expired or revoked | **90 days** after it ended | Delete when `revoked_at < now() - 90 days`, or (not revoked and) `absolute_expires_at < now() - 90 days`, or (not revoked and) idle-expired with `last_seen_at < now() - 90 days - 30 days`. |
 | `sessions`: active | Never removed by cleanup | A session that is not revoked and is within both the idle and absolute timeouts must never match the delete condition. |
 | `auth_events` | **12 months** | Delete rows with `created_at < now() - 12 months`. |
 

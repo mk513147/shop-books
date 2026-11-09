@@ -8,10 +8,23 @@ export const FINANCIAL_YEAR_START_MONTH = 1;
 
 /** Authentication policy (approved in Stage 2). See docs/architecture.md ("Authentication"). */
 export const AUTH = {
-  sessionIdleTimeoutMs: 12 * 60 * 60 * 1000,
-  sessionAbsoluteTimeoutMs: 7 * 24 * 60 * 60 * 1000,
-  /** last_seen_at is only rewritten when older than this, to avoid a write on every request. */
-  sessionTouchIntervalMs: 60 * 1000,
+  /** A session unused for this long is dead. */
+  sessionIdleTimeoutMs: 30 * 24 * 60 * 60 * 1000,
+  /**
+   * Rolling lifetime: `sessions.absolute_expires_at` is pushed to now + this whenever the session is
+   * renewed (see findActiveSession). Same value as the idle timeout.
+   */
+  sessionLifetimeMs: 30 * 24 * 60 * 60 * 1000,
+  /**
+   * Hard cap measured from `sessions.created_at`: renewal can never push the expiry beyond it, so a
+   * session is never permanent and every browser signs in again at least this often.
+   */
+  sessionMaxAgeMs: 90 * 24 * 60 * 60 * 1000,
+  /**
+   * Renewal granularity: last_seen_at and the expiry are rewritten (and the cookie re-issued) at most
+   * this often per session, i.e. about one write per manager per day instead of one per request.
+   */
+  sessionTouchIntervalMs: 24 * 60 * 60 * 1000,
   /** Failed attempts that trigger a lockout. */
   maxFailedAttempts: 5,
   /** First lockout; each further lockout doubles it, up to the maximum. */

@@ -1,7 +1,7 @@
 import type { RequestHandler, Response } from 'express';
 import type { AppConfig } from '../config/env.js';
 import type { Queryable } from '../database/connection.js';
-import { clearSessionCookie, readCookie } from '../modules/auth/cookies.js';
+import { clearSessionCookie, readCookie, setSessionCookie } from '../modules/auth/cookies.js';
 import { findActiveSession, type Role, type SessionContext } from '../modules/auth/sessions.js';
 import { csrfTokenFor, safeEqual } from '../modules/auth/tokens.js';
 import { AppError } from '../utils/errors.js';
@@ -37,6 +37,8 @@ export function requireAuth(db: Queryable, config: AppConfig): RequestHandler {
       if (token) clearSessionCookie(res, config.cookie);
       return next(new AppError(401, 'UNAUTHENTICATED', 'Please sign in'));
     }
+    // Rolling session: same token, later Expires (only on the rare request that renewed the session).
+    if (session.renewedExpiresAt) setSessionCookie(res, config.cookie, session.token, session.renewedExpiresAt);
     res.locals.auth = session;
     next();
   };
