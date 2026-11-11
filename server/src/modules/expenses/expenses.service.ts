@@ -398,6 +398,34 @@ async function assertSupplierUsable(client: Queryable, supplierId: string): Prom
   }
 }
 
+/**
+ * Brand-first entry: the supplier of an expense must be one of the suppliers associated with its
+ * PRIMARY (first) brand through the existing supplier <-> brand links (supplier_brands). Expenses
+ * without a brand or without a supplier are not restricted. The frontend only offers matching
+ * suppliers, but this server check is what enforces it.
+ */
+async function assertSupplierSuppliesBrand(client: Queryable, supplierId: string | null, brandId: string | undefined): Promise<void> {
+  if (!supplierId || !brandId) return;
+  const row = (
+    await client.query<{ supplier: string; brand: string; linked: boolean }>(
+      `SELECT s.name AS supplier, b.name AS brand,
+              EXISTS (SELECT 1 FROM supplier_brands sb WHERE sb.supplier_id = s.id AND sb.brand_id = b.id) AS linked
+         FROM suppliers s CROSS JOIN brands b
+        WHERE s.id = $1 AND b.id = $2`,
+      [supplierId, brandId],
+    )
+  ).rows[0];
+  // A missing supplier or brand is reported by the existence checks.
+  if (row && !row.linked) {
+    throw new ValidationError([
+      {
+        path: 'supplierId',
+        message: `${row.supplier} is not linked to the brand ${row.brand}. Choose one of ${row.brand}'s suppliers, or link the brand on the supplier's page first.`,
+      },
+    ]);
+  }
+}
+
 function normalised(input: ExpenseInput): ExpenseInput {
   return {
     ...input,
@@ -415,6 +443,7 @@ async function insertExpense(client: Queryable, input: ExpenseInput, actor: Acto
   const brandIds = input.brandIds ?? [];
   await assertClassesUsable(client, 'brands', brandIds, new Set());
   if (input.supplierId) await assertSupplierUsable(client, input.supplierId);
+  await assertSupplierSuppliesBrand(client, input.supplierId, brandIds[0]);
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO expenses (expense_date, supplier_id, category_id, description, amount, amount_paid,
                            payment_mode, invoice_reference, created_by, updated_by)
@@ -513,6 +542,10 @@ export async function updateExpense(
     await assertClassesUsable(client, 'brands', next.brandIds, new Set(currentBrandIds));
     // An archived supplier may stay on an existing expense, but cannot be newly chosen.
     if (input.supplierId && input.supplierId !== current.supplier_id) await assertSupplierUsable(client, input.supplierId);
+    // Historical supplier/brand pairs stay as saved; the link is checked only when either changes.
+    if (input.supplierId !== current.supplier_id || next.brandIds[0] !== currentBrandIds[0]) {
+      await assertSupplierSuppliesBrand(client, input.supplierId, next.brandIds[0]);
+    }
 
     const unchanged =
       input.expenseDate === current.expense_date &&

@@ -9,7 +9,8 @@ export type IdempotentOperation =
   | 'expense.create'
   | 'supplier_payment.create'
   | 'supplier_payment.allocate'
-  | 'customer_transaction.create';
+  | 'customer_transaction.create'
+  | 'customer_due.settle_all';
 
 const REUSED_MESSAGES: Record<IdempotentOperation, string> = {
   'expense.create':
@@ -19,6 +20,8 @@ const REUSED_MESSAGES: Record<IdempotentOperation, string> = {
   'supplier_payment.allocate': 'This allocation form was already used with different amounts. Reload the payment and try again.',
   'customer_transaction.create':
     'This form was already used to record a different entry. Check the customer ledger before recording it again.',
+  'customer_due.settle_all':
+    'This form was already used to record a different payment. Check the customer ledger before recording it again.',
 };
 
 const KEY_PATTERN = /^[A-Za-z0-9_-]{16,100}$/;

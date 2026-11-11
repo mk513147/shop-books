@@ -20,6 +20,8 @@ describe.skipIf(!pool)('customers and customer ledger (critical paths)', () => {
   type Session = { agent: ReturnType<typeof request.agent>; csrf: string };
   let owner: Session;
   let manager: Session;
+  /** Dues need an expense category since migration 0014. */
+  let dueCategory: string;
   const today = todayInReportingZone();
 
   async function signIn(email: string): Promise<Session> {
@@ -34,7 +36,7 @@ describe.skipIf(!pool)('customers and customer ledger (critical paths)', () => {
   const newCustomer = async (name: string, phone: string | null = null) =>
     (await send(manager, 'post', '/customers', { name, phone })).body.customer as { id: string; version: number };
   const due = (id: string, amount: string, extra: object = {}) =>
-    send(manager, 'post', `/customers/${id}/dues`, { amount, txnDate: today, description: 'Goods on credit', ...extra });
+    send(manager, 'post', `/customers/${id}/dues`, { amount, txnDate: today, categoryId: dueCategory, notes: 'Goods on credit', ...extra });
   const advance = (id: string, amount: string) => send(manager, 'post', `/customers/${id}/advances`, { amount, txnDate: today, paymentMode: 'cash' });
   const payDue = (id: string, dueId: string, amount: string) =>
     send(manager, 'post', `/customers/${id}/due-payments`, { amount, txnDate: today, paymentMode: 'upi', dueId });
@@ -55,6 +57,7 @@ describe.skipIf(!pool)('customers and customer ledger (critical paths)', () => {
     );
     owner = await signIn('owner3d@example.test');
     manager = await signIn('mgr3d@example.test');
+    dueCategory = (await send(owner, 'post', '/categories', { name: 'Customer credit' })).body.category.id;
   });
 
   afterAll(async () => {
@@ -128,7 +131,7 @@ describe.skipIf(!pool)('customers and customer ledger (critical paths)', () => {
   it('validates entry fields', async () => {
     const c = await newCustomer('Validation');
     expect((await due(c.id, '0')).status).toBe(400);
-    expect((await due(c.id, '10', { description: ' ' })).status).toBe(400);
+    expect((await due(c.id, '10', { categoryId: undefined })).status).toBe(400); // a category is required
     expect((await due(c.id, '10', { paymentMode: 'cash' })).status).toBe(400); // a due moves no money
     expect((await due(c.id, '10', { txnDate: '2999-01-01' })).status).toBe(400);
     expect((await send(manager, 'post', `/customers/${c.id}/advances`, { amount: '10', txnDate: today })).status).toBe(400); // mode required

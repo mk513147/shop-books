@@ -2,7 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 import type { Database } from '../../database/connection.js';
 import { getActor } from '../../middleware/auth.js';
-import { NotFoundError } from '../../utils/errors.js';
+import { AppError, NotFoundError } from '../../utils/errors.js';
 import { parseIdempotencyKey } from '../idempotency/idempotency.js';
 import {
   getCustomerLedger,
@@ -11,6 +11,7 @@ import {
   listOpenDues,
   recordCustomerTransaction,
   reverseCustomerTransaction,
+  settleAllDues,
 } from './customerLedger.service.js';
 import {
   advanceSchema,
@@ -22,6 +23,7 @@ import {
   dueSchema,
   refundSchema,
   reverseSchema,
+  settleAllSchema,
   type CustomerTxnType,
 } from './customers.schemas.js';
 import {
@@ -52,6 +54,8 @@ function parseId(raw: unknown, what = 'Customer'): string {
  *   POST /:id/advances          record an advance received    }
  *   POST /:id/due-payments      record a payment against a due}
  *   POST /:id/refunds           refund advance (≤ advance)    }
+ *   POST /:id/due-payments/settle-all   pay the FULL outstanding due: one payment split over the open
+ *                               dues oldest-first, in one transaction (Idempotency-Key required)
  *   GET  /:id/transactions/:txnId            one entry
  *   POST /:id/transactions/:txnId/reverse    { reason, version }
  *   GET  /:id/transactions/:txnId/history    entry audit history
@@ -101,6 +105,7 @@ export function createCustomersRouter({ db }: { db: Database }): Router {
         txnDate: string;
         paymentMode?: string;
         dueId?: string;
+        categoryId?: string;
         description: string | null;
         reference: string | null;
         notes: string | null;
@@ -114,6 +119,7 @@ export function createCustomersRouter({ db }: { db: Database }): Router {
           txnDate: body.txnDate,
           paymentMode: (body.paymentMode ?? null) as never,
           dueId: body.dueId ?? null,
+          categoryId: body.categoryId ?? null,
           description: body.description,
           reference: body.reference,
           notes: body.notes,
@@ -129,6 +135,16 @@ export function createCustomersRouter({ db }: { db: Database }): Router {
   router.post('/:id/advances', record('advance', advanceSchema));
   router.post('/:id/due-payments', record('due_payment', duePaymentSchema));
   router.post('/:id/refunds', record('advance_refund', refundSchema));
+
+  router.post('/:id/due-payments/settle-all', async (req, res) => {
+    const key = parseIdempotencyKey(req.get('Idempotency-Key'));
+    if (key === null) {
+      throw new AppError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Send an Idempotency-Key header so the payment can never be recorded twice.');
+    }
+    const result = await settleAllDues(db, parseId(req.params.id), settleAllSchema.parse(req.body), getActor(res), key);
+    if (result.replayed) res.set('Idempotent-Replayed', 'true');
+    res.status(result.status).json(result.body);
+  });
 
   router.get('/:id/transactions/:txnId', async (req, res) => {
     res.json({ transaction: await getCustomerTransaction(db, parseId(req.params.id), parseId(req.params.txnId, 'Entry')) });

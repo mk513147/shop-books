@@ -11,6 +11,7 @@ import { createCustomersRouter } from '../modules/customers/customers.routes.js'
 import { createSalesmenRouter } from '../modules/salesmen/salesmen.routes.js';
 import { createExportsRouter } from '../modules/exports/exports.routes.js';
 import { createExpensesRouter } from '../modules/expenses/expenses.routes.js';
+import { createDocumentStorageStatusRouter } from '../modules/documents/documents.routes.js';
 import type { DocumentStorage } from '../modules/documents/storage.js';
 import type { EmailSender } from '../modules/email/email.js';
 import { createMonthlyReportsRouter } from '../modules/monthlyReports/monthlyReports.routes.js';
@@ -79,6 +80,7 @@ export function createApiRouter({ db, config, storage, emailSender, onReportQueu
   // Change feed for live updates across devices (read-only; no amounts or other figures).
   router.use('/sync', createSyncRouter({ db }));
   router.use('/expenses', createExpensesRouter({ db, storage }));
+  router.use('/document-storage', createDocumentStorageStatusRouter({ storage }));
   router.use('/suppliers', createSuppliersRouter({ db }));
   router.use('/supplier-payments', createSupplierPaymentsRouter({ db }));
   router.use('/customers', createCustomersRouter({ db }));

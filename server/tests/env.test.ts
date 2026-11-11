@@ -40,7 +40,10 @@ describe('environment validation', () => {
   it('document storage: defaults outside production, explicit absolute directory required in production', () => {
     expect(loadConfig(valid).documentStorage).toMatchObject({ driver: 'local', directory: expect.stringMatching(/storage[\\/]documents$/) });
     const prod = { ...valid, NODE_ENV: 'production', FRONTEND_URL: 'https://books.example.com' };
-    expect(messageOf(prod)).toContain('DOCUMENT_STORAGE_DIR: required in production');
+    // Nothing configured in production: attachments are postponed, so storage is disabled (no startup failure).
+    expect(loadConfig(prod).documentStorage).toEqual({ driver: 'disabled' });
+    expect(loadConfig({ ...prod, DOCUMENT_STORAGE_DIR: '/srv/docs' }).documentStorage).toEqual({ driver: 'local', directory: '/srv/docs' });
+    expect(messageOf({ ...prod, DOCUMENT_STORAGE_DRIVER: 'local' })).toContain('DOCUMENT_STORAGE_DIR: required in production');
     expect(messageOf({ ...prod, DOCUMENT_STORAGE_DIR: 'relative/dir' })).toContain('must be an absolute path');
     expect(messageOf({ ...valid, DOCUMENT_STORAGE_DRIVER: 's3' })).toContain('DOCUMENT_STORAGE_DRIVER');
   });
@@ -151,7 +154,7 @@ describe('hosted deployment (Render + Neon + desktop storage agent)', () => {
     DATABASE_URL: 'postgresql://u:p@ep-x-123.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
     RENDER: 'true',
     DOCUMENT_STORAGE_DRIVER: 'agent',
-    DOCUMENT_STORAGE_AGENT_URL: 'https://storage.example.com',
+    DOCUMENT_STORAGE_AGENT_URL: 'https://bills.shop-books-storage.in',
     DOCUMENT_STORAGE_AGENT_SECRET: 'a'.repeat(48),
     TRUST_PROXY: '2',
     EMAIL_PROVIDER: 'none',
@@ -160,7 +163,7 @@ describe('hosted deployment (Render + Neon + desktop storage agent)', () => {
 
   it('accepts the planned production configuration; Lax cookies; scheduler off; two proxy hops', () => {
     const config = loadConfig(render);
-    expect(config.documentStorage).toEqual({ driver: 'agent', url: 'https://storage.example.com', secret: 'a'.repeat(48) });
+    expect(config.documentStorage).toEqual({ driver: 'agent', url: 'https://bills.shop-books-storage.in', secret: 'a'.repeat(48) });
     expect(config.cookie).toEqual({ name: '__Host-sb_session', secure: true, sameSite: 'lax' });
     expect(config.reportScheduler.enabled).toBe(false);
     expect(config.trustProxy).toBe(2);
@@ -191,5 +194,55 @@ describe('hosted deployment (Render + Neon + desktop storage agent)', () => {
     expect(loadConfig({ ...valid, TRUST_PROXY: 'false' }).trustProxy).toBe(0);
     expect(loadConfig({ ...valid, TRUST_PROXY: '3' }).trustProxy).toBe(3);
     expect(messageOf({ ...valid, TRUST_PROXY: '9' })).toContain('TRUST_PROXY');
+  });
+});
+
+describe('bill attachments postponed (DOCUMENT_STORAGE_DRIVER=disabled)', () => {
+  /** The Render service as released without attachments: no storage variables at all. */
+  const release = {
+    ...valid,
+    NODE_ENV: 'production',
+    FRONTEND_URL: 'https://shop-books.vercel.app',
+    DATABASE_URL: 'postgresql://u:p@ep-x-123.eu-central-1.aws.neon.tech/neondb?sslmode=require',
+    RENDER: 'true',
+    TRUST_PROXY: '2',
+    EMAIL_PROVIDER: 'none',
+  };
+
+  it('starts on Render with no storage variables at all (or empty ones)', () => {
+    expect(loadConfig(release).documentStorage).toEqual({ driver: 'disabled' });
+    expect(loadConfig({ ...release, DOCUMENT_STORAGE_DRIVER: '', DOCUMENT_STORAGE_AGENT_URL: '', DOCUMENT_STORAGE_AGENT_SECRET: '' }).documentStorage).toEqual({
+      driver: 'disabled',
+    });
+  });
+
+  it('explicitly disabled: leftover agent settings (even placeholders) are ignored, never used', () => {
+    const config = loadConfig({
+      ...release,
+      DOCUMENT_STORAGE_DRIVER: 'disabled',
+      DOCUMENT_STORAGE_AGENT_URL: 'https://storage.example.com',
+      DOCUMENT_STORAGE_AGENT_SECRET: 'change-me',
+    });
+    expect(config.documentStorage).toEqual({ driver: 'disabled' });
+  });
+
+  it('never treats a placeholder agent URL as working storage', () => {
+    const agent = { ...release, DOCUMENT_STORAGE_DRIVER: 'agent', DOCUMENT_STORAGE_AGENT_SECRET: 'a'.repeat(48) };
+    for (const url of [
+      'https://storage.example.com',
+      'https://example.org',
+      'https://files.example.net:8443',
+      'https://your-tunnel.trycloudflare.com',
+      'https://change-me.shop-books.in',
+      'https://placeholder-storage.in',
+      'https://storage.invalid',
+    ]) {
+      expect(messageOf({ ...agent, DOCUMENT_STORAGE_AGENT_URL: url }), url).toMatch(/DOCUMENT_STORAGE_AGENT_URL: looks like a placeholder/);
+    }
+    expect(loadConfig({ ...agent, DOCUMENT_STORAGE_AGENT_URL: 'https://bills.shop-books-storage.in' }).documentStorage.driver).toBe('agent');
+  });
+
+  it('rejects an unknown driver by name', () => {
+    expect(messageOf({ ...release, DOCUMENT_STORAGE_DRIVER: 'r2' })).toMatch(/use "disabled", "local" or "agent"/);
   });
 });

@@ -192,13 +192,26 @@ describe.skipIf(!pool)('expense categories, brands, supplier defaults, payments 
     expect(saved.categories.map((c: { name: string }) => c.name)).toEqual(['Electronics', 'Maintenance']);
     expect(saved.brands.map((b: { name: string }) => b.name)).toEqual(['Samsung', 'LG', 'HP']);
 
-    // Edit: reorder (new primary) and remove a brand; an archived category already on the expense may stay.
+    // Edit: reorder (new primary) and remove brands; an archived category already on the expense may stay.
     await ok(owner, 'patch', `/categories/${cat.Maintenance}`, { isActive: false });
-    const edited = await ok(manager, 'patch', `/expenses/${expenseId}`, {
+    // Brand-first rule: making LG the primary brand is refused, because ABC is no longer linked to LG
+    // (the saved Samsung/ABC pair itself stays valid as history).
+    const refused = await send(manager, 'patch', `/expenses/${expenseId}`, {
       expenseDate: today,
       supplierId: abc.id,
       categoryIds: [cat.Maintenance, cat.Electronics],
       brandIds: [brand.LG],
+      amount: '5000',
+      payments: [{ amount: '5000', paymentMode: 'upi' }],
+      version: saved.version,
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.details[0]).toMatchObject({ path: 'supplierId', message: expect.stringMatching(/not linked to the brand LG/) });
+    const edited = await ok(manager, 'patch', `/expenses/${expenseId}`, {
+      expenseDate: today,
+      supplierId: abc.id,
+      categoryIds: [cat.Maintenance, cat.Electronics],
+      brandIds: [brand.Samsung],
       amount: '5000',
       payments: [{ amount: '5000', paymentMode: 'upi' }],
       version: saved.version,
@@ -209,7 +222,7 @@ describe.skipIf(!pool)('expense categories, brands, supplier defaults, payments 
       ['Maintenance', false],
       ['Electronics', true],
     ]);
-    expect(saved.brands.map((b: { name: string }) => b.name)).toEqual(['LG']);
+    expect(saved.brands.map((b: { name: string }) => b.name)).toEqual(['Samsung']);
     await ok(owner, 'patch', `/categories/${cat.Maintenance}`, { isActive: true });
 
     // Saving the same selections again is a no-op (no new version).
@@ -217,7 +230,7 @@ describe.skipIf(!pool)('expense categories, brands, supplier defaults, payments 
       expenseDate: today,
       supplierId: abc.id,
       categoryIds: [cat.Maintenance, cat.Electronics],
-      brandIds: [brand.LG],
+      brandIds: [brand.Samsung],
       amount: '5000',
       payments: [{ amount: '5000', paymentMode: 'upi' }],
       version: saved.version,

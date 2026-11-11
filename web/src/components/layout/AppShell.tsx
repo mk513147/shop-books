@@ -4,6 +4,10 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { navItemsFor, type NavItem } from '@/app/navigation';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuth } from '@/features/auth/auth-context';
+import { AttachmentQueueProvider, useAttachmentQueue } from '@/features/documents/queue/AttachmentQueueProvider';
+import { AttachmentSyncBanner } from '@/features/documents/queue/LocalAttachments';
+import { PausedDeviceFilesNotice } from '@/features/documents/queue/PausedDeviceFiles';
+import { billAttachmentsEnabled } from '@/features/documents/attachments-feature';
 import { useLiveUpdates } from '@/features/sync/useLiveUpdates';
 import { cn } from '@/lib/utils';
 
@@ -153,8 +157,29 @@ function BottomNav({ items }: { items: NavItem[] }) {
   );
 }
 
+/** Files chosen on this device that are not yet on the shop PC (all expenses). */
+function PendingAttachments() {
+  const { user } = useAuth();
+  const { queue, items } = useAttachmentQueue();
+  // Attachments postponed: no queue runs; only say whether this browser still holds unsent files.
+  if (!billAttachmentsEnabled()) return user ? <PausedDeviceFilesNotice userId={user.id} /> : null;
+  return <AttachmentSyncBanner items={items} onRetry={() => void queue?.syncNow({ force: true })} />;
+}
+
 /** Responsive application frame: sidebar on md+ screens, top bar + bottom navigation on phones. */
 export function AppShell() {
+  const { user } = useAuth();
+  // Bill attachments are postponed: no offline queue, no background sync (docs/bill-attachments-postponed.md).
+  if (!user || !billAttachmentsEnabled()) return <AppFrame />;
+  // The offline attachment queue belongs to the signed-in user (other users of this browser never see it).
+  return (
+    <AttachmentQueueProvider userId={user.id}>
+      <AppFrame />
+    </AttachmentQueueProvider>
+  );
+}
+
+function AppFrame() {
   const { user } = useAuth();
   const items = navItemsFor(user?.role);
   // Changes made on other phones refresh this one, with a small notification (Features 1 and 3).
@@ -181,6 +206,7 @@ export function AppShell() {
           <Brand />
         </header>
         <main className="pb-bottom-nav flex-1 px-4 pt-4 md:px-8 md:pb-10 md:pt-8">
+          <PendingAttachments />
           <Outlet />
         </main>
       </div>

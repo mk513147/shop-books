@@ -15,6 +15,7 @@ import { isValidStorageKey, StorageObjectMissing } from '../modules/documents/st
  *   GET    /v1/objects         NDJSON list (reconciliation)
  *   HEAD   /v1/objects/<key>   exists?
  *   GET    /v1/objects/<key>   the bytes
+ *   GET    /v1/digests/<key>   { sizeBytes, sha256 } of the stored file, hashed here (410 if missing)
  *   PUT    /v1/objects/<key>   store; body SHA-256 must match the signed header; 201 new,
  *                              200 identical bytes already stored, 409 different bytes stored
  *   DELETE /v1/objects/<key>   204 (also when already gone)
@@ -26,6 +27,7 @@ export interface StorageAgentOptions {
 }
 
 const OBJECT_PATH = /^\/v1\/objects\/(.+)$/;
+const DIGEST_PATH = /^\/v1\/digests\/(.+)$/;
 
 class HttpError extends Error {
   constructor(
@@ -100,6 +102,25 @@ export function createStorageAgent({ storage, secret, log }: StorageAgentOptions
       }
       res.end();
       return { status: 200 };
+    }
+
+    const digestMatch = DIGEST_PATH.exec(url.pathname);
+    if (digestMatch) {
+      if (method !== 'GET') throw new HttpError(405, 'method not allowed');
+      const key = digestMatch[1]!;
+      if (!isValidStorageKey(key)) throw new HttpError(400, 'invalid key');
+      try {
+        const { sizeBytes, sha256Hex: sha256 } = await storage.digest(key);
+        send(res, 200, { sizeBytes, sha256 });
+        return { status: 200 };
+      } catch (err) {
+        if (err instanceof StorageObjectMissing) {
+          // 410 (not 404), so the API can tell "object missing" from "older agent without this route".
+          send(res, 410, { error: 'object not found' });
+          return { status: 410 };
+        }
+        throw err;
+      }
     }
 
     const match = OBJECT_PATH.exec(url.pathname);

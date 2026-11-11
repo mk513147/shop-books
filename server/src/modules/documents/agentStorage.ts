@@ -147,6 +147,41 @@ export class AgentDocumentStorage implements DocumentStorage {
     throw AgentDocumentStorage.unavailable(response);
   }
 
+  /**
+   * The agent hashes the file on the desktop (GET /v1/digests/<key>), so the bytes do not travel
+   * again. An older agent without that route answers 404 for it: then the object is downloaded and
+   * hashed here instead (open() reports a really missing object as StorageObjectMissing).
+   */
+  async digest(key: string): Promise<{ sizeBytes: number; sha256Hex: string }> {
+    if (!isValidStorageKey(key)) throw new Error('Invalid storage key');
+    const { response } = await this.request('GET', `/v1/digests/${key}`);
+    if (response.status === 200) {
+      const body = (await response.json()) as { sizeBytes?: unknown; sha256?: unknown };
+      if (typeof body.sizeBytes !== 'number' || typeof body.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(body.sha256)) {
+        throw new StorageUnavailable('Document storage agent sent an invalid digest');
+      }
+      return { sizeBytes: body.sizeBytes, sha256Hex: body.sha256 };
+    }
+    if (response.status === 410) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new StorageObjectMissing(key);
+    }
+    if (response.status !== 404) throw AgentDocumentStorage.unavailable(response);
+    void response.body?.cancel().catch(() => undefined);
+    const { stream } = await this.open(key);
+    const hash = createHash('sha256');
+    let sizeBytes = 0;
+    for await (const chunk of stream) {
+      sizeBytes += (chunk as Buffer).length;
+      hash.update(chunk as Buffer);
+    }
+    return { sizeBytes, sha256Hex: hash.digest('hex') };
+  }
+
+  async isAvailable(): Promise<boolean> {
+    return this.ping();
+  }
+
   async *list(): AsyncIterable<StoredObject> {
     const { response } = await this.request('GET', '/v1/objects');
     if (response.status !== 200) throw AgentDocumentStorage.unavailable(response);

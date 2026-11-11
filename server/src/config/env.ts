@@ -33,8 +33,12 @@ export interface AppConfig extends DatabaseConfig {
   appVersion: string | undefined;
   /** Server-side secret used to derive per-session CSRF tokens (HMAC). */
   sessionSecret: string;
-  /** Private storage for bill photographs/documents (docs/architecture.md → Bill documents). */
+  /**
+   * Private storage for bill photographs/documents (docs/architecture.md → Bill documents).
+   * `disabled`: bill attachments are postponed (docs/bill-attachments-postponed.md).
+   */
   documentStorage:
+    | { driver: 'disabled' }
     | {
         driver: 'local';
         /** Absolute directory outside any web root; never served statically. */
@@ -110,7 +114,8 @@ const appSchema = z.object({
   APP_VERSION: z.string().trim().optional(),
   SESSION_SECRET: z.string({ error: 'SESSION_SECRET is required' }).min(1, 'SESSION_SECRET is required'),
   SESSION_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
-  DOCUMENT_STORAGE_DRIVER: z.enum(['local', 'agent'], 'use "local" or "agent"').default('local'),
+  // Default: "disabled" in production unless DOCUMENT_STORAGE_DIR is set, "local" elsewhere (see loadConfig).
+  DOCUMENT_STORAGE_DRIVER: z.enum(['disabled', 'local', 'agent'], 'use "disabled", "local" or "agent"').optional(),
   DOCUMENT_STORAGE_DIR: z.string().trim().optional(),
   DOCUMENT_STORAGE_AGENT_URL: z.string().trim().optional(),
   DOCUMENT_STORAGE_AGENT_SECRET: z.string().optional(),
@@ -162,7 +167,17 @@ function checkAgentUrl(raw: string | undefined, issues: string[]): string | null
     issues.push('DOCUMENT_STORAGE_AGENT_URL: only scheme, host and port are allowed (no path, query or credentials)');
     return null;
   }
+  if (isPlaceholderHost(url.hostname) || PLACEHOLDER_PATTERN.test(raw)) {
+    issues.push('DOCUMENT_STORAGE_AGENT_URL: looks like a placeholder; set the real storage hostname or use DOCUMENT_STORAGE_DRIVER=disabled');
+    return null;
+  }
   return url.origin;
+}
+
+/** Documentation-only hostnames (RFC 2606/6761) can never be real document storage. */
+function isPlaceholderHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  return /(^|\.)example\.(com|net|org)$/.test(host) || /(^|\.)(example|invalid)$/.test(host) || host === 'localhost.localdomain';
 }
 
 /** Guards that stop one environment from silently using another environment's database. */
@@ -229,8 +244,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     issues.push('SESSION_COOKIE_SAMESITE: "none" requires Secure cookies (production, or COOKIE_SECURE=true behind HTTPS)');
   }
 
+  // Missing storage settings must not stop the API: production defaults to "disabled" (attachments
+  // postponed) unless a local directory is named; development/test keep the local default.
+  const storageDriver =
+    data.DOCUMENT_STORAGE_DRIVER ?? (data.NODE_ENV === 'production' && !data.DOCUMENT_STORAGE_DIR ? 'disabled' : 'local');
   let documentStorage: AppConfig['documentStorage'] | null = null;
-  if (data.DOCUMENT_STORAGE_DRIVER === 'agent') {
+  if (storageDriver === 'disabled') {
+    // Nothing is stored or contacted; DOCUMENT_STORAGE_AGENT_* / DOCUMENT_STORAGE_DIR are ignored.
+    documentStorage = { driver: 'disabled' };
+  } else if (storageDriver === 'agent') {
     const agentUrl = checkAgentUrl(data.DOCUMENT_STORAGE_AGENT_URL, issues);
     const agentSecret = data.DOCUMENT_STORAGE_AGENT_SECRET ?? '';
     if (agentSecret.length < 32) issues.push('DOCUMENT_STORAGE_AGENT_SECRET: must be at least 32 characters');
@@ -240,7 +262,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   } else {
     // Render's disk is wiped on every deploy/restart: bill documents must never live there.
     if (env.RENDER === 'true') {
-      issues.push('DOCUMENT_STORAGE_DRIVER: "local" stores files on Render\'s temporary disk; use "agent" (the desktop storage agent)');
+      issues.push('DOCUMENT_STORAGE_DRIVER: "local" stores files on Render\'s temporary disk; use "agent" (the desktop storage agent) or "disabled"');
     }
     // Production must name the storage directory explicitly (and it must be absolute); development
     // and tests default to <repo>/storage/documents[-test], which is gitignored and never served.

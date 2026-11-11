@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/test/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionUser } from '@/types/api';
@@ -65,7 +65,7 @@ describe('application', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     renderAt('/');
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.type(await screen.findByLabelText('Email'), 'm@example.com');
     await user.type(screen.getByLabelText('Password'), 'manager-password');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -86,7 +86,7 @@ describe('application', () => {
       ),
     );
     renderAt('/login');
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.type(await screen.findByLabelText('Email'), 'x@example.com');
     await user.type(screen.getByLabelText('Password'), 'wrong');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));

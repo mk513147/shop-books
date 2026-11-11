@@ -1,5 +1,7 @@
 # Hosted deployment: Vercel + Render + Neon + desktop document storage
 
+> **Bill attachments are postponed (2026-11-10).** The current release runs **without** the storage agent and Cloudflare Tunnel: `DOCUMENT_STORAGE_DRIVER=disabled` on Render and no `VITE_BILL_ATTACHMENTS` on Vercel. The storage-agent parts below describe how attachments will work when they are reactivated. See [bill-attachments-postponed.md](bill-attachments-postponed.md).
+
 **Status:** configuration and code are prepared and tested locally. Nothing has been deployed. Cloudflare Tunnel, Vercel's proxy and Render were **not** exercised by the automated tests (see "Not yet verified").
 
 ```
@@ -56,7 +58,7 @@ Recommended: protect the tunnel hostname additionally with Cloudflare Access (se
 | Health check path | `/api/v1/health` |
 | Node | from `engines` (`>=22.12.0`) |
 
-Environment (names only): `NODE_ENV=production`, `DATABASE_URL` (Neon **direct**, not `-pooler`: advisory locks need a session), `SESSION_SECRET`, `FRONTEND_URL` (exact Vercel origin), `SESSION_COOKIE_SAMESITE=lax`, `TRUST_PROXY=2`, `DOCUMENT_STORAGE_DRIVER=agent`, `DOCUMENT_STORAGE_AGENT_URL`, `DOCUMENT_STORAGE_AGENT_SECRET`, `EMAIL_PROVIDER=none`, `REPORT_SCHEDULER_ENABLED=false`, optional `SHOP_NAME`, `APP_VERSION`, `LOG_LEVEL`. Leave `HOST` unset; Render provides `PORT`.
+Environment (names only): `NODE_ENV=production`, `DATABASE_URL` (Neon **direct**, not `-pooler`: advisory locks need a session), `SESSION_SECRET`, `FRONTEND_URL` (exact Vercel origin), `SESSION_COOKIE_SAMESITE=lax`, `TRUST_PROXY=2`, `DOCUMENT_STORAGE_DRIVER=disabled` while attachments are postponed (later: `agent` plus `DOCUMENT_STORAGE_AGENT_URL` and `DOCUMENT_STORAGE_AGENT_SECRET`), `EMAIL_PROVIDER=none`, `REPORT_SCHEDULER_ENABLED=false`, optional `SHOP_NAME`, `APP_VERSION`, `LOG_LEVEL`. Leave `HOST` unset; Render provides `PORT`.
 
 Migrations (once per release, from the Render shell; Neon is a remote host, so the exact name is required; `sslmode` and `channel_binding` in Neon's URL are accepted):
 

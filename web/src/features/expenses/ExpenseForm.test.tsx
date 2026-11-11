@@ -1,11 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser, type TestUser } from '@/test/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/api-client';
 import type { Category, Expense, ExpenseInput } from '@/types/api';
 import { ExpenseForm } from './ExpenseForm';
+
+// Targeted timeout (this file only): each test is a whole user scenario (often 15–30 typed and
+// clicked steps) on the full expense form, rendered by React's development build in jsdom. Measured
+// 0.3–3.8 s per test while the full suite runs in parallel, too close to Vitest's 5 s default to
+// survive a busy machine. 15 s is about 4x the slowest measured test and still catches a real hang.
+vi.setConfig({ testTimeout: 15_000 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 const cat = (id: string, name: string, isActive = true): Category => ({
   id,
@@ -42,15 +50,32 @@ const ABC = supplier('s1', 'ABC Distributors', {
   categories: [ref('c2', 'Electronics'), ref('c1', 'Packaging'), ref('c9', 'Retired category', false)],
 });
 const XYZ = supplier('s2', 'XYZ Traders', { brands: [ref('b4', 'HP')], categories: [ref('c4', 'Transport')] });
+/** Not linked to any brand: must never be offered once a brand is chosen. */
+const OTHER = supplier('s3', 'Other Co');
+const option = (s: typeof ABC) => ({ id: s.id, name: s.name, phone: null, isActive: true, categories: s.categories.filter((c: { isActive: boolean }) => c.isActive) });
+/** Brand -> its active suppliers (GET /brands/:id/suppliers): Samsung one, LG two, Sony none, HP one. */
+const BRAND_SUPPLIERS: Record<string, ReturnType<typeof option>[]> = {
+  b1: [option(ABC)],
+  b2: [option(ABC), option(XYZ)],
+  b3: [],
+  b4: [option(XYZ)],
+};
 
 let fetchMock: ReturnType<typeof vi.fn>;
 /** Supplier ids whose detail request currently fails (the defaults then cannot be loaded). */
 let failDetailFor = new Set<string>();
+/** Brand ids whose supplier list currently fails to load. */
+let failBrandFor = new Set<string>();
 /** Supplier search/detail, active categories and brands are answered; everything else is 404. */
 async function fakeApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = String(input);
   if ((init?.method ?? 'GET') !== 'GET') return Response.json({}, { status: 404 });
-  if (/\/suppliers\?/.test(url)) return Response.json({ items: [ABC, XYZ], pagination: { page: 1, pageSize: 20, total: 2, totalPages: 1 } });
+  if (/\/suppliers\?/.test(url)) return Response.json({ items: [ABC, XYZ, OTHER], pagination: { page: 1, pageSize: 20, total: 3, totalPages: 1 } });
+  const brandId = /\/brands\/(b\d)\/suppliers$/.exec(url)?.[1];
+  if (brandId) {
+    if (failBrandFor.has(brandId)) return Response.json({ error: { code: 'INTERNAL', message: 'The server had a problem.' } }, { status: 500 });
+    return Response.json({ brand: { id: brandId }, suppliers: BRAND_SUPPLIERS[brandId] ?? [] });
+  }
   const detailId = /\/suppliers\/(s\d)$/.exec(url)?.[1];
   if (detailId && failDetailFor.has(detailId)) {
     return Response.json({ error: { code: 'INTERNAL', message: 'The server had a problem.' } }, { status: 500 });
@@ -68,6 +93,7 @@ function renderForm(props: { initial?: Expense; onSubmit?: (input: ExpenseInput,
   );
   const onDone = vi.fn();
   failDetailFor = new Set();
+  failBrandFor = new Set();
   fetchMock = vi.fn(fakeApi);
   vi.stubGlobal('fetch', fetchMock);
   render(
@@ -84,9 +110,9 @@ function renderForm(props: { initial?: Expense; onSubmit?: (input: ExpenseInput,
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return { onSubmit, onDone, user: userEvent.setup() };
+  return { onSubmit, onDone, user: setupUser() };
 }
-type User = ReturnType<typeof userEvent.setup>;
+type User = TestUser;
 
 const summary = () => within(screen.getByTestId('payment-summary'));
 const status = () => within(screen.getByTestId('payment-status'));
@@ -99,6 +125,10 @@ const selected = (box: () => ReturnType<typeof within>) =>
 
 async function chooseSupplier(user: User, name: RegExp) {
   await user.click(screen.getByRole('button', { name: 'Supplier' }));
+  await user.click(await screen.findByRole('option', { name }));
+}
+async function chooseBrand(user: User, name: string) {
+  await user.click(screen.getByRole('button', { name: 'Brand' }));
   await user.click(await screen.findByRole('option', { name }));
 }
 async function addCategory(user: User, name: string) {
@@ -345,70 +375,56 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
   });
 });
 
-describe('ExpenseForm: supplier default brands and categories (Feature 7)', () => {
-  it('2–8. pre-selects the supplier’s active defaults; edits affect only this expense; never writes supplier defaults', async () => {
+describe('ExpenseForm: supplier default categories (Feature 7, without a brand)', () => {
+  it('2–8. pre-selects the supplier’s active default categories; edits affect only this expense; never writes supplier defaults', async () => {
     const { onSubmit, user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '5000');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
-    expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']);
-    // 16. archived defaults are never auto-selected
-    expect(screen.queryByText('Retired brand')).not.toBeInTheDocument();
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
+    // 16. archived defaults are never auto-selected; brands are chosen first, never by the supplier
     expect(screen.queryByText('Retired category')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('No brand');
 
-    await user.click(brandsBox().getByRole('button', { name: 'Remove Sony' }));
-    await user.click(await brandsBox().findByRole('button', { name: 'HP' }));
     await user.click(categoriesBox().getByRole('button', { name: 'Remove Packaging' }));
     await addCategory(user, 'Maintenance');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]).toMatchObject({
-      supplierId: 's1',
-      brandIds: ['b1', 'b2', 'b4'],
-      categoryIds: ['c2', 'c3'],
-      amount: '5000',
-    });
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's1', brandIds: [], categoryIds: ['c2', 'c3'], amount: '5000' });
     // 9. Nothing was sent to the supplier (its defaults are only changed in the supplier form).
     const writes = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method && (init as RequestInit).method !== 'GET');
     expect(writes).toEqual([]);
   });
 
-  it('10. changing the supplier replaces untouched defaults without asking; removing it clears them', async () => {
+  it('10. changing the supplier replaces untouched default categories without asking; removing it clears them', async () => {
     const { user } = renderForm();
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     await chooseSupplier(user, /XYZ Traders/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['HP']));
-    expect(selected(categoriesBox)).toEqual(['Transport']);
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Transport']));
     expect(screen.queryByRole('button', { name: 'Keep my selections' })).not.toBeInTheDocument();
     await removeSupplier(user);
-    await waitFor(() => expect(brandsBox().getByText('None selected')).toBeInTheDocument());
+    await waitFor(() => expect(categoriesBox().getByText('None selected')).toBeInTheDocument());
   });
 
-  it('11–13. asks before replacing manual changes; Cancel keeps supplier and every field; confirming applies the new defaults only', async () => {
+  it('11–13. asks before replacing manual category changes; Cancel keeps supplier and every field; confirming applies the new defaults only', async () => {
     const { onSubmit, user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '3000');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     await user.click(status().getByRole('radio', { name: 'Part paid' }));
     await user.keyboard('1000');
     await user.type(screen.getByLabelText(/Description/), 'TV stock');
-    await user.click(brandsBox().getByRole('button', { name: 'Remove Sony' })); // manual change
+    await user.click(categoriesBox().getByRole('button', { name: 'Remove Packaging' })); // manual change
 
-    // 11. confirmation appears
     await chooseSupplier(user, /XYZ Traders/);
     expect(await screen.findByText(/Replace them with the usual ones for XYZ Traders/)).toBeInTheDocument();
-    // 12. cancel keeps everything, including the supplier
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('ABC Distributors');
-    expect(selected(brandsBox)).toEqual(['Samsung', 'LG']);
-    expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']);
+    expect(selected(categoriesBox)).toEqual(['Electronics']);
 
-    // confirm: new defaults; 13. amount, payment, status and description untouched
     await chooseSupplier(user, /XYZ Traders/);
     await user.click(await screen.findByRole('button', { name: 'Use XYZ Traders’s' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
-    expect(selected(brandsBox)).toEqual(['HP']);
     expect(selected(categoriesBox)).toEqual(['Transport']);
     expect(screen.getByLabelText('Total expense amount')).toHaveValue('3000');
     expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1000');
@@ -416,36 +432,20 @@ describe('ExpenseForm: supplier default brands and categories (Feature 7)', () =
     expect(screen.getByLabelText(/Description/)).toHaveValue('TV stock');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's2', brandIds: ['b4'], categoryIds: ['c4'], payments: [{ amount: '1000' }] });
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's2', categoryIds: ['c4'], payments: [{ amount: '1000' }] });
   });
 
   it('13. bill files picked before changing the supplier are kept', async () => {
+    vi.stubEnv('VITE_BILL_ATTACHMENTS', 'enabled'); // attachments are postponed (off by default)
     const { user } = renderForm();
     const file = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'bill.pdf', { type: 'application/pdf' });
-    const input = document.querySelector('input[type="file"][multiple]') as HTMLInputElement;
-    await user.upload(input, file);
+    await user.upload(document.querySelector('input[type="file"][multiple]') as HTMLInputElement, file);
     expect(await screen.findByText('bill.pdf')).toBeInTheDocument();
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     await chooseSupplier(user, /XYZ Traders/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['HP']));
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Transport']));
     expect(screen.getByText('bill.pdf')).toBeInTheDocument();
-  });
-
-  it('14. editing shows the selections saved on the expense, not the supplier’s current defaults', async () => {
-    const { onSubmit, user } = renderForm({
-      initial: {
-        id: 'e3', expenseDate: '2026-10-01', supplier: { id: 's1', name: 'ABC Distributors', isActive: true }, legacySupplierName: null,
-        category: ref('c4', 'Transport'), categories: [ref('c4', 'Transport'), ref('c3', 'Maintenance')], brands: [ref('b4', 'HP')],
-        description: null, amount: '100.00', amountPaid: '100.00', payments: [{ paymentMode: 'cash', amount: '100.00' }],
-        allocatedPayments: '0.00', outstanding: '0.00', paymentMode: 'cash', invoiceReference: null, status: 'active', version: 1, documentCount: 0,
-      } as unknown as Expense,
-    });
-    expect(selected(categoriesBox)).toEqual(['Transport', 'Maintenance']);
-    expect(selected(brandsBox)).toEqual(['HP']);
-    await user.click(screen.getByRole('button', { name: 'Save expense' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ categoryIds: ['c4', 'c3'], brandIds: ['b4'] });
   });
 });
 
@@ -453,78 +453,54 @@ describe('ExpenseForm: supplier defaults cannot be loaded (M3)', () => {
   const noneSelected = (box: () => ReturnType<typeof within>) => expect(box().getByText('None selected')).toBeInTheDocument();
 
   it('never keeps the previous supplier defaults, keeps every other field, shows an error and retries', async () => {
+    vi.stubEnv('VITE_BILL_ATTACHMENTS', 'enabled'); // the picked bill file is one of the kept fields
     const { onSubmit, user } = renderForm();
     const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'bill.pdf', { type: 'application/pdf' });
     await user.upload(document.querySelector('input[type="file"][multiple]') as HTMLInputElement, pdf);
     await user.type(screen.getByLabelText('Total expense amount'), '3000');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     await user.click(status().getByRole('radio', { name: 'Part paid' }));
     await user.keyboard('1000');
     await user.type(screen.getByLabelText(/Description/), 'TV stock');
 
     failDetailFor.add('s2');
     await chooseSupplier(user, /XYZ Traders/);
-    // The new supplier is chosen, the previous supplier's items are gone, nothing was guessed ...
-    expect(await screen.findByTestId('defaults-error')).toHaveTextContent(/Could not load the usual brands and categories of XYZ Traders/);
+    expect(await screen.findByTestId('defaults-error')).toHaveTextContent(/Could not load the usual categories of XYZ Traders/);
     expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders');
-    noneSelected(brandsBox);
     noneSelected(categoriesBox);
-    // ... and everything unrelated is untouched.
     expect(screen.getByLabelText('Total expense amount')).toHaveValue('3000');
     expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1000');
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText(/Description/)).toHaveValue('TV stock');
     expect(screen.getByText('bill.pdf')).toBeInTheDocument();
 
-    // Retry works once the server answers; the selections were empty, so no confirmation is needed.
     failDetailFor.clear();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['HP']));
-    expect(selected(categoriesBox)).toEqual(['Transport']);
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Transport']));
     expect(screen.queryByTestId('defaults-error')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1000');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's2', brandIds: ['b4'], categoryIds: ['c4'], payments: [{ amount: '1000' }] });
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's2', categoryIds: ['c4'], payments: [{ amount: '1000' }] });
   });
 
-  it('lets the user choose classifications by hand after a failure', async () => {
-    const { onSubmit, user } = renderForm();
-    await user.type(screen.getByLabelText('Total expense amount'), '500');
-    failDetailFor.add('s1');
-    await chooseSupplier(user, /ABC Distributors/);
-    expect(await screen.findByTestId('defaults-error')).toBeInTheDocument();
-    noneSelected(brandsBox);
-    await addCategory(user, 'Packaging');
-    await user.click(await brandsBox().findByRole('button', { name: 'LG' }));
-    await user.click(screen.getByRole('button', { name: 'Save expense' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's1', categoryIds: ['c1'], brandIds: ['b2'], amount: '500' });
-  });
-
-  it('asks before touching hand-edited selections: Cancel keeps everything; Remove drops only the previous supplier items', async () => {
+  it('asks before touching hand-edited categories: Cancel keeps everything; Remove drops only the previous supplier items', async () => {
     const { user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '500');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
-    await user.click(brandsBox().getByRole('button', { name: 'Remove Sony' })); // hand-edited
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     await addCategory(user, 'Maintenance'); // added by hand
 
     failDetailFor.add('s2');
     await chooseSupplier(user, /XYZ Traders/);
     expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
-    // Cancel: the previous supplier and every selection stay.
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('ABC Distributors');
-    expect(selected(brandsBox)).toEqual(['Samsung', 'LG']);
     expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging', 'Maintenance']);
-    expect(screen.queryByTestId('defaults-error')).not.toBeInTheDocument();
 
     await chooseSupplier(user, /XYZ Traders/);
     await user.click(await screen.findByRole('button', { name: 'Remove them' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
-    noneSelected(brandsBox);
     expect(selected(categoriesBox)).toEqual(['Maintenance']); // only what the user added themselves
     expect(screen.getByTestId('defaults-error')).toBeInTheDocument();
   });
@@ -533,24 +509,236 @@ describe('ExpenseForm: supplier defaults cannot be loaded (M3)', () => {
     const { onSubmit, user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '500');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(selected(brandsBox)).toEqual(['Samsung', 'LG', 'Sony']));
-    await user.click(brandsBox().getByRole('button', { name: 'Remove Sony' }));
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
+    await user.click(categoriesBox().getByRole('button', { name: 'Remove Packaging' }));
 
     failDetailFor.add('s2');
     await chooseSupplier(user, /XYZ Traders/);
     await user.click(await screen.findByRole('button', { name: 'Keep my selections' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
-    expect(selected(brandsBox)).toEqual(['Samsung', 'LG']);
-    expect(screen.getByTestId('defaults-error')).toBeInTheDocument();
+    expect(selected(categoriesBox)).toEqual(['Electronics']);
 
     failDetailFor.clear();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText(/Replace them with the usual ones for XYZ Traders/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Cancel' })); // keeps the selections
-    expect(selected(brandsBox)).toEqual(['Samsung', 'LG']);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(selected(categoriesBox)).toEqual(['Electronics']);
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's2', brandIds: ['b1', 'b2'], categoryIds: ['c2', 'c1'] });
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's2', categoryIds: ['c2'] });
+  });
+});
+
+describe('ExpenseForm: brand-first entry (Feature 3)', () => {
+  const supplierButton = () => screen.getByRole('button', { name: 'Supplier' });
+  const supplierChoices = async (user: User) => {
+    await user.click(supplierButton());
+    const names = (await within(await screen.findByRole('listbox', { name: 'supplier' })).findAllByRole('option')).map((o) => o.textContent ?? '');
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    return names;
+  };
+
+  it('a brand with ONE supplier selects it automatically, with its default categories', async () => {
+    const { onSubmit, user } = renderForm();
+    await user.type(screen.getByLabelText('Total expense amount'), '1200');
+    await chooseBrand(user, 'Samsung');
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('ABC Distributors'));
+    expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']);
+    expect(screen.getByTestId('brand-notice')).toHaveTextContent(/ABC Distributors is the only supplier of Samsung/);
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b1'], supplierId: 's1', categoryIds: ['c2', 'c1'], amount: '1200' });
+  });
+
+  it('a brand with SEVERAL suppliers offers only those and requires a choice', async () => {
+    const { onSubmit, user } = renderForm();
+    await user.type(screen.getByLabelText('Total expense amount'), '700');
+    await addCategory(user, 'Packaging');
+    await chooseBrand(user, 'LG');
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('Choose LG'));
+    expect(await supplierChoices(user)).toEqual(['ABC Distributors', 'XYZ Traders']); // never "Other Co"
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    expect(await screen.findByText(/Choose which of LG's suppliers/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await chooseSupplier(user, /XYZ Traders/);
+    // Packaging was chosen by hand: replacing it needs confirmation; keep it.
+    await user.click(await screen.findByRole('button', { name: 'Keep my selections' }));
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('XYZ Traders'));
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b2'], supplierId: 's2', categoryIds: ['c1'] });
+  });
+
+  it('a brand WITHOUT suppliers continues without one', async () => {
+    const { onSubmit, user } = renderForm();
+    await user.type(screen.getByLabelText('Total expense amount'), '300');
+    await addCategory(user, 'Maintenance');
+    await chooseBrand(user, 'Sony');
+    await waitFor(() => expect(screen.getByTestId('brand-notice')).toHaveTextContent(/Sony has no linked supplier/));
+    expect(supplierButton()).toHaveTextContent('No supplier');
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b3'], supplierId: null, categoryIds: ['c3'] });
+  });
+
+  it('changing the supplier manually loads its categories; untouched defaults are replaced without asking', async () => {
+    const { onSubmit, user } = renderForm();
+    await user.type(screen.getByLabelText('Total expense amount'), '900');
+    await chooseBrand(user, 'LG');
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('Choose LG'));
+    await chooseSupplier(user, /ABC Distributors/);
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
+    await chooseSupplier(user, /XYZ Traders/);
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Transport']));
+    expect(screen.queryByRole('button', { name: 'Keep my selections' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b2'], supplierId: 's2', categoryIds: ['c4'] });
+  });
+
+  it('changing the brand explains a supplier replacement first; Cancel changes nothing; unrelated fields are kept', async () => {
+    const { onSubmit, user } = renderForm();
+    await user.type(screen.getByLabelText('Total expense amount'), '4000');
+    await chooseBrand(user, 'Samsung');
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('ABC Distributors'));
+    await user.click(status().getByRole('radio', { name: 'Part paid' }));
+    await user.keyboard('1500');
+    await user.type(screen.getByLabelText(/Description/), 'Printers');
+
+    await chooseBrand(user, 'HP');
+    expect(await screen.findByText(/ABC Distributors is not linked to HP\. XYZ Traders, its only supplier, will be selected instead/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('Samsung');
+    expect(supplierButton()).toHaveTextContent('ABC Distributors');
+
+    await chooseBrand(user, 'HP');
+    await user.click(await screen.findByRole('button', { name: 'Change brand' }));
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('XYZ Traders'));
+    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('HP');
+    expect(selected(categoriesBox)).toEqual(['Transport']); // untouched defaults follow the supplier
+    expect(screen.getByLabelText('Total expense amount')).toHaveValue('4000');
+    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1500');
+    expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText(/Description/)).toHaveValue('Printers');
+
+    // A brand the current supplier also supplies keeps it, silently.
+    await chooseBrand(user, 'LG');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('LG'));
+    expect(supplierButton()).toHaveTextContent('XYZ Traders');
+    expect(screen.queryByRole('button', { name: 'Change brand' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b2'], supplierId: 's2', categoryIds: ['c4'], payments: [{ amount: '1500' }] });
+  });
+
+  it('changing the brand asks before discarding hand-picked categories ("Keep my categories")', async () => {
+    const { onSubmit, user } = renderForm();
+    await user.type(screen.getByLabelText('Total expense amount'), '650');
+    await chooseBrand(user, 'Samsung');
+    await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
+    await addCategory(user, 'Maintenance');
+    await chooseBrand(user, 'HP');
+    expect(await screen.findByText(/You chose the categories by hand/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Keep my categories' }));
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('XYZ Traders'));
+    expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging', 'Maintenance']);
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b4'], supplierId: 's2', categoryIds: ['c2', 'c1', 'c3'] });
+  });
+
+  it('14. editing keeps the saved brand, supplier and categories (never the current defaults)', async () => {
+    const { onSubmit, user } = renderForm({
+      initial: {
+        id: 'e3', expenseDate: '2026-10-01', supplier: { id: 's2', name: 'XYZ Traders', isActive: true }, legacySupplierName: null,
+        category: ref('c3', 'Maintenance'), categories: [ref('c3', 'Maintenance')], brands: [ref('b2', 'LG'), ref('b4', 'HP')],
+        description: null, amount: '100.00', amountPaid: '100.00', payments: [{ paymentMode: 'cash', amount: '100.00' }],
+        allocatedPayments: '0.00', outstanding: '0.00', paymentMode: 'cash', invoiceReference: null, status: 'active', version: 1, documentCount: 0,
+      } as unknown as Expense,
+    });
+    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('LG');
+    expect(supplierButton()).toHaveTextContent('XYZ Traders');
+    expect(selected(categoriesBox)).toEqual(['Maintenance']);
+    expect(selected(brandsBox)).toEqual(['HP']); // the other brand of this expense
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b2', 'b4'], supplierId: 's2', categoryIds: ['c3'] });
+  });
+
+  it('editing an older expense whose supplier is not linked to its brand keeps that pair', async () => {
+    const { onSubmit, user } = renderForm({
+      initial: {
+        id: 'e4', expenseDate: '2026-09-01', supplier: { id: 's1', name: 'ABC Distributors', isActive: true }, legacySupplierName: null,
+        category: ref('c1', 'Packaging'), categories: [ref('c1', 'Packaging')], brands: [ref('b3', 'Sony')],
+        description: 'Old bill', amount: '50.00', amountPaid: '50.00', payments: [{ paymentMode: 'cash', amount: '50.00' }],
+        allocatedPayments: '0.00', outstanding: '0.00', paymentMode: 'cash', invoiceReference: null, status: 'active', version: 3, documentCount: 0,
+      } as unknown as Expense,
+    });
+    expect(supplierButton()).toHaveTextContent('ABC Distributors');
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b3'], supplierId: 's1', categoryIds: ['c1'] });
+  });
+
+  it('an older expense with a brand but no supplier can still be edited and saved as it is', async () => {
+    const { onSubmit, user } = renderForm({
+      initial: {
+        id: 'e5', expenseDate: '2026-08-01', supplier: null, legacySupplierName: null,
+        category: ref('c1', 'Packaging'), categories: [ref('c1', 'Packaging')], brands: [ref('b2', 'LG')],
+        description: 'Cash purchase', amount: '75.00', amountPaid: '75.00', payments: [{ paymentMode: 'cash', amount: '75.00' }],
+        allocatedPayments: '0.00', outstanding: '0.00', paymentMode: 'cash', invoiceReference: null, status: 'active', version: 2, documentCount: 0,
+      } as unknown as Expense,
+    });
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('Choose LG'));
+    await user.clear(screen.getByLabelText(/Description/));
+    await user.type(screen.getByLabelText(/Description/), 'Cash purchase, cable');
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: ['b2'], supplierId: null, description: 'Cash purchase, cable' });
+  });
+
+  it('choosing "No brand" also removes the other brands, and says so', async () => {
+    const { onSubmit, user } = renderForm({
+      initial: {
+        id: 'e6', expenseDate: '2026-08-01', supplier: { id: 's2', name: 'XYZ Traders', isActive: true }, legacySupplierName: null,
+        category: ref('c4', 'Transport'), categories: [ref('c4', 'Transport')], brands: [ref('b4', 'HP'), ref('b2', 'LG')],
+        description: null, amount: '20.00', amountPaid: '20.00', payments: [{ paymentMode: 'cash', amount: '20.00' }],
+        allocatedPayments: '0.00', outstanding: '0.00', paymentMode: 'cash', invoiceReference: null, status: 'active', version: 1, documentCount: 0,
+      } as unknown as Expense,
+    });
+    expect(selected(brandsBox)).toEqual(['LG']);
+    await user.click(screen.getByRole('button', { name: 'Remove brand' }));
+    expect(await screen.findByTestId('brand-notice')).toHaveTextContent(/other brand of this expense was removed too/);
+    expect(supplierButton()).toHaveTextContent('XYZ Traders'); // the supplier stays
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ brandIds: [], supplierId: 's2' });
+  });
+
+  it('shows the server’s brand–supplier check on the supplier field', async () => {
+    const { user } = renderForm({
+      onSubmit: async () => {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Request validation failed', undefined, [
+          { path: 'supplierId', message: 'ABC Distributors is not linked to the brand Samsung.' },
+        ]);
+      },
+    });
+    await user.type(screen.getByLabelText('Total expense amount'), '10');
+    await chooseBrand(user, 'Samsung');
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('ABC Distributors'));
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    expect(await screen.findByText('ABC Distributors is not linked to the brand Samsung.')).toBeInTheDocument();
+  });
+
+  it('if the brand’s suppliers cannot be loaded, the supplier is left alone and it can be retried', async () => {
+    const { user } = renderForm();
+    failBrandFor.add('b1');
+    await chooseBrand(user, 'Samsung');
+    expect(await screen.findByTestId('brand-suppliers-error')).toHaveTextContent(/Could not load the suppliers of Samsung/);
+    failBrandFor.clear();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(supplierButton()).toHaveTextContent('ABC Distributors'));
   });
 });
 
@@ -606,5 +794,46 @@ describe('ExpenseForm: payment row accessibility (L3)', () => {
     expect(screen.getByLabelText('Payment 2 amount')).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Remove payment 2' }));
     expect(screen.getByLabelText('Payment 1 amount')).toHaveFocus();
+  });
+});
+
+describe('ExpenseForm: bill attachments postponed (default build)', () => {
+  const noAttachmentUi = () => {
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+    expect(screen.queryByText(/Bill photos and documents/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Choose files|Take photo|Upload/i })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/shop PC|sent automatically|Pending sync/i);
+  };
+
+  it('creates an expense without any attachment step or upload message', async () => {
+    const { onSubmit, onDone, user } = renderForm();
+    noAttachmentUi();
+    await user.type(screen.getByLabelText('Total expense amount'), '450');
+    await addCategory(user, 'Packaging');
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ amount: '450', categoryIds: ['c1'], payments: [{ amount: '450', paymentMode: 'cash' }] });
+    expect(onDone.mock.calls[0]![1]).toBe('Expense saved.');
+  });
+
+  it('edits an expense that already has document records without touching them', async () => {
+    const { onSubmit, onDone, user } = renderForm({
+      initial: {
+        id: 'e9', expenseDate: '2026-10-01', supplier: null, legacySupplierName: null,
+        category: ref('c1', 'Packaging'), categories: [ref('c1', 'Packaging')], brands: [], description: 'Tape', amount: '300.00',
+        amountPaid: '300.00', payments: [{ paymentMode: 'cash', amount: '300.00' }], allocatedPayments: '0.00', outstanding: '0.00',
+        paymentMode: 'cash', invoiceReference: null, status: 'active', version: 7, documentCount: 2,
+      } as unknown as Expense,
+    });
+    noAttachmentUi();
+    await user.clear(screen.getByLabelText(/Description \(optional\)/));
+    await user.type(screen.getByLabelText(/Description \(optional\)/), 'Tape and boxes');
+    await user.click(screen.getByRole('button', { name: 'Save expense' }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ description: 'Tape and boxes', categoryIds: ['c1'] });
+    expect(onSubmit.mock.calls[0]![1]).toBe(7);
+    expect(onDone.mock.calls[0]![1]).toBe('Changes saved.');
+    // No request ever reaches the document endpoints.
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/documents') || String(u).includes('/document-storage'))).toBe(false);
   });
 });

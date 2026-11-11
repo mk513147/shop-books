@@ -46,6 +46,37 @@ export function fakeDb(behaviour: 'up' | 'down'): Database {
 export const BROWSER_HEADERS = { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' };
 
 /**
+ * Runs ONE large seeding statement (e.g. INSERT ... SELECT ... FROM generate_series(1, 20000)) on a
+ * fresh connection of the test pool's database, with sequential scans disabled for that transaction.
+ *
+ * Why: every inserted expense fires row triggers (category link sync and the deferred primary
+ * category check) that look rows up by expense id. PL/pgSQL plans those lookups from the table
+ * statistics. If autovacuum has just analyzed the tables while they held a few dozen rows, the
+ * planner picks sequential scans and keeps using them while the single statement grows the table
+ * to 20,000 rows: quadratic work (measured 96 s to over 120 s instead of 8 s, depending only on
+ * whether autoanalyze happened to run first). A fresh connection has no cached trigger plans; with
+ * seqscans off the lookups use the existing indexes. Every trigger still runs; only the plan changes.
+ */
+export async function bulkSeed(db: pg.Pool, sql: string, params: unknown[]): Promise<void> {
+  // Normally 4-12 s for 20,000 rows; twice measured at 45-49 s on a busy local disk. 100 s keeps 2x
+  // headroom yet still ends the statement before the calling test's own 120 s limit, so it can never
+  // outlive the test and block the next files.
+  const client = new pg.Client({ ...db.options, statement_timeout: 100_000 });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL enable_seqscan = off');
+    await client.query(sql, params);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
  * Connects to the dedicated test database (from .env.test or the environment) if one is reachable.
  * Returns null when it is not configured or not reachable, so integration tests can skip honestly.
  * Throws (never skips) when the URL is not the local designated test database, or when PostgreSQL

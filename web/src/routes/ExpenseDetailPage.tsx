@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ReasonDialog } from '@/components/ui/reason-dialog';
 import { useToast } from '@/components/ui/toast';
 import { AuditHistory } from '@/features/audit/AuditHistory';
-import { ExpenseDocuments } from '@/features/documents/ExpenseDocuments';
+import { ExpenseDocuments, ExpenseDocumentsOnRecord } from '@/features/documents/ExpenseDocuments';
+import { billAttachmentsEnabled } from '@/features/documents/attachments-feature';
 import {
   PAYMENT_MODE_LABELS,
   useExpense,
@@ -235,14 +236,18 @@ export function ExpenseDetailPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Bill photos and documents</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ExpenseDocuments expenseId={e.id} voided={voided} />
-        </CardContent>
-      </Card>
+      {billAttachmentsEnabled() ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Bill photos and documents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ExpenseDocuments expenseId={e.id} voided={voided} />
+          </CardContent>
+        </Card>
+      ) : (
+        <ExpenseDocumentsOnRecord expenseId={e.id} voided={voided} />
+      )}
 
       <Card>
         <CardHeader>

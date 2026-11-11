@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowDownLeft, ArrowUpRight, BookOpenText, HandCoins, History, MapPin, Pencil, Phone, Undo2 } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowDownLeft, ArrowUpRight, BookOpenText, CheckCheck, HandCoins, History, MapPin, Pencil, Phone, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { StatusBadge } from '@/components/finance/StatusBadge';
@@ -13,6 +13,8 @@ import { AuditHistory } from '@/features/audit/AuditHistory';
 import { CustomerBalances } from '@/features/customers/CustomerBalances';
 import { CustomerFormDialog } from '@/features/customers/CustomerFormDialog';
 import { CustomerTxnDialog } from '@/features/customers/CustomerTxnDialog';
+import { dueTitle, entryDetail } from '@/features/customers/due-helpers';
+import { SettleAllDialog } from '@/features/customers/SettleAllDialog';
 import {
   TXN_LABELS,
   useCustomer,
@@ -38,7 +40,7 @@ export function CustomerDetailPage() {
   const update = useUpdateCustomer();
   const toast = useToast();
   const [txn, setTxn] = useState<{ type: CustomerTxnType; dueId?: string } | null>(null);
-  const [dialog, setDialog] = useState<'edit' | 'archive' | 'history' | null>(null);
+  const [dialog, setDialog] = useState<'edit' | 'archive' | 'history' | 'settle' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const history = useCustomerHistory(id, dialog === 'history');
 
@@ -90,6 +92,11 @@ export function CustomerDetailPage() {
         {action('advance', 'Receive advance', ArrowDownLeft, !c.isActive, !c.isActive ? 'Reactivate the customer first' : undefined)}
         {action('advance_refund', 'Refund advance', Undo2, c.advanceBalance === '0.00')}
       </div>
+      {c.dueBalance !== '0.00' && (
+        <Button className="w-full" variant="soft" onClick={() => setDialog('settle')}>
+          <CheckCheck aria-hidden="true" /> Pay full outstanding amount ({formatInr(c.dueBalance)})
+        </Button>
+      )}
       {!c.isActive && (
         <p className="text-xs text-muted-foreground">Archived: new dues and advances are disabled; existing dues can still be paid and advances refunded.</p>
       )}
@@ -108,7 +115,7 @@ export function CustomerDetailPage() {
                 <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                   <div className="min-w-0 flex-1 basis-40">
                     <Link to={`/customers/${c.id}/transactions/${d.id}`} className="block truncate text-sm font-medium hover:underline">
-                      {d.description}
+                      {dueTitle(d)}
                     </Link>
                     <p className="text-xs text-muted-foreground">
                       {formatDate(d.txnDate)} · {formatInr(d.amount)}
@@ -146,7 +153,7 @@ export function CustomerDetailPage() {
                       <p className="text-sm font-medium">{TXN_LABELS[e.type]}</p>
                       <p className="truncate text-xs text-muted-foreground">
                         {formatDate(e.txnDate)}
-                        {e.description && ` · ${e.description}`}
+                        {entryDetail(e) && ` · ${entryDetail(e)}`}
                       </p>
                     </div>
                     <span className="flex shrink-0 items-center gap-2">
@@ -196,6 +203,7 @@ export function CustomerDetailPage() {
       </Card>
 
       <CustomerTxnDialog customer={c} type={txn?.type ?? null} presetDueId={txn?.dueId} onClose={() => setTxn(null)} onSaved={setNotice} />
+      <SettleAllDialog customer={c} open={dialog === 'settle'} onClose={() => setDialog(null)} onSaved={setNotice} />
       <CustomerFormDialog open={dialog === 'edit'} customer={c} onClose={() => setDialog(null)} onSaved={() => setNotice('Customer details saved.')} />
       <Dialog
         open={dialog === 'archive'}

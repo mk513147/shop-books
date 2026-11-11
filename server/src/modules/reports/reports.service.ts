@@ -553,6 +553,15 @@ export interface CustomerActivity {
 }
 
 /** Active customer ledger entries in the period, by type (never netted). */
+/**
+ * What a customer ledger entry is "for" in transaction lists: its description, else (dues recorded
+ * since migration 0014) its category name, else (a due payment made with "Pay full outstanding")
+ * a fixed label. Correlated on `t` = customer_transactions.
+ */
+export const CUSTOMER_TXN_DESCRIPTION_SQL = `COALESCE(t.description,
+  (SELECT ec.name FROM expense_categories ec WHERE ec.id = t.category_id),
+  CASE WHEN t.settlement_id IS NOT NULL THEN 'Full outstanding payment' END)`;
+
 export async function customerActivityInPeriod(db: Queryable, from: string, to: string): Promise<CustomerActivity> {
   const row = (
     await db.query<Record<string, string | number>>(
@@ -755,13 +764,13 @@ function transactionsSql(q: TransactionQuery, bind: Bind): string {
     parts.push(`SELECT CASE t.txn_type ${Object.entries(CUSTOMER_TYPE_SQL)
       .map(([raw, t]) => `WHEN '${raw}' THEN '${t}'`)
       .join(' ')} END AS type, t.id, t.txn_date AS date, t.created_at, t.reference, c.name AS entity, c.id AS entity_id,
-                       t.description, t.amount, CASE WHEN t.reversed_at IS NULL THEN 'active' ELSE 'reversed' END AS status,
+                       ${CUSTOMER_TXN_DESCRIPTION_SQL} AS description, t.amount, CASE WHEN t.reversed_at IS NULL THEN 'active' ELSE 'reversed' END AS status,
                        u.name AS recorded_by
                   FROM customer_transactions t JOIN customers c ON c.id = t.customer_id JOIN users u ON u.id = t.created_by
                   ${and([
                     `t.txn_type = ANY(${bind(customerTypes)}::text[])`,
                     ...date('t.txn_date'),
-                    ...search(['t.description', 't.reference', 'c.name']),
+                    ...search([CUSTOMER_TXN_DESCRIPTION_SQL, 't.notes', 't.reference', 'c.name']),
                   ])}`);
   }
   const statusFilter = q.status === 'active' ? `WHERE x.status = 'active'` : q.status === 'cancelled' ? `WHERE x.status <> 'active'` : '';
@@ -846,7 +855,7 @@ export async function recentActivity(db: Queryable, limit = 12): Promise<Transac
        UNION ALL
        (SELECT CASE t.txn_type WHEN 'due' THEN 'customer_due' WHEN 'due_payment' THEN 'customer_due_payment'
                                WHEN 'advance' THEN 'customer_advance' ELSE 'customer_refund' END,
-               t.id, t.txn_date, t.created_at, t.reference, c.name, c.id, t.description, t.amount,
+               t.id, t.txn_date, t.created_at, t.reference, c.name, c.id, ${CUSTOMER_TXN_DESCRIPTION_SQL}, t.amount,
                CASE WHEN t.reversed_at IS NULL THEN 'active' ELSE 'reversed' END, u.name
           FROM customer_transactions t JOIN customers c ON c.id = t.customer_id JOIN users u ON u.id = t.created_by
          ORDER BY t.created_at DESC LIMIT ${l})

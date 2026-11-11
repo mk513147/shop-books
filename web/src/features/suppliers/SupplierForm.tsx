@@ -41,11 +41,13 @@ interface SupplierFormDialogProps {
   supplier?: Supplier;
   /** Prefill for a new supplier (e.g. the text typed into the supplier search). */
   initialName?: string;
+  /** Prefill for a new supplier's brands (e.g. the brand chosen first on the expense form). */
+  initialBrandIds?: string[];
   onClose: () => void;
   onSaved: (supplier: Supplier) => void;
 }
 
-export function SupplierFormDialog({ open, supplier, initialName = '', onClose, onSaved }: SupplierFormDialogProps) {
+export function SupplierFormDialog({ open, supplier, initialName = '', initialBrandIds, onClose, onSaved }: SupplierFormDialogProps) {
   const formId = useId();
   // Lifted from the form so the footer's submit button can show progress and block double taps.
   const [saving, setSaving] = useState(false);
@@ -69,7 +71,16 @@ export function SupplierFormDialog({ open, supplier, initialName = '', onClose, 
       }
     >
       {/* Mounted per opening: starts from the data shown when it was opened. */}
-      {open && <SupplierForm formId={formId} supplier={supplier} initialName={initialName} onSaved={onSaved} onSavingChange={setSaving} />}
+      {open && (
+        <SupplierForm
+          formId={formId}
+          supplier={supplier}
+          initialName={initialName}
+          initialBrandIds={initialBrandIds ?? []}
+          onSaved={onSaved}
+          onSavingChange={setSaving}
+        />
+      )}
     </Dialog>
   );
 }
@@ -78,12 +89,14 @@ function SupplierForm({
   formId,
   supplier,
   initialName,
+  initialBrandIds,
   onSaved,
   onSavingChange,
 }: {
   formId: string;
   supplier: Supplier | undefined;
   initialName: string;
+  initialBrandIds: string[];
   onSaved: (supplier: Supplier) => void;
   onSavingChange: (saving: boolean) => void;
 }) {
@@ -96,7 +109,7 @@ function SupplierForm({
   const inFlight = useRef(false);
   const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
   const [categoryIds, setCategoryIds] = useState<string[]>(base?.categories.map((c) => c.id) ?? []);
-  const [brandIds, setBrandIds] = useState<string[]>(base?.brands.map((b) => b.id) ?? []);
+  const [brandIds, setBrandIds] = useState<string[]>(base?.brands.map((b) => b.id) ?? initialBrandIds);
   const categories = useCategories('active');
   const brands = useBrands('active');
   const categoryCreator = useCategoryCreator();

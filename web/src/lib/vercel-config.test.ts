@@ -20,11 +20,12 @@ describe('Vercel API proxy (web/vercel.json)', () => {
     expect(vercelApiProxyProblem({ rewrites: [api('/api/:path*'), spa] })).toMatch(/absolute https/);
   });
 
-  it('the committed vercel.json has the proxy first; only the backend host is left to fill in', () => {
+  it('the committed vercel.json proxies /api first to the Render backend, then falls back to the SPA', () => {
     const config = JSON.parse(readFileSync(path.join(import.meta.dirname, '../../vercel.json'), 'utf8')) as {
       rewrites: { source: string; destination: string }[];
     };
     expect(config.rewrites.map((r) => r.source)).toEqual(['/api/:path*', '/(.*)']);
-    expect(vercelApiProxyProblem(config)).toMatch(/replace the placeholder backend host/);
+    expect(config.rewrites[0]!.destination).toBe('https://shop-books-api.onrender.com/api/:path*');
+    expect(vercelApiProxyProblem(config)).toBeNull();
   });
 });

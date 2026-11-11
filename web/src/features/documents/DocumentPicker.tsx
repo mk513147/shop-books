@@ -23,7 +23,16 @@ let counter = 0;
  * saved; failed files stay in the list (with their error) so they can be retried without losing
  * anything the user entered.
  */
-export function usePendingFiles() {
+export function usePendingFiles(
+  options: {
+    /** Files accepted by `add` (e.g. to keep a draft copy on the device). */
+    onAdded?: (files: PendingFile[]) => void;
+    /** A file removed by the user. */
+    onRemoved?: (key: string) => void;
+  } = {},
+) {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [rejected, setRejected] = useState<string[]>([]);
   const filesRef = useRef(files);
@@ -36,7 +45,7 @@ export function usePendingFiles() {
     [],
   );
 
-  const add = useCallback((list: File[], maxCount: number) => {
+  const add = useCallback((list: File[], maxCount: number): PendingFile[] => {
     const problems: string[] = [];
     const accepted: PendingFile[] = [];
     const current = filesRef.current;
@@ -64,7 +73,11 @@ export function usePendingFiles() {
       });
     }
     setRejected(problems);
-    if (accepted.length) setFiles((prev) => [...prev, ...accepted]);
+    if (accepted.length) {
+      setFiles((prev) => [...prev, ...accepted]);
+      optionsRef.current.onAdded?.(accepted);
+    }
+    return accepted;
   }, []);
 
   const remove = useCallback((key: string) => {
@@ -73,6 +86,7 @@ export function usePendingFiles() {
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
       return prev.filter((f) => f.key !== key);
     });
+    optionsRef.current.onRemoved?.(key);
   }, []);
 
   const patch = (key: string, change: Partial<PendingFile>) =>
@@ -94,6 +108,12 @@ export function usePendingFiles() {
     return failed;
   }, []);
 
+  /** Marks files as handled elsewhere (e.g. saved in the offline queue): they are not sent again. */
+  const markDone = useCallback((keys: string[]) => {
+    if (keys.length === 0) return;
+    setFiles((prev) => prev.map((f) => (keys.includes(f.key) ? { ...f, status: 'done' as const, progress: 1, error: null } : f)));
+  }, []);
+
   const clear = useCallback(() => {
     for (const f of filesRef.current) if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
     setFiles([]);
@@ -106,6 +126,7 @@ export function usePendingFiles() {
     add,
     remove,
     uploadAll,
+    markDone,
     clear,
     uploading: files.some((f) => f.status === 'uploading'),
     pendingCount: files.filter((f) => f.status !== 'done').length,
@@ -124,6 +145,38 @@ function Thumb({ name, previewUrl }: { name: string; previewUrl: string | null }
   );
 }
 
+/** "Choose files" (multiple) everywhere, plus "Take photo" (rear camera) on phones. */
+export function FileChooserButtons({
+  onFiles,
+  disabled,
+  hintId,
+}: {
+  onFiles: (files: File[]) => void;
+  disabled: boolean;
+  hintId?: string;
+}) {
+  const chooseRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const onPick = (input: HTMLInputElement | null) => {
+    if (!input?.files) return;
+    const files = Array.from(input.files);
+    input.value = ''; // allow choosing the same file again after removing it
+    onFiles(files);
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button variant="outline" size="sm" disabled={disabled} onClick={() => chooseRef.current?.click()} aria-describedby={hintId}>
+        <Paperclip aria-hidden="true" /> Choose files
+      </Button>
+      <Button variant="outline" size="sm" className="md:hidden" disabled={disabled} onClick={() => cameraRef.current?.click()}>
+        <Camera aria-hidden="true" /> Take photo
+      </Button>
+      <input ref={chooseRef} type="file" multiple accept={DOCUMENT_ACCEPT} className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => onPick(e.currentTarget)} />
+      <input ref={cameraRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => onPick(e.currentTarget)} />
+    </div>
+  );
+}
+
 /**
  * Choose bill photos/PDFs: "Choose files" (multiple) everywhere, plus "Take photo" (rear camera)
  * on phones. Shows a small preview, name, type, size and per-file upload state.
@@ -139,16 +192,8 @@ export function DocumentPicker({
   disabled?: boolean;
 }) {
   const id = useId();
-  const chooseRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
   const full = pending.files.length >= maxCount;
   const locked = disabled || pending.uploading;
-
-  const onPick = (input: HTMLInputElement | null) => {
-    if (!input?.files) return;
-    pending.add(Array.from(input.files), maxCount);
-    input.value = ''; // allow choosing the same file again after removing it
-  };
 
   return (
     <div className="space-y-3">
@@ -156,16 +201,7 @@ export function DocumentPicker({
         Optional. Photos (JPEG, PNG, WebP) or PDF, up to 10 MB each
         {maxCount < 10 ? ` (${Math.max(0, maxCount)} more allowed)` : ', at most 10 per expense'}.
       </p>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={locked || full} onClick={() => chooseRef.current?.click()} aria-describedby={`${id}-hint`}>
-          <Paperclip aria-hidden="true" /> Choose files
-        </Button>
-        <Button variant="outline" size="sm" className="md:hidden" disabled={locked || full} onClick={() => cameraRef.current?.click()}>
-          <Camera aria-hidden="true" /> Take photo
-        </Button>
-        <input ref={chooseRef} type="file" multiple accept={DOCUMENT_ACCEPT} className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => onPick(e.currentTarget)} />
-        <input ref={cameraRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => onPick(e.currentTarget)} />
-      </div>
+      <FileChooserButtons onFiles={(files) => pending.add(files, maxCount)} disabled={locked || full} hintId={`${id}-hint`} />
 
       {pending.rejected.length > 0 && (
         <ul role="alert" className="space-y-1 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">

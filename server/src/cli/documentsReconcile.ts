@@ -34,6 +34,10 @@ async function main(): Promise<void> {
   if (deleteOrphans && config.nodeEnv === 'production' && !args.includes('--yes')) {
     throw new UserFacingError('Deleting files in production requires --yes.');
   }
+  if (config.documentStorage.driver === 'disabled') {
+    // Attachments are postponed: there is no storage to compare the metadata with (and nothing to delete).
+    throw new UserFacingError('Document storage is disabled (DOCUMENT_STORAGE_DRIVER=disabled): bill attachments are postponed, nothing to reconcile.');
+  }
   const pool = createPool(config);
   const storage = createDocumentStorage(config.documentStorage);
   try {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Database } from '../../database/connection.js';
 import { getActor } from '../../middleware/auth.js';
 import { NotFoundError } from '../../utils/errors.js';
-import { createBrand, getBrandHistory, listBrands, updateBrand } from './brands.service.js';
+import { createBrand, getBrandHistory, listBrands, listBrandSuppliers, updateBrand } from './brands.service.js';
 
 /** Trimmed, runs of whitespace collapsed (the database requires this form, see brands_name_valid). */
 const nameSchema = z
@@ -40,6 +40,11 @@ export function createBrandsRouter({ db }: { db: Database }): Router {
   router.patch('/:id', async (req, res) => {
     const body = updateSchema.parse(req.body);
     res.json({ brand: await updateBrand(db, parseId(req.params.id), body, getActor(res)) });
+  });
+
+  // Brand-first expense entry: the brand's active suppliers (with their active default categories).
+  router.get('/:id/suppliers', async (req, res) => {
+    res.json(await listBrandSuppliers(db, parseId(req.params.id)));
   });
 
   router.get('/:id/history', async (req, res) => {

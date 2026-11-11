@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type { Database, Queryable } from '../../database/connection.js';
 import type { Actor } from '../../middleware/auth.js';
@@ -8,7 +9,7 @@ import { listAuditHistory, recordFinancialAudit, type AuditHistoryEntry, type Au
 import { withSessionTransaction } from '../auth/sessionTransaction.js';
 import type { PaymentMode } from '../expenses/expenses.schemas.js';
 import { hashRequest, runIdempotent, type IdempotentResult } from '../idempotency/idempotency.js';
-import type { CustomerLedgerQuery, CustomerTxnInput, CustomerTxnType } from './customers.schemas.js';
+import type { CustomerLedgerQuery, CustomerTxnInput, CustomerTxnType, SettleAllInput } from './customers.schemas.js';
 import { lockCustomer, selectCustomer } from './customers.service.js';
 
 interface PersonRef {
@@ -30,8 +31,12 @@ export interface CustomerTransaction {
   txnDate: string;
   amount: string;
   paymentMode: PaymentMode | null;
-  /** due_payment: the due it settles. */
-  due: { id: string; txnDate: string; description: string | null; amount: string } | null;
+  /** due_payment: the due it settles (`categoryName`: that due's category, if it has one). */
+  due: { id: string; txnDate: string; description: string | null; categoryName: string | null; amount: string } | null;
+  /** due only: what it is for (expense category). Null for dues recorded before migration 0014. */
+  category: { id: string; name: string; isActive: boolean } | null;
+  /** due_payment only: set on the payments created together by one "Pay full outstanding". */
+  settlementId: string | null;
   description: string | null;
   reference: string | null;
   notes: string | null;
@@ -58,6 +63,12 @@ interface TxnRow {
   due_date: string | null;
   due_description: string | null;
   due_amount: string | null;
+  due_category_id: string | null;
+  due_category_name: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  category_active: boolean | null;
+  settlement_id: string | null;
   description: string | null;
   reference: string | null;
   notes: string | null;
@@ -75,6 +86,8 @@ interface TxnRow {
 const SELECT_TXN = `
   SELECT t.id, t.customer_id, t.txn_type, t.txn_date, t.amount, t.payment_mode, t.due_id,
          d.txn_date AS due_date, d.description AS due_description, d.amount AS due_amount,
+         d.category_id AS due_category_id, dc.name AS due_category_name,
+         t.category_id, tc.name AS category_name, tc.is_active AS category_active, t.settlement_id,
          t.description, t.reference, t.notes, t.version, t.created_at, t.reversed_at, t.reversal_reason,
          CASE WHEN t.txn_type = 'due' THEN
            (SELECT COALESCE(sum(p.amount), 0)::numeric(14,2) FROM customer_transactions p
@@ -82,6 +95,8 @@ const SELECT_TXN = `
          cu.id AS created_by_id, cu.name AS created_by_name, ru.id AS reversed_by_id, ru.name AS reversed_by_name
     FROM customer_transactions t
     LEFT JOIN customer_transactions d ON d.id = t.due_id
+    LEFT JOIN expense_categories tc ON tc.id = t.category_id
+    LEFT JOIN expense_categories dc ON dc.id = d.category_id
     JOIN users cu ON cu.id = t.created_by
     LEFT JOIN users ru ON ru.id = t.reversed_by`;
 
@@ -94,7 +109,11 @@ function toTxn(row: TxnRow): CustomerTransaction {
     txnDate: row.txn_date,
     amount: row.amount,
     paymentMode: row.payment_mode,
-    due: row.due_id ? { id: row.due_id, txnDate: row.due_date!, description: row.due_description, amount: row.due_amount! } : null,
+    due: row.due_id
+      ? { id: row.due_id, txnDate: row.due_date!, description: row.due_description, categoryName: row.due_category_name, amount: row.due_amount! }
+      : null,
+    category: row.category_id ? { id: row.category_id, name: row.category_name ?? '', isActive: row.category_active ?? false } : null,
+    settlementId: row.settlement_id,
     description: row.description,
     reference: row.reference,
     notes: row.notes,
@@ -122,6 +141,9 @@ function snapshot(row: TxnRow): AuditSnapshot {
     amount: row.amount,
     paymentMode: row.payment_mode,
     dueId: row.due_id,
+    categoryId: row.category_id,
+    categoryName: row.category_name,
+    settlementId: row.settlement_id,
     description: row.description,
     reference: row.reference,
     notes: row.notes,
@@ -164,6 +186,19 @@ function validateDate(txnDate: string): void {
   if (txnDate < '2000-01-01') throw new ValidationError([{ path: 'txnDate', message: 'The date is too far in the past' }]);
 }
 
+/**
+ * A new due must name an ACTIVE expense category (the same master list as expenses; there is no
+ * separate customer category list). Share-locked so it cannot be archived mid-transaction.
+ */
+async function assertDueCategoryUsable(client: Queryable, categoryId: string | null): Promise<void> {
+  if (!categoryId) throw new ValidationError([{ path: 'categoryId', message: 'Choose a category' }]);
+  const row = (
+    await client.query<{ is_active: boolean }>(`SELECT is_active FROM expense_categories WHERE id = $1 FOR SHARE`, [categoryId])
+  ).rows[0];
+  if (!row) throw new ValidationError([{ path: 'categoryId', message: 'Category not found' }]);
+  if (!row.is_active) throw new ValidationError([{ path: 'categoryId', message: 'This category is archived; choose an active one' }]);
+}
+
 const ARCHIVED = () =>
   new AppError(409, 'CUSTOMER_ARCHIVED', 'This customer is archived. Reactivate them to record new dues or advances.');
 
@@ -176,6 +211,8 @@ async function insertTxn(client: pg.PoolClient, customerId: string, input: Custo
   const customer = await lockCustomer(client, customerId);
   // Settling old dues and refunding advances stays possible for archived customers.
   if (!customer.is_active && (input.type === 'due' || input.type === 'advance')) throw ARCHIVED();
+
+  if (input.type === 'due') await assertDueCategoryUsable(client, input.categoryId);
 
   if (input.type === 'due_payment') {
     const due = (
@@ -216,8 +253,8 @@ async function insertTxn(client: pg.PoolClient, customerId: string, input: Custo
 
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO customer_transactions
-       (customer_id, txn_type, txn_date, amount, payment_mode, due_id, description, reference, notes, created_by, updated_by)
-     VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8, $9, $10, $10) RETURNING id`,
+       (customer_id, txn_type, txn_date, amount, payment_mode, due_id, description, reference, notes, created_by, updated_by, category_id)
+     VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8, $9, $10, $10, $11) RETURNING id`,
     [
       customerId,
       input.type,
@@ -229,6 +266,7 @@ async function insertTxn(client: pg.PoolClient, customerId: string, input: Custo
       input.reference,
       input.notes,
       actor.userId,
+      input.type === 'due' ? input.categoryId : null,
     ],
   );
   const row = await selectTxn(client, customerId, inserted.rows[0]!.id);
@@ -335,6 +373,125 @@ export async function getCustomerTransactionHistory(db: Queryable, customerId: s
   return listAuditHistory(db, 'customer_transaction', id);
 }
 
+export interface FifoDue {
+  id: string;
+  /** Still owed on this due, in paise. */
+  remaining: bigint;
+}
+
+/**
+ * Splits `amount` (paise) over `dues` in the order given (callers pass them OLDEST FIRST): each due
+ * is paid in full before the next one gets anything, and the last one reached may be paid in part.
+ * Dues with nothing left are skipped. Throws when the amount is not positive or exceeds the total
+ * still owed (a payment is never allocated beyond what is due).
+ */
+export function allocateFifo(dues: FifoDue[], amount: bigint): { dueId: string; amount: bigint }[] {
+  if (amount <= 0n) throw new RangeError('The amount must be greater than zero');
+  const total = dues.reduce((sum, d) => sum + (d.remaining > 0n ? d.remaining : 0n), 0n);
+  if (amount > total) throw new RangeError('The amount is more than the total outstanding');
+  const allocations: { dueId: string; amount: bigint }[] = [];
+  let left = amount;
+  for (const due of dues) {
+    if (left === 0n) break;
+    if (due.remaining <= 0n) continue;
+    const part = due.remaining < left ? due.remaining : left;
+    allocations.push({ dueId: due.id, amount: part });
+    left -= part;
+  }
+  return allocations;
+}
+
+export interface Settlement {
+  id: string;
+  customerId: string;
+  amount: string;
+  txnDate: string;
+  paymentMode: PaymentMode;
+  /** One per due paid, oldest due first. */
+  allocations: { dueId: string; transactionId: string; amount: string; dueRemainingAfter: string }[];
+}
+
+/**
+ * "Pay full outstanding amount": records ONE payment of the customer's whole outstanding due, as one
+ * due_payment per open due (oldest first, FIFO) sharing a settlement id, in ONE transaction: either
+ * every due is settled or nothing is recorded.
+ *
+ * Concurrency: the customer row is locked first (like every ledger write), so concurrent payments,
+ * dues and reversals for the same customer are serialised. `amount` must equal the outstanding total
+ * at that moment; if anything changed since the user confirmed it, 409 OUTSTANDING_CHANGED and
+ * nothing is recorded. The Idempotency-Key makes retries and double taps return the first result.
+ */
+export async function settleAllDues(
+  db: Database,
+  customerId: string,
+  rawInput: SettleAllInput,
+  actor: Actor,
+  idempotencyKey: string,
+): Promise<IdempotentResult<{ settlement: Settlement; transactions: CustomerTransaction[] }>> {
+  const input = { ...rawInput, amount: normaliseMoney(rawInput.amount) };
+  if (toPaise(input.amount) <= 0n) throw new ValidationError([{ path: 'amount', message: 'The amount must be greater than zero' }]);
+  validateDate(input.txnDate);
+  return runIdempotent(db, actor, 'customer_due.settle_all', idempotencyKey, hashRequest({ customerId, ...input }), async (client) => {
+    await lockCustomer(client, customerId);
+    const open = (
+      await client.query<{ id: string; amount: string; paid: string }>(
+        `SELECT t.id, t.amount,
+                (SELECT COALESCE(sum(p.amount), 0)::numeric(14,2) FROM customer_transactions p
+                  WHERE p.due_id = t.id AND p.reversed_at IS NULL) AS paid
+           FROM customer_transactions t
+          WHERE t.customer_id = $1 AND t.txn_type = 'due' AND t.reversed_at IS NULL
+          ORDER BY t.txn_date, t.created_at, t.id
+            FOR UPDATE OF t`,
+        [customerId],
+      )
+    ).rows;
+    const dues: FifoDue[] = open.map((d) => ({ id: d.id, remaining: toPaise(d.amount) - toPaise(d.paid) }));
+    const outstanding = dues.reduce((sum, d) => sum + (d.remaining > 0n ? d.remaining : 0n), 0n);
+    if (outstanding === 0n) throw new AppError(409, 'NOTHING_DUE', 'This customer has no outstanding dues.');
+    const amount = toPaise(input.amount);
+    if (amount !== outstanding) {
+      throw new AppError(
+        409,
+        'OUTSTANDING_CHANGED',
+        `The outstanding amount is now ${rupees(outstanding)} (you confirmed ${rupees(amount)}). Nothing was recorded; check and confirm again.`,
+      );
+    }
+
+    const settlementId = randomUUID();
+    const transactions: CustomerTransaction[] = [];
+    const lines: Settlement['allocations'] = [];
+    for (const a of allocateFifo(dues, amount)) {
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO customer_transactions
+           (customer_id, txn_type, txn_date, amount, payment_mode, due_id, reference, notes, settlement_id, created_by, updated_by)
+         VALUES ($1, 'due_payment', $2, $3::numeric, $4, $5, $6, $7, $8, $9, $9) RETURNING id`,
+        [customerId, input.txnDate, fromDb(a.amount), input.paymentMode, a.dueId, input.reference, input.notes, settlementId, actor.userId],
+      );
+      const row = await selectTxn(client, customerId, inserted.rows[0]!.id);
+      await recordFinancialAudit(client, {
+        entityType: 'customer_transaction',
+        entityId: row.id,
+        action: 'create',
+        actorUserId: actor.userId,
+        before: null,
+        after: snapshot(row),
+      });
+      transactions.push(toTxn(row));
+      const due = dues.find((d) => d.id === a.dueId)!;
+      lines.push({ dueId: a.dueId, transactionId: row.id, amount: fromDb(a.amount), dueRemainingAfter: fromDb(due.remaining - a.amount) });
+    }
+    const settlement: Settlement = {
+      id: settlementId,
+      customerId,
+      amount: fromDb(amount),
+      txnDate: input.txnDate,
+      paymentMode: input.paymentMode,
+      allocations: lines,
+    };
+    return { status: 201, body: { settlement, transactions }, resourceId: settlementId };
+  });
+}
+
 /** Active dues with something still owed, oldest first (for "receive payment"). */
 export async function listOpenDues(db: Queryable, customerId: string): Promise<CustomerTransaction[]> {
   await selectCustomer(db, customerId);
@@ -378,6 +535,11 @@ export async function getCustomerLedger(db: Queryable, customerId: string, query
   if (query.from) where.push(`x.txn_date >= ${bind(query.from)}::date`);
   if (query.to) where.push(`x.txn_date <= ${bind(query.to)}::date`);
   if (query.type) where.push(`x.txn_type = ${bind(query.type)}`);
+  if (query.categoryId) {
+    // Dues of this category and the payments made against them.
+    const c = bind(query.categoryId);
+    where.push(`(x.category_id = ${c}::uuid OR x.due_category_id = ${c}::uuid)`);
+  }
   if (query.status === 'active') where.push('x.reversed_at IS NULL');
   if (query.status === 'reversed') where.push('x.reversed_at IS NOT NULL');
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';

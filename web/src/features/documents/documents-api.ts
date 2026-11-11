@@ -43,3 +43,33 @@ export function useRemoveDocument() {
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ['expenses'] }),
   });
 }
+
+/** Is the shop PC (permanent document storage) reachable through the API right now? */
+export function fetchDocumentStorageStatus(): Promise<{ available: boolean; driver: string }> {
+  return apiRequest<{ available: boolean; driver: string }>('/document-storage/status');
+}
+
+/**
+ * Upload of one file from the offline attachment queue: "permanent" mode (stored and verified on
+ * the PC, never parked on the server), the attachment id as document id (idempotent retries) and
+ * the checksum computed on this device (the server refuses bytes that do not match).
+ */
+export function uploadQueuedAttachment(
+  item: { id: string; expenseId: string; fileName: string; mimeType: string; sha256: string; blob: Blob },
+  onProgress?: (fraction: number) => void,
+): Promise<{ document: ExpenseDocument; created: boolean; stored: 'permanent' | 'queued' }> {
+  return uploadBinary(`/expenses/${item.expenseId}/documents`, item.blob, {
+    headers: {
+      'X-File-Name': encodeURIComponent(item.fileName),
+      ...(item.mimeType ? { 'X-File-Type': item.mimeType } : {}),
+      'X-Storage-Mode': 'permanent',
+      'X-Attachment-Id': item.id,
+      'X-Content-SHA256': item.sha256,
+    },
+    ...(onProgress ? { onProgress } : {}),
+  });
+}
+
+export function fetchExpenseDocument(expenseId: string, documentId: string): Promise<ExpenseDocument> {
+  return apiRequest<{ document: ExpenseDocument }>(`/expenses/${expenseId}/documents/${documentId}`).then((r) => r.document);
+}

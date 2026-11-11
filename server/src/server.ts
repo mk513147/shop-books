@@ -43,6 +43,7 @@ function main(): void {
   const documentQueue = new DocumentQueueWorker({ db: pool, storage, logger, intervalMs: 60_000 });
   const app = createApp({ config, db: pool, logger, emailSender, storage, onReportQueued: () => scheduler.nudge() });
   if (storage.driver === 'agent') documentQueue.start();
+  if (storage.driver === 'disabled') logger.info('Bill attachments are postponed: document storage is disabled (uploads are refused)');
   if (config.reportScheduler.enabled) scheduler.start();
   logger.info({ emailProvider: emailSender.provider, scheduler: config.reportScheduler.enabled }, 'Monthly report scheduler configured');
 

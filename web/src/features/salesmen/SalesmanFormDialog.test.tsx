@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '@/test/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '@/components/ui/toast';
 import type { Salesman } from '@/types/api';
@@ -32,7 +32,7 @@ function renderDialog(fetchImpl: (input: RequestInfo | URL, init?: RequestInit) 
     </QueryClientProvider>,
   );
   const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
-  return { onSaved, onClose, posts, user: userEvent.setup() };
+  return { onSaved, onClose, posts, user: setupUser() };
 }
 
 describe('SalesmanFormDialog', () => {

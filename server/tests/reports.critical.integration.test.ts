@@ -146,7 +146,7 @@ describe.skipIf(!pool)('reports reconcile with the ledgers (critical paths)', ()
     // Customers: C1 due 5000 (paid 1000), advance 2000 (refund 500); C2 advance 100.
     const c1 = (await post(manager, '/customers', { name: 'Cust One' })).customer.id;
     const c2 = (await post(manager, '/customers', { name: 'Cust Two' })).customer.id;
-    const due = (await post(manager, `/customers/${c1}/dues`, { amount: '5000', txnDate: today, description: 'Credit' })).transaction;
+    const due = (await post(manager, `/customers/${c1}/dues`, { amount: '5000', txnDate: today, categoryId: cat1, notes: 'Credit' })).transaction;
     await post(manager, `/customers/${c1}/due-payments`, { amount: '1000', txnDate: today, paymentMode: 'cash', dueId: due.id });
     await post(manager, `/customers/${c1}/advances`, { amount: '2000', txnDate: today, paymentMode: 'cash' });
     await post(manager, `/customers/${c1}/refunds`, { amount: '500', txnDate: today, paymentMode: 'cash' });

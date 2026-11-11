@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, X } from 'lucide-react';
+import { Plus, Tag, Truck, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
@@ -12,19 +12,31 @@ import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select';
+import { SearchSelect, type SearchSelectOption } from '@/components/ui/search-select';
 import { Select } from '@/components/ui/select';
 import { useToast } from '@/components/ui/toast';
 import { useBrands } from '@/features/brands/brands-api';
 import { useBrandCreator, useCategoryCreator } from '@/features/classification/useOptionCreators';
 import { DocumentPicker, usePendingFiles } from '@/features/documents/DocumentPicker';
 import { MAX_DOCUMENTS_PER_EXPENSE } from '@/features/documents/limits';
+import { requestPersistentStorage, useAttachmentQueue } from '@/features/documents/queue/AttachmentQueueProvider';
+import { useAttachmentDrafts } from '@/features/documents/queue/drafts';
+import { billAttachmentsEnabled } from '@/features/documents/attachments-feature';
 import { SupplierFormDialog } from '@/features/suppliers/SupplierForm';
 import { SupplierPicker } from '@/features/suppliers/SupplierPicker';
 import { ApiError, apiRequest } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import type { Category, Expense, ExpenseInput, PaymentMode, Supplier, SupplierRef } from '@/types/api';
+import type { Category, ClassRef, Expense, ExpenseInput, PaymentMode, Supplier, SupplierRef } from '@/types/api';
+import {
+  categoriesModified,
+  defaultCategoryIds,
+  planSupplierForBrand,
+  sameSet,
+  type BrandSupplierOption,
+  type SupplierPlan,
+} from './brand-first';
 import { PAYMENT_MODE_LABELS, PAYMENT_MODES } from './expenses-api';
 import { isPaymentSplitValid, paymentStatusOf, splitPayments, type PaymentStatus } from './payment-split';
 
@@ -39,10 +51,13 @@ const schema = z
   .object({
     amount: money('total amount').refine((v) => !MONEY_INPUT.test(v) || toPaise(v) > 0n, 'Must be more than zero'),
     payments: z.array(z.object({ amount: z.string(), paymentMode: z.string() })).min(1).max(MAX_PAYMENT_ROWS),
+    // Brand-first entry: the PRIMARY brand ('' = none); it decides which suppliers are offered.
+    brandId: z.string(),
     supplierId: z.string(),
     // Ordered; the first is the primary category. Labels only: the amount is never split.
     categoryIds: z.array(z.string()).min(1, 'Choose at least one category').max(20, 'At most 20 categories'),
-    brandIds: z.array(z.string()).max(50, 'At most 50 brands'),
+    // Any further brands of the expense (rare; kept for expenses that already have several).
+    extraBrandIds: z.array(z.string()).max(49, 'At most 50 brands'),
     // Optional: the category is shown instead when it is left empty.
     description: z.string().trim().max(500, 'At most 500 characters'),
     expenseDate: z
@@ -68,22 +83,25 @@ export function toFormValues(expense?: Expense): FormValues {
     return {
       amount: '',
       payments: [blankRow()],
+      brandId: '',
       supplierId: '',
       categoryIds: [],
-      brandIds: [],
+      extraBrandIds: [],
       description: '',
       expenseDate: todayInKolkata(),
       invoiceReference: '',
     };
   }
+  const brands = expense.brands ?? [];
   return {
     amount: expense.amount,
     // An unpaid bill loads as one blank row ("Not paid yet"): editing never marks it paid by itself.
     payments: expense.payments.length > 0 ? expense.payments.map((p) => ({ amount: p.amount, paymentMode: p.paymentMode })) : [blankRow('')],
+    // The brand, supplier and categories saved on THIS expense (never the current defaults).
+    brandId: brands[0]?.id ?? '',
     supplierId: expense.supplier?.id ?? '',
-    // The selections saved on THIS expense (never the supplier's current defaults).
     categoryIds: (expense.categories?.length ? expense.categories : [expense.category]).map((c) => c.id),
-    brandIds: (expense.brands ?? []).map((b) => b.id),
+    extraBrandIds: brands.slice(1).map((b) => b.id),
     description: expense.description ?? '',
     expenseDate: expense.expenseDate,
     invoiceReference: expense.invoiceReference ?? '',
@@ -95,7 +113,8 @@ function toInput(v: FormValues): ExpenseInput {
     expenseDate: v.expenseDate,
     supplierId: v.supplierId || null,
     categoryIds: v.categoryIds,
-    brandIds: v.brandIds,
+    // The chosen brand is the primary (first) one; without it no other brands are kept.
+    brandIds: v.brandId ? [v.brandId, ...v.extraBrandIds.filter((id) => id !== v.brandId)] : [],
     description: v.description.trim() || null,
     amount: v.amount.trim(),
     // A lone blank row means "not paid yet": it is not sent.
@@ -110,15 +129,10 @@ const paiseToString = (p: bigint) => `${p / 100n}.${(p % 100n).toString().padSta
 
 interface Defaults {
   categoryIds: string[];
-  brandIds: string[];
 }
-const NO_DEFAULTS: Defaults = { categoryIds: [], brandIds: [] };
-/** A supplier's ACTIVE default categories and brands (archived ones are never auto-selected). */
-export const defaultsOf = (s: Supplier): Defaults => ({
-  categoryIds: s.categories.filter((c) => c.isActive).map((c) => c.id),
-  brandIds: (s.brands ?? []).filter((b) => b.isActive).map((b) => b.id),
-});
-const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+const NO_DEFAULTS: Defaults = { categoryIds: [] };
+/** A supplier's ACTIVE default categories (archived ones are never auto-selected). */
+export const defaultsOf = (s: { categories: ClassRef[] }): Defaults => ({ categoryIds: defaultCategoryIds(s) });
 
 const STATUS_OPTIONS: { value: PaymentStatus; label: string }[] = [
   { value: 'full', label: 'Paid in full' },
@@ -140,6 +154,19 @@ function Section({ step, title, children, className }: { step: number; title: st
   );
 }
 
+/** A brand change that needs the user's confirmation before it is applied. */
+interface BrandChange {
+  brand: ClassRef;
+  options: BrandSupplierOption[];
+  plan: SupplierPlan;
+  /** The supplier after the change (null: none / to be chosen). */
+  supplier: SupplierRef | null;
+  /** Default categories of that supplier. */
+  defaults: Defaults;
+  /** The categories were chosen by hand and would be replaced. */
+  categoriesAtRisk: boolean;
+}
+
 interface ExpenseFormProps {
   initial?: Expense;
   /** Active categories, plus the expense's current category if it has since been archived. */
@@ -153,26 +180,62 @@ interface ExpenseFormProps {
    */
   onSubmit: (input: ExpenseInput, baseVersion: number | undefined) => Promise<Expense>;
   /**
-   * Called once the expense is saved AND every selected file is uploaded (or the user chose to
-   * continue without the failed ones). Files are uploaded only after the expense itself was saved.
+   * Called once the expense is saved AND every selected file is either saved on this device for
+   * upload (offline queue) or uploaded, or the user chose to continue without the failed ones.
    */
   onDone: (expense: Expense, notice: string) => void;
 }
 
+const toSupplierRef = (s: { id: string; name: string; isActive: boolean }): SupplierRef => ({ id: s.id, name: s.name, isActive: s.isActive });
+
 export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubmit, onDone }: ExpenseFormProps) {
   const [formError, setFormError] = useState<{ message: string; conflict: boolean } | null>(null);
   const [paymentsServerError, setPaymentsServerError] = useState<string | null>(null);
-  const pending = usePendingFiles();
+  // Files picked before saving are also kept as drafts on this device, so a refresh or a closed
+  // tab does not lose them (offered again when this form is reopened).
+  const drafts = useAttachmentDrafts(initial ? initial.id : 'new');
+  const pending = usePendingFiles({ onAdded: drafts.keep, onRemoved: (key) => drafts.forget([key]) });
+  const [confirmDiscardDrafts, setConfirmDiscardDrafts] = useState(false);
+  const { queue } = useAttachmentQueue();
   const toast = useToast();
   const queryClient = useQueryClient();
-  // Set once the expense is saved but some files failed to upload: the form then offers a retry.
+  // Set once the expense is saved but some files could not be uploaded/kept: the form then offers a retry.
   const [saved, setSaved] = useState<Expense | null>(null);
+  const [queueProblems, setQueueProblems] = useState<string[]>([]);
   const savedNotice = initial ? 'Changes saved.' : 'Expense saved.';
 
+  /** Without the offline queue (no provider): upload now, one by one. */
   async function finishUploads(expense: Expense) {
     const failed = await pending.uploadAll(expense.id);
     if (failed === 0) onDone(expense, pending.files.length > 0 ? `${savedNotice} Documents uploaded.` : savedNotice);
     else setSaved(expense);
+  }
+
+  /** With the offline queue: keep the files on this device; they are sent to the shop PC automatically. */
+  async function queueFiles(expense: Expense) {
+    if (!queue) return finishUploads(expense);
+    const waiting = pending.files.filter((f) => f.status !== 'done');
+    const result = await queue.enqueue(
+      expense.id,
+      waiting.map((f) => f.file),
+      initial?.documentCount ?? 0,
+    );
+    const added = new Set(result.added.map((a) => a.blob));
+    const queuedKeys = waiting.filter((f) => added.has(f.file)).map((f) => f.key);
+    pending.markDone(queuedKeys);
+    // They are in the upload queue now (saved before this point): the draft copies can go.
+    drafts.forget(queuedKeys);
+    if (result.added.length > 0) {
+      requestPersistentStorage();
+      void queue.syncNow({ force: true });
+    }
+    if (result.problems.length === 0) {
+      const n = result.added.length;
+      onDone(expense, `${savedNotice} ${n} bill file${n === 1 ? '' : 's'} saved on this device; sent to the shop PC automatically.`);
+    } else {
+      setQueueProblems(result.problems);
+      setSaved(expense);
+    }
   }
   const inFlight = useRef(false);
   const baseVersion = useRef(initial?.version);
@@ -182,6 +245,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
     register,
     handleSubmit,
     setError,
+    clearErrors,
     setValue,
     setFocus,
     getValues,
@@ -194,7 +258,8 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   const amount = watch('amount').trim();
   const rows = watch('payments');
   const categoryIds = watch('categoryIds');
-  const brandIds = watch('brandIds');
+  const brandId = watch('brandId');
+  const extraBrandIds = watch('extraBrandIds');
   const amountValid = MONEY_INPUT.test(amount);
   const amountPositive = amountValid && toPaise(amount) > 0n;
   const hasSupplier = supplier !== null;
@@ -265,21 +330,29 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
     setValue('payments', [blankRow('')], { shouldValidate: submitCount > 0 });
   }
 
-  // ---- Categories and brands, with supplier defaults ----------------------------------------------
+  // ---- Brand first, then its suppliers, then categories -------------------------------------------
   const brandsQuery = useBrands('active');
   const categoryCreator = useCategoryCreator();
   const brandCreator = useBrandCreator();
-  // The defaults applied automatically for the current supplier (null: none, or editing an expense,
-  // whose saved selections always count as the user's own).
+  const dirty = { shouldDirty: true };
+  // The category defaults applied automatically for the current supplier (null: none, or editing an
+  // expense, whose saved selections always count as the user's own).
   const autoApplied = useRef<Defaults | null>(null);
   const [supplierDefaults, setSupplierDefaults] = useState<Defaults>(NO_DEFAULTS);
   // `defaults: null` = loading the new supplier's defaults FAILED (the dialog then only asks what to do
-  // with the previous supplier's pre-selected items).
+  // with the previous supplier's pre-selected categories).
   const [replaceAsk, setReplaceAsk] = useState<{ next: SupplierRef | null; defaults: Defaults | null } | null>(null);
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   // Set when the chosen supplier's defaults could not be loaded (cleared on success or another supplier).
   const [defaultsError, setDefaultsError] = useState<SupplierRef | null>(null);
   const supplierSeq = useRef(0);
+
+  // Suppliers of the chosen brand (null while no brand is chosen or they could not be loaded).
+  const [brandSuppliers, setBrandSuppliers] = useState<BrandSupplierOption[] | null>(null);
+  const [brandLoad, setBrandLoad] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [brandAsk, setBrandAsk] = useState<BrandChange | null>(null);
+  const [brandNotice, setBrandNotice] = useState<string | null>(null);
+  const brandSeq = useRef(0);
 
   const categoryOptions: MultiSelectOption[] = [...categories];
   for (const c of initial?.categories ?? (initial ? [initial.category] : [])) {
@@ -287,25 +360,40 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   }
   const brandOptions: MultiSelectOption[] = [...(brandsQuery.data ?? [])];
   for (const b of initial?.brands ?? []) if (!brandOptions.some((o) => o.id === b.id)) brandOptions.push(b);
+  const brand: ClassRef | null = brandOptions.find((b) => b.id === brandId) ?? null;
 
-  /** True when replacing the selections would throw away something the user chose. */
-  function selectionsModified(): boolean {
-    const current = { categoryIds: getValues('categoryIds'), brandIds: getValues('brandIds') };
-    if (current.categoryIds.length === 0 && current.brandIds.length === 0) return false;
-    const auto = autoApplied.current;
-    return !(auto && sameSet(current.categoryIds, auto.categoryIds) && sameSet(current.brandIds, auto.brandIds));
-  }
+  const fetchBrandSuppliers = (id: string) =>
+    queryClient.fetchQuery({
+      queryKey: ['brands', 'suppliers', id],
+      queryFn: ({ signal }) => apiRequest<{ suppliers: BrandSupplierOption[] }>(`/brands/${id}/suppliers`, { signal }).then((r) => r.suppliers),
+      staleTime: 10_000,
+    });
+
+  // Editing: load the saved brand's suppliers for the dropdown only. Nothing saved is replaced.
+  useEffect(() => {
+    const saved = initial?.brands?.[0];
+    if (!saved) return;
+    const seq = ++brandSeq.current;
+    setBrandLoad('loading');
+    fetchBrandSuppliers(saved.id)
+      .then((options) => {
+        if (seq !== brandSeq.current) return;
+        setBrandSuppliers(options);
+        setBrandLoad('idle');
+      })
+      .catch(() => seq === brandSeq.current && setBrandLoad('error'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function applySupplier(next: SupplierRef | null, defaults: Defaults, replace: boolean) {
     setSupplier(next);
-    setValue('supplierId', next?.id ?? '', { shouldDirty: true });
+    setValue('supplierId', next?.id ?? '', dirty);
+    clearErrors('supplierId');
     setSupplierDefaults(defaults);
     setDefaultsError(null);
     if (replace) {
-      // Only these two fields change; amount, payments, status, description, date and files never do.
-      const validate = { shouldValidate: submitCount > 0, shouldDirty: true };
-      setValue('categoryIds', defaults.categoryIds, validate);
-      setValue('brandIds', defaults.brandIds, validate);
+      // Only the categories change; amount, payments, status, description, date and files never do.
+      setValue('categoryIds', defaults.categoryIds, { shouldValidate: submitCount > 0, shouldDirty: true });
       autoApplied.current = defaults;
     } else {
       // The user kept their own selections: from now on they are theirs, not the previous supplier's.
@@ -315,20 +403,22 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
 
   /**
    * The new supplier is chosen but its defaults could not be loaded. Nothing is guessed: the
-   * previous supplier's pre-selected items are never kept silently ('remove' drops exactly those;
-   * anything the user added themselves stays) and nothing else on the form changes. 'keep' is the
-   * user's explicit decision to keep their current selections as their own.
+   * previous supplier's pre-selected categories are never kept silently ('remove' drops exactly
+   * those; anything the user added themselves stays) and nothing else on the form changes. 'keep'
+   * is the user's explicit decision to keep their current selections as their own.
    */
   function applyDefaultsFailure(next: SupplierRef, action: 'remove' | 'keep') {
     setSupplier(next);
-    setValue('supplierId', next.id, { shouldDirty: true });
+    setValue('supplierId', next.id, dirty);
+    clearErrors('supplierId');
     setSupplierDefaults(NO_DEFAULTS);
     if (action === 'remove') {
       const previous = autoApplied.current;
       if (previous) {
-        const validate = { shouldValidate: submitCount > 0, shouldDirty: true };
-        setValue('categoryIds', getValues('categoryIds').filter((id) => !previous.categoryIds.includes(id)), validate);
-        setValue('brandIds', getValues('brandIds').filter((id) => !previous.brandIds.includes(id)), validate);
+        setValue('categoryIds', getValues('categoryIds').filter((id) => !previous.categoryIds.includes(id)), {
+          shouldValidate: submitCount > 0,
+          shouldDirty: true,
+        });
       }
     }
     autoApplied.current = null;
@@ -337,8 +427,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
 
   function handleDefaultsFailure(next: SupplierRef) {
     const previous = autoApplied.current;
-    const current = { categoryIds: getValues('categoryIds'), brandIds: getValues('brandIds') };
-    if (previous && !(sameSet(current.categoryIds, previous.categoryIds) && sameSet(current.brandIds, previous.brandIds))) {
+    if (previous && !sameSet(getValues('categoryIds'), previous.categoryIds)) {
       // The previous supplier's defaults were edited by hand: ask what to do with them.
       setReplaceAsk({ next, defaults: null });
       return;
@@ -347,15 +436,19 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
     applyDefaultsFailure(next, 'remove');
   }
 
-  /** `force` re-loads the defaults of the supplier that is already chosen (the "Try again" button). */
-  async function selectSupplier(next: SupplierRef | null, detail?: Supplier, force = false) {
+  /**
+   * Manual supplier choice (or change). Loads that supplier's ACTIVE default categories; asks before
+   * replacing categories chosen by hand. `detail` skips the request when the categories are known
+   * (brand suppliers come with them). `force` re-loads the defaults ("Try again").
+   */
+  async function selectSupplier(next: SupplierRef | null, detail?: { categories: ClassRef[] }, force = false) {
     if (!force && (next?.id ?? null) === (supplier?.id ?? null)) return;
     const seq = ++supplierSeq.current;
     let defaults: Defaults | null = NO_DEFAULTS;
     if (next) {
       try {
         setLoadingDefaults(true);
-        const full: Supplier =
+        const full: { categories: ClassRef[] } =
           detail ??
           (await queryClient.fetchQuery<Supplier>({
             queryKey: ['suppliers', 'detail', next.id],
@@ -375,19 +468,100 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
       return;
     }
     // Ask only when the user's own choices would be replaced by something different.
-    const differs = !sameSet(getValues('categoryIds'), defaults.categoryIds) || !sameSet(getValues('brandIds'), defaults.brandIds);
-    if (selectionsModified() && differs) {
+    const current = getValues('categoryIds');
+    if (categoriesModified(current, autoApplied.current?.categoryIds ?? null) && !sameSet(current, defaults.categoryIds)) {
       setReplaceAsk({ next, defaults });
       return;
     }
     applySupplier(next, defaults, true);
   }
 
+  /** Applies a (confirmed) brand change: brand, its supplier list, the supplier, maybe the categories. */
+  function applyBrand(change: BrandChange, replaceCategories: boolean) {
+    const previous = supplier;
+    setValue('brandId', change.brand.id, dirty);
+    setBrandSuppliers(change.options);
+    setBrandLoad('idle');
+    const supplierChanges = (change.supplier?.id ?? null) !== (previous?.id ?? null);
+    if (supplierChanges) {
+      supplierSeq.current += 1; // cancels a supplier-defaults request still in flight
+      applySupplier(change.supplier, change.defaults, replaceCategories);
+    }
+    const removed = supplierChanges && previous ? `${previous.name} is not linked to ${change.brand.name}, so it was removed. ` : '';
+    const notice =
+      change.plan.kind === 'auto'
+        ? `${change.plan.supplier.name} is the only supplier of ${change.brand.name}, so it was selected. You can change it.`
+        : change.plan.kind === 'choose'
+          ? `${removed}Choose which of ${change.brand.name}'s ${change.options.length} suppliers this bill is from.`
+          : change.plan.kind === 'none'
+            ? `${removed}${change.brand.name} has no linked supplier: continue without one, or add one.`
+            : null;
+    setBrandNotice(notice);
+  }
+
+  /**
+   * Brand first: loads the brand's active suppliers, keeps a compatible supplier, selects the only
+   * one automatically, or asks for a choice. Explains (and asks) before replacing or removing a
+   * chosen supplier or hand-picked categories; amount, payments, date, description and files are
+   * never touched.
+   */
+  async function selectBrand(next: ClassRef | null, force = false) {
+    if (!force && (next?.id ?? '') === brandId) return;
+    const seq = ++brandSeq.current;
+    setBrandNotice(null);
+    clearErrors('supplierId');
+    if (!next) {
+      // No brand: every supplier may be chosen again; the current one stays. Other brands only exist
+      // next to a main brand, so they go too (said so, never silently).
+      const extras = getValues('extraBrandIds').filter((id) => id !== brandId);
+      setValue('brandId', '', dirty);
+      setValue('extraBrandIds', [], dirty);
+      setBrandSuppliers(null);
+      setBrandLoad('idle');
+      if (extras.length > 0) setBrandNotice(`No brand: the other brand${extras.length === 1 ? '' : 's'} of this expense ${extras.length === 1 ? 'was' : 'were'} removed too.`);
+      return;
+    }
+    setBrandLoad('loading');
+    let options: BrandSupplierOption[];
+    try {
+      options = await fetchBrandSuppliers(next.id);
+    } catch {
+      if (seq !== brandSeq.current) return;
+      // The brand is applied, the supplier is left as it is (the server checks the pair on save).
+      setValue('brandId', next.id, dirty);
+      setBrandSuppliers(null);
+      setBrandLoad('error');
+      return;
+    }
+    if (seq !== brandSeq.current) return;
+    const plan = planSupplierForBrand(supplier?.id ?? null, options);
+    const nextSupplier = plan.kind === 'keep' ? supplier : plan.kind === 'auto' ? toSupplierRef(plan.supplier) : null;
+    const defaults: Defaults = plan.kind === 'auto' ? defaultsOf(plan.supplier) : NO_DEFAULTS;
+    const current = getValues('categoryIds');
+    const atRisk = categoriesModified(current, autoApplied.current?.categoryIds ?? null) && !sameSet(current, defaults.categoryIds);
+    const change: BrandChange = { brand: next, options, plan, supplier: nextSupplier, defaults, categoriesAtRisk: atRisk };
+    const supplierChanges = (nextSupplier?.id ?? null) !== (supplier?.id ?? null);
+    // Replacing or removing a chosen supplier, or hand-picked categories, is explained first.
+    if (supplierChanges && (supplier !== null || atRisk)) {
+      setBrandLoad('idle');
+      setBrandAsk(change);
+      return;
+    }
+    applyBrand(change, true);
+  }
+
   const supplierName = supplier?.name ?? 'this supplier';
   const suggestedCategoryIds = new Set(supplierDefaults.categoryIds);
-  const suggestedBrandIds = new Set(supplierDefaults.brandIds);
   const categoryError = errors.categoryIds?.message ?? (errors.categoryIds as { root?: { message?: string } } | undefined)?.root?.message;
-  const brandError = errors.brandIds?.message;
+  const extraBrandOptions = brandOptions.filter((b) => b.id !== brandId);
+  const [showExtraBrands, setShowExtraBrands] = useState((initial?.brands?.length ?? 0) > 1);
+
+  // Supplier choices when a brand is chosen: its suppliers (+ the saved one on an older expense).
+  const supplierOptions: SearchSelectOption[] = (brandSuppliers ?? []).map((s) => ({ id: s.id, name: s.name, detail: s.phone, isActive: s.isActive }));
+  if (supplier && brandSuppliers && !brandSuppliers.some((s) => s.id === supplier.id)) {
+    supplierOptions.unshift({ id: supplier.id, name: supplier.name, detail: `Saved on this expense; not linked to ${brand?.name ?? 'this brand'}`, isActive: supplier.isActive });
+  }
+  const brandHasSuppliers = (brandSuppliers?.length ?? 0) > 0;
 
   return (
     <>
@@ -398,18 +572,27 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           // Synchronous re-entry guard: a fast double tap must not send twice (the server's
           // idempotency key is the second line of defence).
           if (inFlight.current || saved) return;
+          // A newly chosen brand with suppliers needs one of them (the server checks the pair too).
+          // An older expense keeps its saved brand without a supplier if it had none.
+          const brandIsNew = !initial || values.brandId !== (initial.brands?.[0]?.id ?? '');
+          if (values.brandId && brandIsNew && brandHasSuppliers && !values.supplierId) {
+            setError('supplierId', { message: `Choose which of ${brand?.name ?? 'the brand'}'s suppliers this bill is from` });
+            setFocus('supplierId');
+            return;
+          }
           inFlight.current = true;
           setFormError(null);
           setPaymentsServerError(null);
           try {
             const expense = await onSubmit(toInput(values), baseVersion.current);
             if (pending.pendingCount === 0) onDone(expense, savedNotice);
-            else await finishUploads(expense);
+            else await queueFiles(expense);
           } catch (err) {
             // Everything typed stays in the form; only the errors are shown.
             if (err instanceof ApiError && err.details?.length) {
               for (const d of err.details) {
                 if (d.path in values) setError(d.path as keyof FormValues, { message: d.message });
+                else if (d.path === 'brandIds') setError('brandId', { message: d.message });
                 else if (d.path.startsWith('payments')) setPaymentsServerError(d.message);
               }
             }
@@ -445,7 +628,130 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
             </p>
           </Section>
 
-          <Section step={2} title="Payment">
+          <Section step={2} title="Brand and supplier">
+            <Field id="brand" label="Brand" error={errors.brandId?.message} hint="Choose the brand first: its supplier is filled in for you.">
+              <SearchSelect
+                id="brand"
+                noun="brand"
+                icon={Tag}
+                options={brandOptions}
+                value={brand}
+                onChange={(next) => void selectBrand(next ? { id: next.id, name: next.name, isActive: next.isActive ?? true } : null)}
+                placeholder="No brand"
+                noneLabel="No brand"
+                loading={brandsQuery.isPending}
+                emptyText="No brands yet: add them on the Brands page."
+              />
+            </Field>
+
+            <Field
+              id="supplier"
+              label="Supplier"
+              error={errors.supplierId?.message}
+              hint={
+                <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setAddSupplier({ name: '' })}>
+                  {brand ? `+ Add a new supplier for ${brand.name}` : '+ Add a new supplier'}
+                </button>
+              }
+            >
+              {brand ? (
+                <SearchSelect
+                  id="supplier"
+                  noun="supplier"
+                  icon={Truck}
+                  options={supplierOptions}
+                  value={supplier ? { id: supplier.id, name: supplier.name, isActive: supplier.isActive } : null}
+                  onChange={(next) => {
+                    const detail = brandSuppliers?.find((s) => s.id === next?.id);
+                    void selectSupplier(next ? toSupplierRef({ id: next.id, name: next.name, isActive: next.isActive ?? true }) : null, detail);
+                  }}
+                  placeholder={brandLoad === 'loading' ? 'Loading suppliers…' : brandHasSuppliers ? `Choose ${brand.name}'s supplier` : 'No supplier'}
+                  noneLabel={brandHasSuppliers || brandLoad === 'error' ? null : 'No supplier'}
+                  disabled={brandLoad === 'loading'}
+                  loading={brandLoad === 'loading'}
+                  invalid={Boolean(errors.supplierId)}
+                  describedBy={errors.supplierId ? 'supplier-error' : undefined}
+                  emptyText={`${brand.name} has no linked supplier.`}
+                />
+              ) : (
+                <SupplierPicker
+                  id="supplier"
+                  value={supplier}
+                  onChange={(next) => void selectSupplier(next)}
+                  onAddSupplier={(name) => setAddSupplier({ name })}
+                  invalid={Boolean(errors.supplierId)}
+                  describedBy={errors.supplierId ? 'supplier-error' : undefined}
+                />
+              )}
+              {brandLoad === 'error' && brand && (
+                <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="brand-suppliers-error">
+                  <p>Could not load the suppliers of {brand.name}. The supplier was not changed; try again.</p>
+                  <Button size="sm" variant="outline" onClick={() => void selectBrand(brand, true)}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              {brandNotice && (
+                <p role="status" className="text-xs text-muted-foreground" data-testid="brand-notice">
+                  {brandNotice}
+                </p>
+              )}
+              {loadingDefaults && <p className="text-xs text-muted-foreground">Loading the supplier’s usual categories…</p>}
+              {defaultsError && supplier?.id === defaultsError.id && (
+                <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="defaults-error">
+                  <p>
+                    Could not load the usual categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose them below,
+                    or try again. Everything else you entered is unchanged.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={loadingDefaults}
+                    onClick={() => void selectSupplier(supplier, brandSuppliers?.find((s) => s.id === supplier.id), true)}
+                  >
+                    {loadingDefaults ? 'Loading…' : 'Try again'}
+                  </Button>
+                </div>
+              )}
+            </Field>
+          </Section>
+        </div>
+
+        <Section step={3} title="Categories">
+          <MultiSelect
+            label="Categories"
+            noun="category"
+            options={categoryOptions}
+            selected={categoryIds}
+            onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+            suggestedIds={suggestedCategoryIds}
+            suggestedLabel={`Usual for ${supplierName}`}
+            onCreate={categoryCreator.create}
+            creating={categoryCreator.creating}
+            note={categoryCreator.note}
+            firstBadge="Primary"
+            hint={
+              <>
+                Choose one or more. The first is the primary category (used for category totals); the amount is never split or counted twice.
+                {categories.length === 0 && (
+                  <>
+                    {' '}
+                    No categories yet: type a name to add one, or{' '}
+                    <Link to="/categories" className="text-primary underline">
+                      manage categories
+                    </Link>
+                    .
+                  </>
+                )}
+              </>
+            }
+            error={categoryError}
+            testId="expense-categories"
+          />
+        </Section>
+
+        <div className="grid gap-4 md:gap-5 lg:grid-cols-2 lg:items-start">
+          <Section step={4} title="Payment">
             {status !== null && (
               <div className="space-y-1.5">
                 <p id="payment-status-label" className="text-sm font-medium">
@@ -473,7 +779,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                   {status !== 'full' &&
                     (hasSupplier
                       ? `Anything not paid now stays payable to ${supplier?.name}.`
-                      : 'Choose the supplier below: an unpaid or part-paid bill stays payable to them.')}
+                      : 'Choose the supplier above: an unpaid or part-paid bill stays payable to them.')}
                   {status === 'partial' && split.allocated === 0n && ' Enter the amount paid now.'}
                 </p>
               </div>
@@ -594,42 +900,8 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               </p>
             )}
           </Section>
-        </div>
 
-        <Section step={3} title="Expense details">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field
-              id="supplier"
-              label="Supplier"
-              error={errors.supplierId?.message}
-              hint={
-                <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setAddSupplier({ name: '' })}>
-                  + Add a new supplier
-                </button>
-              }
-            >
-              <SupplierPicker
-                id="supplier"
-                value={supplier}
-                onChange={(next) => void selectSupplier(next)}
-                onAddSupplier={(name) => setAddSupplier({ name })}
-                invalid={Boolean(errors.supplierId)}
-                describedBy={errors.supplierId ? 'supplier-error' : undefined}
-              />
-              {loadingDefaults && <p className="text-xs text-muted-foreground">Loading the supplier’s usual brands and categories…</p>}
-              {defaultsError && supplier?.id === defaultsError.id && (
-                <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="defaults-error">
-                  <p>
-                    Could not load the usual brands and categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose
-                    them below, or try again. Everything else you entered is unchanged.
-                  </p>
-                  <Button size="sm" variant="outline" loading={loadingDefaults} onClick={() => void selectSupplier(supplier, undefined, true)}>
-                    {loadingDefaults ? 'Loading…' : 'Try again'}
-                  </Button>
-                </div>
-              )}
-            </Field>
-
+          <Section step={5} title="Other details">
             <Field id="description" label="Description (optional)" error={errors.description?.message}>
               <Input
                 id="description"
@@ -640,57 +912,6 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               />
             </Field>
 
-            <div className="md:col-span-2">
-              <MultiSelect
-                label="Categories"
-                noun="category"
-                options={categoryOptions}
-                selected={categoryIds}
-                onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
-                suggestedIds={suggestedCategoryIds}
-                suggestedLabel={`Usual for ${supplierName}`}
-                onCreate={categoryCreator.create}
-                creating={categoryCreator.creating}
-                note={categoryCreator.note}
-                firstBadge="Primary"
-                hint={
-                  <>
-                    Choose one or more. The first is the primary category (used for category totals); the amount is never split or counted twice.
-                    {categories.length === 0 && (
-                      <>
-                        {' '}
-                        No categories yet: type a name to add one, or{' '}
-                        <Link to="/categories" className="text-primary underline">
-                          manage categories
-                        </Link>
-                        .
-                      </>
-                    )}
-                  </>
-                }
-                error={categoryError}
-                testId="expense-categories"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <MultiSelect
-                label="Brands (optional)"
-                noun="brand"
-                options={brandOptions}
-                selected={brandIds}
-                onChange={(ids) => setValue('brandIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
-                suggestedIds={suggestedBrandIds}
-                suggestedLabel={`Usual for ${supplierName}`}
-                onCreate={brandCreator.create}
-                creating={brandCreator.creating}
-                note={brandCreator.note}
-                loading={brandsQuery.isPending}
-                error={brandError}
-                testId="expense-brands"
-              />
-            </div>
-
             <Field id="expenseDate" label="Expense date" error={errors.expenseDate?.message}>
               <Input id="expenseDate" type="date" max={todayInKolkata()} {...errorProps('expenseDate', errors.expenseDate)} {...register('expenseDate')} />
             </Field>
@@ -698,38 +919,125 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
             <Field id="invoiceReference" label="Invoice / bill number (optional)" error={errors.invoiceReference?.message}>
               <Input id="invoiceReference" autoComplete="off" {...errorProps('invoiceReference', errors.invoiceReference)} {...register('invoiceReference')} />
             </Field>
-          </div>
-        </Section>
 
-        <Section step={4} title="Bill photos and documents">
-          {initial && initial.documentCount > 0 && (
-            <p className="text-sm text-muted-foreground">
-              {initial.documentCount} document{initial.documentCount === 1 ? ' is' : 's are'} already attached; manage them on the expense
-              details page.
-            </p>
-          )}
-          <DocumentPicker
-            pending={pending}
-            maxCount={MAX_DOCUMENTS_PER_EXPENSE - (initial?.documentCount ?? 0)}
-            disabled={isSubmitting || saved !== null}
-          />
-        </Section>
+            {brand &&
+              (showExtraBrands ? (
+                <MultiSelect
+                  label="Other brands (optional)"
+                  noun="brand"
+                  options={extraBrandOptions}
+                  selected={extraBrandIds.filter((id) => id !== brandId)}
+                  onChange={(ids) => setValue('extraBrandIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+                  onCreate={brandCreator.create}
+                  creating={brandCreator.creating}
+                  note={brandCreator.note}
+                  loading={brandsQuery.isPending}
+                  hint={`Only if the bill also covers other brands. ${brand.name} stays the main brand.`}
+                  error={errors.extraBrandIds?.message}
+                  testId="expense-brands"
+                />
+              ) : (
+                <button type="button" className="text-sm text-primary underline-offset-2 hover:underline" onClick={() => setShowExtraBrands(true)}>
+                  + The bill covers other brands too
+                </button>
+              ))}
+          </Section>
+        </div>
+
+        {/* Bill attachments are postponed: no upload step at all (docs/bill-attachments-postponed.md). */}
+        {billAttachmentsEnabled() && (
+          <Section step={6} title="Bill photos and documents">
+            {initial && initial.documentCount > 0 && (
+              <p className="text-sm text-muted-foreground">
+                {initial.documentCount} document{initial.documentCount === 1 ? ' is' : 's are'} already attached; manage them on the expense
+                details page.
+              </p>
+            )}
+            {drafts.recoverable.length > 0 && (
+              <div role="status" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="draft-recovery">
+                {confirmDiscardDrafts ? (
+                  <>
+                    <p>
+                      Delete {drafts.recoverable.length === 1 ? 'this file' : `these ${drafts.recoverable.length} files`} from this device? They
+                      were never uploaded, so this cannot be undone.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="destructive" onClick={() => void drafts.discardRecoverable().then(() => setConfirmDiscardDrafts(false))}>
+                        Delete from device
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setConfirmDiscardDrafts(false)}>
+                        Keep them
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      {drafts.recoverable.length} bill file{drafts.recoverable.length === 1 ? '' : 's'} chosen earlier for{' '}
+                      {initial ? 'this expense' : 'a new expense'} {drafts.recoverable.length === 1 ? 'is' : 'are'} still on this device (the page
+                      was closed or refreshed before saving): {drafts.recoverable.map((d) => d.fileName).join(', ')}.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => pending.add(drafts.restore(), MAX_DOCUMENTS_PER_EXPENSE - (initial?.documentCount ?? 0))}
+                      >
+                        Add them to this expense
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setConfirmDiscardDrafts(true)}>
+                        Discard…
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            {drafts.problem && (
+              <p role="alert" className="text-sm text-warning">
+                {drafts.problem}
+              </p>
+            )}
+            <DocumentPicker
+              pending={pending}
+              maxCount={MAX_DOCUMENTS_PER_EXPENSE - (initial?.documentCount ?? 0)}
+              disabled={isSubmitting || saved !== null}
+            />
+            {queue && pending.files.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                When you save, the files are kept on this device and sent to the shop PC automatically (also later, if it is offline now).
+              </p>
+            )}
+          </Section>
+        )}
 
         {saved && (
           <div role="alert" className="space-y-3 rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm">
             <p>
-              <strong>{savedNotice}</strong> {pending.pendingCount} file{pending.pendingCount === 1 ? '' : 's'} could not be uploaded (see
-              the errors above). The expense is stored; you can retry now or add documents later from its details page.
+              <strong>{savedNotice}</strong> {pending.pendingCount} file{pending.pendingCount === 1 ? '' : 's'} could not be{' '}
+              {queue ? 'kept for upload' : 'uploaded'} (see the errors {queue ? 'below' : 'above'}). The expense is stored; you can retry now or add
+              documents later from its details page.
             </p>
+            {queueProblems.length > 0 && (
+              <ul className="space-y-1 text-destructive">
+                {queueProblems.map((m) => (
+                  <li key={m} className="break-words">
+                    {m}
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button size="sm" loading={pending.uploading} onClick={() => void finishUploads(saved)}>
-                {pending.uploading ? 'Uploading…' : 'Retry upload'}
+              <Button size="sm" loading={pending.uploading} onClick={() => void queueFiles(saved)}>
+                {pending.uploading ? 'Uploading…' : 'Retry'}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 disabled={pending.uploading}
-                onClick={() => onDone(saved, `${savedNotice} Some documents were not uploaded.`)}
+                onClick={() => {
+                  drafts.forget(pending.files.map((f) => f.key));
+                  onDone(saved, `${savedNotice} Some documents were not uploaded.`);
+                }}
               >
                 Continue without them
               </Button>
@@ -760,7 +1068,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
 
       <Dialog
         open={replaceAsk !== null}
-        title={replaceAsk?.defaults === null ? 'Remove the previous supplier’s brands and categories?' : 'Replace brands and categories?'}
+        title={replaceAsk?.defaults === null ? 'Remove the previous supplier’s categories?' : 'Replace categories?'}
         size="sm"
         onClose={() => setReplaceAsk(null)}
         footer={
@@ -792,24 +1100,91 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
       >
         <p className="text-sm">
           {replaceAsk?.defaults === null
-            ? `The usual brands and categories of ${replaceAsk.next?.name ?? 'the new supplier'} could not be loaded. Brands and categories that came from the previous supplier are still selected. Remove those (anything you added yourself stays), or keep your selections as they are?`
+            ? `The usual categories of ${replaceAsk.next?.name ?? 'the new supplier'} could not be loaded. Categories that came from the previous supplier are still selected. Remove those (anything you added yourself stays), or keep your selections as they are?`
             : replaceAsk?.next
-              ? `You changed the brands or categories of this expense. Replace them with the usual ones for ${replaceAsk.next.name}?`
-              : 'You changed the brands or categories of this expense. Clear them along with the supplier?'}
+              ? `You changed the categories of this expense. Replace them with the usual ones for ${replaceAsk.next.name}?`
+              : 'You changed the categories of this expense. Clear them along with the supplier?'}
         </p>
         <p className="mt-2 text-sm text-muted-foreground">
-          Cancel keeps the current supplier and everything entered. Amounts, payments, description, date and bill photos are never changed
-          here.
+          Cancel keeps the current supplier and everything entered. Brand, amounts, payments, description, date and bill photos are never
+          changed here.
         </p>
+      </Dialog>
+
+      <Dialog
+        open={brandAsk !== null}
+        title={`Change brand to ${brandAsk?.brand.name ?? ''}?`}
+        size="sm"
+        onClose={() => setBrandAsk(null)}
+        footer={
+          <DialogActions>
+            <Button variant="outline" onClick={() => setBrandAsk(null)}>
+              Cancel
+            </Button>
+            {brandAsk?.categoriesAtRisk && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (brandAsk) applyBrand(brandAsk, false);
+                  setBrandAsk(null);
+                }}
+              >
+                Keep my categories
+              </Button>
+            )}
+            <Button
+              onClick={() => {
+                if (brandAsk) applyBrand(brandAsk, true);
+                setBrandAsk(null);
+              }}
+            >
+              Change brand
+            </Button>
+          </DialogActions>
+        }
+      >
+        {brandAsk && (
+          <ul className="list-disc space-y-1.5 pl-5 text-sm">
+            {supplier && (
+              <li>
+                {brandAsk.supplier
+                  ? `${supplier.name} is not linked to ${brandAsk.brand.name}. ${brandAsk.supplier.name}, its only supplier, will be selected instead.`
+                  : brandAsk.plan.kind === 'none'
+                    ? `${brandAsk.brand.name} has no linked supplier, so ${supplier.name} will be removed.`
+                    : `${supplier.name} is not linked to ${brandAsk.brand.name}, so it will be removed and you choose one of its ${brandAsk.options.length} suppliers.`}
+              </li>
+            )}
+            {brandAsk.categoriesAtRisk && (
+              <li>
+                You chose the categories by hand.{' '}
+                {brandAsk.supplier ? `“Change brand” replaces them with ${brandAsk.supplier.name}’s usual categories.` : '“Change brand” clears them.'}{' '}
+                “Keep my categories” keeps them.
+              </li>
+            )}
+            <li className="text-muted-foreground">Cancel keeps everything as it is. Amount, payments, date, description and bill photos never change here.</li>
+          </ul>
+        )}
       </Dialog>
 
       <SupplierFormDialog
         open={addSupplier !== null}
         initialName={addSupplier?.name ?? ''}
+        {...(brand ? { initialBrandIds: [brand.id] } : {})}
         onClose={() => setAddSupplier(null)}
         onSaved={(created) => {
           setAddSupplier(null);
-          void selectSupplier({ id: created.id, name: created.name, isActive: created.isActive }, created);
+          if (brand && created.brands.some((b) => b.id === brand.id)) {
+            const option: BrandSupplierOption = {
+              id: created.id,
+              name: created.name,
+              phone: created.phone,
+              isActive: created.isActive,
+              categories: created.categories,
+            };
+            setBrandSuppliers((list) => [...(list ?? []).filter((s) => s.id !== created.id), option]);
+            void queryClient.invalidateQueries({ queryKey: ['brands', 'suppliers', brand.id] });
+          }
+          void selectSupplier(toSupplierRef(created), created);
         }}
       />
     </>

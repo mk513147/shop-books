@@ -9,7 +9,7 @@ A private, shared expense-management application for one physical shop, used by 
 - Currency: INR (₹), two decimal places. Money is `NUMERIC(14,2)` in the database and a **decimal string** in API responses (never a JS float).
 - Timezone: timestamps are `TIMESTAMPTZ`; calendar dates are `DATE`; reporting uses **Asia/Kolkata**.
 - Financial year: January – December.
-- Bill photographs/documents are **optional**; JPEG, PNG, WebP and PDF, max 10 MB each, at most 10 per expense, stored privately outside the database (`DOCUMENT_STORAGE_DIR`).
+- Bill photographs/documents are **postponed** (switched off in the release; existing records stay read-only). See [docs/bill-attachments-postponed.md](docs/bill-attachments-postponed.md). When active: JPEG, PNG, WebP and PDF, max 10 MB each, at most 10 per expense, stored privately outside the database.
 - Supplier payments are not expenses; balances (supplier payable, customer due, customer advance) are always derived from transactions. Customer due and advance are never netted.
 
 ## Technology

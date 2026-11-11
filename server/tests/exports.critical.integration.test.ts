@@ -114,7 +114,7 @@ describe.skipIf(!pool)('Excel exports (critical paths)', () => {
       allocations: [{ expenseId: a1.id, amount: '400' }],
     });
     customer = (await post(manager, '/customers', { name: '=cmd|calc' })).customer.id;
-    const due = (await post(manager, `/customers/${customer}/dues`, { amount: '5000', txnDate: today, description: 'Credit' })).transaction;
+    const due = (await post(manager, `/customers/${customer}/dues`, { amount: '5000', txnDate: today, categoryId: cat, notes: 'Credit' })).transaction;
     await post(manager, `/customers/${customer}/due-payments`, { amount: '1000', txnDate: today, paymentMode: 'cash', dueId: due.id });
     await post(manager, `/customers/${customer}/advances`, { amount: '2000', txnDate: today, paymentMode: 'cash' });
   });

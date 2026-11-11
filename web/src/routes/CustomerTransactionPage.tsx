@@ -104,12 +104,18 @@ export function CustomerTransactionPage() {
             {t.due && (
               <Row label="Pays the due of">
                 <Link to={`/customers/${id}/transactions/${t.due.id}`} className="text-primary hover:underline">
-                  {formatDate(t.due.txnDate)} · {t.due.description} ({formatInr(t.due.amount)})
+                  {formatDate(t.due.txnDate)} · {t.due.categoryName ?? t.due.description ?? 'Due'} ({formatInr(t.due.amount)})
                 </Link>
               </Row>
             )}
             {t.paymentMode && <Row label="Paid by">{PAYMENT_MODE_LABELS[t.paymentMode]}</Row>}
-            <Row label="Description">{t.description ?? '—'}</Row>
+            {t.type === 'due' && (
+              <Row label="Category">
+                {t.category ? `${t.category.name}${t.category.isActive ? '' : ' (archived)'}` : '— (recorded before categories)'}
+              </Row>
+            )}
+            {t.settlementId && <Row label="Recorded as">Part of a full outstanding payment (several dues settled at once)</Row>}
+            {(t.type !== 'due' || t.description) && <Row label="Description">{t.description ?? '—'}</Row>}
             <Row label="Reference">{t.reference ?? '—'}</Row>
             <Row label="Notes">{t.notes ?? '—'}</Row>
             <Row label="Recorded by">

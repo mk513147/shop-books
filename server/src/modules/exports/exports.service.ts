@@ -416,7 +416,9 @@ export async function exportCustomerLedger(
     { header: 'Date', width: 13, type: 'date', value: (e) => e.txnDate },
     { header: 'Entry', width: 22, type: 'text', value: (e) => TYPES[e.type] },
     { header: 'Reference', width: 16, type: 'text', value: (e) => e.reference },
-    { header: 'Description', width: 30, type: 'text', value: (e) => e.description },
+    // Dues: their own category; due payments: the category of the due they settle.
+    { header: 'Category', width: 18, type: 'text', value: (e) => e.category?.name ?? e.due?.categoryName ?? null },
+    { header: 'Description', width: 30, type: 'text', value: (e) => e.description ?? (e.settlementId ? 'Full outstanding payment' : null) },
     { header: 'Mode', width: 13, type: 'text', value: (e) => mode(e.paymentMode) },
     { header: 'Due ±', width: 13, type: 'money', value: (e) => signed(e.dueEffect) },
     { header: 'Advance ±', width: 13, type: 'money', value: (e) => signed(e.advanceEffect) },

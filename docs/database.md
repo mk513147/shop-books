@@ -286,6 +286,12 @@ Additive. `salesmen (name 1–120, phone (same rule as suppliers), notes ≤ 100
 
 **Status:** 0012 and 0013 have been applied only to `shop_books_test` (by the automated tests). Apply to `shop_books_dev` / production with the normal procedure (backup first, `db:status`, `db:migrate`), then spot-check that `SELECT count(*) FROM expenses` equals `SELECT count(*) FROM expense_category_links`.
 
+### `0014_customer_due_categories`
+
+Additive, backward compatible. `customer_transactions` gets two nullable columns, only ever set on new rows: `category_id → expense_categories` (dues only; CHECK) and `settlement_id uuid` (due payments created together by "Pay full outstanding"; CHECK). The due rule becomes "description **or** category" (existing dues all have a description, so they stay valid). The immutability trigger now also covers both columns. Indexes on both (partial). The idempotency operation list gains `customer_due.settle_all`. No existing row is changed. Rollback (only before any new due was recorded with a category): drop the columns and indexes and restore the 0007 constraint, trigger function and idempotency list.
+
+**Status:** 0014 has been applied only to `shop_books_test` (by the automated tests). Apply to dev/production with the normal procedure (backup first, `db:status`, `db:migrate`).
+
 ### `0008_reporting_indexes` (Stage 4)
 
 Indexes only; no data or constraint changes: `expenses_created_at_idx`, `supplier_payments_created_at_idx`, `customer_txn_created_at_idx` (`created_at DESC`, for the "recently recorded" feed) and `customer_txn_active_date_idx` (`(txn_date, txn_type) WHERE reversed_at IS NULL`, for period activity across customers). Plain `CREATE INDEX` (the runner uses a transaction), which briefly blocks writes to those tables while building — negligible at shop scale. Rollback: drop the four indexes.

@@ -78,7 +78,7 @@ describe.skipIf(!pool)('monthly e-mail reports (critical paths)', () => {
       invoiceReference: null,
     });
     const c = (await send(manager, 'post', '/customers', { name: 'Report Customer' })).body.customer.id;
-    await send(manager, 'post', `/customers/${c}/dues`, { amount: '5000', txnDate: monthRange(ty, tm - 1).to, description: 'Credit' });
+    await send(manager, 'post', `/customers/${c}/dues`, { amount: '5000', txnDate: monthRange(ty, tm - 1).to, categoryId: cat, notes: 'Credit' });
     await send(manager, 'post', `/customers/${c}/advances`, { amount: '2000', txnDate: monthRange(ty, tm - 1).to, paymentMode: 'cash' });
   });
 
@@ -195,7 +195,12 @@ describe.skipIf(!pool)('monthly e-mail reports (critical paths)', () => {
       expect((await send(manager, 'post', `/monthly-reports/deliveries/${failed.id}/retry`, {})).status).toBe(403);
       const retried = await send(owner, 'post', `/monthly-reports/deliveries/${failed.id}/retry`, {});
       expect(retried.body.delivery.status).toBe('retry_scheduled');
-      await scheduler(recording, () => new Date()).tick();
+      // The retry makes the delivery due at the DATABASE's now() (microseconds); the scheduler compares
+      // with its own clock. Node's clock read right afterwards can still be at or before that instant
+      // (measured: up to 1.3 ms behind PostgreSQL's here, plus millisecond truncation), which made an
+      // immediate tick with new Date() find nothing due now and then. Tick one second after the due time.
+      const dueAt = new Date((await deliveries()).find((d) => d.id === failed.id)!.next_attempt_at).getTime();
+      await scheduler(recording, () => new Date(dueAt + 1000)).tick();
       expect((await deliveries()).find((d) => d.id === failed.id)!.status).toBe('sent');
       const sentOne = (await deliveries()).find((d) => d.id !== failed.id)!;
       expect((await send(owner, 'post', `/monthly-reports/deliveries/${sentOne.id}/retry`, {})).body.error.code).toBe('DELIVERY_NOT_FAILED');

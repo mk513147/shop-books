@@ -6,7 +6,9 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { CustomerBalances } from '@/features/customers/CustomerBalances';
+import { useCategories } from '@/features/categories/categories-api';
 import { TXN_LABELS, useCustomerLedger } from '@/features/customers/customers-api';
+import { entryDetail } from '@/features/customers/due-helpers';
 import { ExportButton } from '@/features/exports/ExportButton';
 import { PAYMENT_MODE_LABELS } from '@/features/expenses/expenses-api';
 import { formatDate } from '@/lib/dates';
@@ -40,6 +42,9 @@ function detail(e: CustomerLedgerEntry): string {
   return parts.join(' · ');
 }
 
+/** What the entry is for: the due's category (or older free-text description), settlement label. */
+const title = (e: CustomerLedgerEntry) => entryDetail(e);
+
 /**
  * Customer ledger with two separate running balances (due and advance). Signs: "+" increases that
  * balance, "−" reduces it. Reversed entries are listed but never counted.
@@ -52,8 +57,11 @@ export function CustomerLedgerPage() {
     from: get('from') || undefined,
     to: get('to') || undefined,
     type: get('type') || undefined,
+    categoryId: get('categoryId') || undefined,
     status: get('status') || undefined,
   });
+  // Dues use the expense categories; archived ones stay available as filters for older dues.
+  const categories = useCategories('all');
 
   function update(next: Record<string, string>) {
     const merged = new URLSearchParams(params);
@@ -101,7 +109,7 @@ export function CustomerLedgerPage() {
         </ul>
       </details>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <Input type="date" aria-label="From date" value={get('from')} onChange={(e) => update({ from: e.target.value })} />
         <Input type="date" aria-label="To date" value={get('to')} onChange={(e) => update({ to: e.target.value })} />
         <Select aria-label="Entry type" value={get('type')} onChange={(e) => update({ type: e.target.value })}>
@@ -109,6 +117,15 @@ export function CustomerLedgerPage() {
           {Object.entries(TXN_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
+            </option>
+          ))}
+        </Select>
+        <Select aria-label="Due category" value={get('categoryId')} onChange={(e) => update({ categoryId: e.target.value })}>
+          <option value="">All categories</option>
+          {(categories.data ?? []).map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.isActive ? '' : ' (archived)'}
             </option>
           ))}
         </Select>
@@ -145,8 +162,8 @@ export function CustomerLedgerPage() {
                     <div className="min-w-0">
                       <p className="text-xs text-muted-foreground">{formatDate(e.txnDate)}</p>
                       <p className="text-sm font-medium">{TXN_LABELS[e.type]}</p>
-                      {(e.description || detail(e)) && (
-                        <p className="truncate text-xs text-muted-foreground">{[e.description, detail(e)].filter(Boolean).join(' · ')}</p>
+                      {(title(e) || detail(e)) && (
+                        <p className="truncate text-xs text-muted-foreground">{[title(e), detail(e)].filter(Boolean).join(' · ')}</p>
                       )}
                     </div>
                     {!e.counted && <StatusBadge status="reversed" />}
@@ -194,7 +211,7 @@ export function CustomerLedgerPage() {
                     </td>
                     <td className="px-4 py-3">{e.reference ?? '—'}</td>
                     <td className="max-w-64 px-4 py-3">
-                      <span className="line-clamp-2">{e.description ?? '—'}</span>
+                      <span className="line-clamp-2">{title(e) ?? '—'}</span>
                       {detail(e) && <span className="block text-xs text-muted-foreground">{detail(e)}</span>}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">

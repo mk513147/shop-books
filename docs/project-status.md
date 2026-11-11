@@ -7,7 +7,7 @@ This is the project's status record (the equivalent of a `PHASE_1_STATUS.md`). I
 | 1 | Foundation | Done |
 | 2 | Authentication and access control | Done |
 | 3A | Categories, expenses, audit, suppliers, idempotent creation, mobile-first design | Done |
-| 3B | Bill attachments and private document storage | Implemented; awaiting owner's manual testing |
+| 3B | Bill attachments and private document storage | Implemented, then **postponed** (2026-11-10): switched off in the release, code kept. See [bill-attachments-postponed.md](bill-attachments-postponed.md) |
 | 3C | Supplier payments and supplier ledger | Implemented; awaiting owner's manual testing |
 | 3D | Customer management and customer ledger | Implemented; awaiting owner's manual testing |
 | 4 | Dashboard and financial reports | Implemented; awaiting owner's manual testing |

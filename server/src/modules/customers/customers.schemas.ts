@@ -67,10 +67,15 @@ const common = {
 };
 const mode = z.enum(PAYMENT_MODES, 'Choose how the money was paid');
 
-/** POST /customers/:id/dues: an amount the customer owes (no money moves). */
+/**
+ * POST /customers/:id/dues: an amount the customer owes (no money moves). The CATEGORY (one of the
+ * active expense categories) says what it is for; details go in `notes`. `description` is still
+ * accepted (optional) for older clients, but a category is always required for new dues.
+ */
 export const dueSchema = z.strictObject({
   ...common,
-  description: z.string().trim().min(1, 'Say what the due is for').max(500, 'At most 500 characters'),
+  categoryId: z.uuid('Choose a category'),
+  description: optionalText(500, 'Description'),
 });
 /** POST /customers/:id/advances: money received in advance. */
 export const advanceSchema = z.strictObject({ ...common, paymentMode: mode, description: optionalText(500, 'Description') });
@@ -84,12 +89,28 @@ export const duePaymentSchema = z.strictObject({
 /** POST /customers/:id/refunds: advance money given back (never more than the advance balance). */
 export const refundSchema = z.strictObject({ ...common, paymentMode: mode, description: optionalText(500, 'Description') });
 
+/**
+ * POST /customers/:id/due-payments/settle-all: "Pay full outstanding amount". `amount` is the total
+ * the user saw and confirmed; it must still equal the customer's outstanding due when the request
+ * is processed (otherwise 409 OUTSTANDING_CHANGED and nothing is recorded).
+ */
+export const settleAllSchema = z.strictObject({
+  amount: moneySchema,
+  txnDate: calendarDateSchema,
+  paymentMode: mode,
+  reference: optionalText(100, 'Reference'),
+  notes: optionalText(1000, 'Notes'),
+});
+export type SettleAllInput = z.infer<typeof settleAllSchema>;
+
 export interface CustomerTxnInput {
   type: CustomerTxnType;
   amount: string;
   txnDate: string;
   paymentMode: (typeof PAYMENT_MODES)[number] | null;
   dueId: string | null;
+  /** due only (required for new dues): an expense category. */
+  categoryId: string | null;
   description: string | null;
   reference: string | null;
   notes: string | null;
@@ -104,6 +125,8 @@ export const customerLedgerQuerySchema = z.object({
   from: calendarDateSchema.optional(),
   to: calendarDateSchema.optional(),
   type: z.enum(CUSTOMER_TXN_TYPES).optional(),
+  /** Dues of this category, and the payments made against them. */
+  categoryId: z.uuid().optional(),
   status: z.enum(['active', 'reversed', 'all']).default('all'),
 });
 export type CustomerLedgerQuery = z.infer<typeof customerLedgerQuerySchema>;

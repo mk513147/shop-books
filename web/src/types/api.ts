@@ -397,7 +397,12 @@ export interface CustomerTransaction {
   txnDate: string;
   amount: string;
   paymentMode: PaymentMode | null;
-  due: { id: string; txnDate: string; description: string | null; amount: string } | null;
+  /** due_payment: the due it settles (`categoryName`: that due's category). */
+  due: { id: string; txnDate: string; description: string | null; categoryName?: string | null; amount: string } | null;
+  /** due only: what it is for (an expense category). Null on dues recorded before categories. */
+  category?: ClassRef | null;
+  /** due_payment only: shared by the payments of one "Pay full outstanding". */
+  settlementId?: string | null;
   description: string | null;
   reference: string | null;
   notes: string | null;
@@ -433,6 +438,8 @@ export interface CustomerTxnInput {
   txnDate: string;
   paymentMode?: PaymentMode;
   dueId?: string;
+  /** due only (required): an active expense category. */
+  categoryId?: string;
   description: string | null;
   reference: string | null;
   notes: string | null;
@@ -462,4 +469,23 @@ export interface SalesmanInput {
 export interface SalesmanListResponse {
   items: Salesman[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+/** POST /customers/:id/due-payments/settle-all: "Pay full outstanding amount". */
+export interface SettleAllInput {
+  /** The outstanding total the user confirmed (must still be current). */
+  amount: string;
+  txnDate: string;
+  paymentMode: PaymentMode;
+  reference: string | null;
+  notes: string | null;
+}
+
+export interface CustomerSettlement {
+  id: string;
+  customerId: string;
+  amount: string;
+  txnDate: string;
+  paymentMode: PaymentMode;
+  allocations: { dueId: string; transactionId: string; amount: string; dueRemainingAfter: string }[];
 }

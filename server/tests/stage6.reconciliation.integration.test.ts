@@ -22,7 +22,7 @@ import { LocalDocumentStorage } from '../src/modules/documents/localStorage.js';
 import { MAX_EXPORT_ROWS } from '../src/modules/exports/exports.service.js';
 import { monthRange } from '../src/modules/reports/period.js';
 import { todayInReportingZone } from '../src/utils/dates.js';
-import { BROWSER_HEADERS, connectTestDatabase, silentLogger, testConfig } from './helpers.js';
+import { BROWSER_HEADERS, bulkSeed, connectTestDatabase, silentLogger, testConfig } from './helpers.js';
 
 const pool = await connectTestDatabase();
 
@@ -206,7 +206,7 @@ describe.skipIf(!pool)('Stage 6 release-readiness checks', () => {
           note('reverse-payment', (await call(actor(), 'post', `/supplier-payments/${p.id}/reverse`, { reason: 'Random', version: p.version })).status);
         } else if (op < 0.68) {
           const c = pick(customers);
-          note('due', (await call(actor(), 'post', `/customers/${c}/dues`, { amount: money(4000), txnDate: date, description: 'Credit' })).status);
+          note('due', (await call(actor(), 'post', `/customers/${c}/dues`, { amount: money(4000), txnDate: date, categoryId: pick(categories) })).status);
         } else if (op < 0.78) {
           const c = pick(customers);
           const dues = (await get(owner, `/customers/${c}/open-dues`)).dues as { id: string; remainingAmount: string }[];
@@ -571,7 +571,7 @@ describe.skipIf(!pool)('Stage 6 release-readiness checks', () => {
           call(owner, 'post', `/customers/${customer}/transactions/${adv.id}/reverse`, { reason: 'race', version: 1 }),
           call(manager, 'post', `/customers/${customer}/refunds`, { amount: balance, txnDate: today, paymentMode: 'cash' }),
         ]);
-        const due = (await call(manager, 'post', `/customers/${customer}/dues`, { amount: '100', txnDate: today, description: 'race' })).body.transaction;
+        const due = (await call(manager, 'post', `/customers/${customer}/dues`, { amount: '100', txnDate: today, categoryId: category })).body.transaction;
         await Promise.all([
           call(owner, 'post', `/customers/${customer}/transactions/${due.id}/reverse`, { reason: 'race', version: 1 }),
           call(manager, 'post', `/customers/${customer}/due-payments`, { dueId: due.id, amount: '100', txnDate: today, paymentMode: 'cash' }),
@@ -703,11 +703,18 @@ describe.skipIf(!pool)('Stage 6 release-readiness checks', () => {
   describe('6. export row limit', () => {
     it(`allows exactly ${MAX_EXPORT_ROWS} rows and refuses ${MAX_EXPORT_ROWS + 1}`, async () => {
       const cat = (await call(owner, 'post', '/categories', { name: 'Bulk limit' })).body.category.id;
-      await db.query(
+      // One 20,000-row statement: seeded so its row triggers cannot go quadratic (see bulkSeed).
+      await bulkSeed(
+        db,
         `INSERT INTO expenses (expense_date, category_id, description, amount, created_by, updated_by)
          SELECT $1::date, $2, 'Bulk ' || g, 1.00, $3, $3 FROM generate_series(1, $4) g`,
         [prev2.from, cat, owner.userId, MAX_EXPORT_ROWS],
       );
+      // Refresh planner statistics for the tables the export's count query and category filter read.
+      // Right after a 20,000-row seed they still describe near-empty tables; the count query then got a
+      // plan that took 43 s (under 1 s once autovacuum happened to re-analyze). Production tables grow
+      // gradually with current statistics, which is the state this reproduces.
+      await db.query('ANALYZE expenses, expense_category_links, supplier_payment_allocations, suppliers');
       const ok = await owner.agent.get(`/api/v1/exports/expenses?period=custom&from=${prev2.from}&to=${prev2.from}&categoryId=${cat}`);
       expect(ok.status).toBe(200);
       await db.query(

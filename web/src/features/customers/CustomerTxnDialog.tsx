@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { SearchSelect } from '@/components/ui/search-select';
 import { Select, Textarea } from '@/components/ui/select';
+import { useCategories } from '@/features/categories/categories-api';
 import { ApiError } from '@/lib/api-client';
 import { formatDate, todayInKolkata } from '@/lib/dates';
 import { optionalText, pastOrTodayDate, positiveMoney } from '@/lib/form-schemas';
@@ -17,11 +19,12 @@ import { newIdempotencyKey } from '@/lib/ids';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import type { Customer, CustomerTxnType, PaymentMode } from '@/types/api';
 import { useOpenDues, useRecordCustomerTxn } from './customers-api';
+import { dueTitle } from './due-helpers';
 
 const COPY: Record<CustomerTxnType, { title: string; help: string; amountLabel: string; submit: string; notice: string }> = {
   due: {
     title: 'Record a due',
-    help: 'An amount the customer owes the shop. It increases their due only; their advance is not touched.',
+    help: 'An amount the customer owes the shop. Choose what it is for; it increases their due only (their advance is not touched).',
     amountLabel: 'Amount owed',
     submit: 'Record due',
     notice: 'Due recorded',
@@ -54,6 +57,7 @@ const schema = z.object({
   txnDate: pastOrTodayDate,
   paymentMode: z.string(),
   dueId: z.string(),
+  categoryId: z.string(),
   description: optionalText(500),
   reference: optionalText(100),
   notes: optionalText(1000),
@@ -83,6 +87,8 @@ export function CustomerTxnDialog({
   const copy = COPY[t];
   const record = useRecordCustomerTxn();
   const dues = useOpenDues(customer.id, open && t === 'due_payment');
+  // Dues are categorised with the existing expense categories (active ones only).
+  const categories = useCategories('active');
   const [key, setKey] = useState(newIdempotencyKey);
   const [confirming, setConfirming] = useState<Values | null>(null);
   const [showMore, setShowMore] = useState(false);
@@ -97,12 +103,12 @@ export function CustomerTxnDialog({
     formState: { errors },
   } = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { amount: '', txnDate: todayInKolkata(), paymentMode: '', dueId: '', description: '', reference: '', notes: '' },
+    defaultValues: { amount: '', txnDate: todayInKolkata(), paymentMode: '', dueId: '', categoryId: '', description: '', reference: '', notes: '' },
   });
 
   useEffect(() => {
     if (open) {
-      reset({ amount: '', txnDate: todayInKolkata(), paymentMode: '', dueId: presetDueId ?? '', description: '', reference: '', notes: '' });
+      reset({ amount: '', txnDate: todayInKolkata(), paymentMode: '', dueId: presetDueId ?? '', categoryId: '', description: '', reference: '', notes: '' });
       setConfirming(null);
       setShowMore(false);
       setKey(newIdempotencyKey());
@@ -130,7 +136,9 @@ export function CustomerTxnDialog({
           txnDate: v.txnDate,
           ...(t !== 'due' ? { paymentMode: v.paymentMode as PaymentMode } : {}),
           ...(t === 'due_payment' ? { dueId: v.dueId } : {}),
-          description: v.description.trim() || null,
+          ...(t === 'due' ? { categoryId: v.categoryId } : {}),
+          // Dues are described by their category (+ notes); the free-text description is for the other entries.
+          description: t === 'due' ? null : v.description.trim() || null,
           reference: v.reference.trim() || null,
           notes: v.notes.trim() || null,
         },
@@ -153,8 +161,8 @@ export function CustomerTxnDialog({
       setError('paymentMode', { message: 'Choose how the money was paid' });
       failed = true;
     }
-    if (t === 'due' && !v.description.trim()) {
-      setError('description', { message: 'Say what the due is for' });
+    if (t === 'due' && !v.categoryId) {
+      setError('categoryId', { message: 'Choose a category' });
       failed = true;
     }
     if (t === 'due_payment' && !v.dueId) {
@@ -215,7 +223,7 @@ export function CustomerTxnDialog({
                   <option value="">Choose a due…</option>
                   {dues.data.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {formatDate(d.txnDate)} · {d.description} · {formatInr(d.remainingAmount ?? d.amount)} left
+                      {formatDate(d.txnDate)} · {dueTitle(d)} · {formatInr(d.remainingAmount ?? d.amount)} left
                     </option>
                   ))}
                 </Select>
@@ -261,9 +269,27 @@ export function CustomerTxnDialog({
           )}
 
           {t === 'due' && (
-            <Field id="txn-description" label="What is it for?" error={errors.description?.message}>
-              <Input id="txn-description" autoComplete="off" placeholder="e.g. Goods taken on credit" {...errorProps('txn-description', errors.description)} {...register('description')} />
-            </Field>
+            <>
+              <Field id="txn-category" label="Category" error={errors.categoryId?.message}>
+                <SearchSelect
+                  id="txn-category"
+                  noun="category"
+                  options={categories.data ?? []}
+                  value={categories.data?.find((c) => c.id === watch('categoryId')) ?? null}
+                  onChange={(c) => {
+                    setValue('categoryId', c?.id ?? '', { shouldValidate: errors.categoryId !== undefined });
+                  }}
+                  placeholder="Choose what the due is for"
+                  loading={categories.isPending}
+                  invalid={Boolean(errors.categoryId)}
+                  describedBy={errors.categoryId ? 'txn-category-error' : undefined}
+                  emptyText="No active categories: add one on the Categories page."
+                />
+              </Field>
+              <Field id="txn-due-notes" label="Notes (optional)" error={errors.notes?.message}>
+                <Textarea id="txn-due-notes" placeholder="e.g. 2 fans taken on credit" {...register('notes')} />
+              </Field>
+            </>
           )}
 
           <Field id="txn-date" label="Date" error={errors.txnDate?.message}>
@@ -280,13 +306,15 @@ export function CustomerTxnDialog({
                   <Input id="txn-note-desc" autoComplete="off" {...register('description')} />
                 </Field>
               )}
-              <Field id="txn-notes" label="Notes (optional)" error={errors.notes?.message}>
-                <Textarea id="txn-notes" {...register('notes')} />
-              </Field>
+              {t !== 'due' && (
+                <Field id="txn-notes" label="Notes (optional)" error={errors.notes?.message}>
+                  <Textarea id="txn-notes" {...register('notes')} />
+                </Field>
+              )}
             </>
           ) : (
             <button type="button" className="text-sm text-primary underline-offset-2 hover:underline" onClick={() => setShowMore(true)}>
-              + Reference and notes
+              {t === 'due' ? '+ Reference' : '+ Reference and notes'}
             </button>
           )}
 

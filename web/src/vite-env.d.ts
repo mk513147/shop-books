@@ -7,6 +7,8 @@ interface ImportMetaEnv {
    * Cloudflare Tunnel URL. See src/lib/api-base-url.ts and docs/staging-deployment.md.
    */
   readonly VITE_API_BASE_URL?: string;
+  /** "enabled" turns bill attachments back on (postponed; default off). See features/documents/attachments-feature.ts. */
+  readonly VITE_BILL_ATTACHMENTS?: string;
 }
 
 interface ImportMeta {

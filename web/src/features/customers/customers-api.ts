@@ -8,8 +8,10 @@ import type {
   CustomerListResponse,
   CustomersSummary,
   CustomerTransaction,
+  CustomerSettlement,
   CustomerTxnInput,
   CustomerTxnType,
+  SettleAllInput,
 } from '@/types/api';
 
 /** Plain-language labels (no accounting jargon). */
@@ -158,6 +160,23 @@ export function useReverseCustomerTxn() {
         method: 'POST',
         json: { reason, version },
       }).then((r) => r.transaction),
+    onSettled: invalidate,
+  });
+}
+
+/**
+ * "Pay full outstanding amount": one payment allocated over every open due, oldest first, in one
+ * server transaction. `idempotencyKey`: one per opened dialog, reused on retries.
+ */
+export function useSettleAllDues() {
+  const invalidate = useInvalidateCustomers();
+  return useMutation({
+    mutationFn: ({ customerId, idempotencyKey, input }: { customerId: string; idempotencyKey: string; input: SettleAllInput }) =>
+      apiRequest<{ settlement: CustomerSettlement; transactions: CustomerTransaction[] }>(`/customers/${customerId}/due-payments/settle-all`, {
+        method: 'POST',
+        json: input,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
     onSettled: invalidate,
   });
 }

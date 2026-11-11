@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { link, mkdir, open, readdir, rename, rm, stat, unlink } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
@@ -85,6 +85,27 @@ export class LocalDocumentStorage implements DocumentStorage {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
       throw err;
+    }
+  }
+
+  async digest(key: string): Promise<{ sizeBytes: number; sha256Hex: string }> {
+    const { stream } = await this.open(key);
+    const hash = createHash('sha256');
+    let sizeBytes = 0;
+    for await (const chunk of stream) {
+      sizeBytes += (chunk as Buffer).length;
+      hash.update(chunk as Buffer);
+    }
+    return { sizeBytes, sha256Hex: hash.digest('hex') };
+  }
+
+  /** The directory is on this machine: available whenever it can be created/read. */
+  async isAvailable(): Promise<boolean> {
+    try {
+      await mkdir(this.root, { recursive: true, mode: 0o700 });
+      return (await stat(this.root)).isDirectory();
+    } catch {
+      return false;
     }
   }
 

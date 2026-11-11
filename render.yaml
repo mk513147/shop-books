@@ -24,12 +24,11 @@ services:
         value: lax
       - key: TRUST_PROXY # Vercel rewrite + Render proxy
         value: "2"
+      # Bill attachments are POSTPONED (docs/bill-attachments-postponed.md): no storage host is needed.
+      # To reactivate: value: agent, and restore DOCUMENT_STORAGE_AGENT_URL / DOCUMENT_STORAGE_AGENT_SECRET
+      # (both sync: false) with a permanent named-tunnel hostname.
       - key: DOCUMENT_STORAGE_DRIVER
-        value: agent
-      - key: DOCUMENT_STORAGE_AGENT_URL # the Cloudflare Tunnel hostname of the desktop storage agent
-        sync: false
-      - key: DOCUMENT_STORAGE_AGENT_SECRET
-        sync: false
+        value: disabled
       - key: EMAIL_PROVIDER
         value: none
       - key: REPORT_SCHEDULER_ENABLED

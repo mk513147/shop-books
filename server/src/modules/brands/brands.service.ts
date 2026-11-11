@@ -142,3 +142,35 @@ export async function updateBrand(
     throw err;
   }
 }
+
+/** A supplier offered for a brand on the expense form, with its active default categories. */
+export interface BrandSupplier {
+  id: string;
+  name: string;
+  phone: string | null;
+  isActive: boolean;
+  /** Active default categories (pre-selected on new expenses), in name order. */
+  categories: BrandRef[];
+}
+
+/**
+ * Brand-first expense entry: the ACTIVE suppliers associated with a brand (supplier_brands, the
+ * existing supplier <-> brand links), by name. Archived suppliers are never offered.
+ */
+export async function listBrandSuppliers(db: Queryable, brandId: string): Promise<{ brand: BrandRef; suppliers: BrandSupplier[] }> {
+  const brand = await selectBrand(db, brandId);
+  const result = await db.query<{ id: string; name: string; phone: string | null; is_active: boolean; categories: BrandRef[] }>(
+    `SELECT s.id, s.name, s.phone, s.is_active,
+            COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name, 'isActive', c.is_active) ORDER BY lower(c.name))
+                        FROM supplier_categories sc JOIN expense_categories c ON c.id = sc.category_id
+                       WHERE sc.supplier_id = s.id AND c.is_active), '[]'::json) AS categories
+       FROM supplier_brands sb JOIN suppliers s ON s.id = sb.supplier_id
+      WHERE sb.brand_id = $1 AND s.is_active
+      ORDER BY lower(s.name), s.id`,
+    [brandId],
+  );
+  return {
+    brand: { id: brand.id, name: brand.name, isActive: brand.is_active },
+    suppliers: result.rows.map((r) => ({ id: r.id, name: r.name, phone: r.phone, isActive: r.is_active, categories: r.categories })),
+  };
+}
