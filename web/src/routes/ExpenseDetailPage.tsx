@@ -94,14 +94,16 @@ export function ExpenseDetailPage() {
   const history = useExpenseHistory(id);
   const voidMutation = useVoidExpense();
   const restoreMutation = useRestoreExpense();
+  const toast = useToast();
   const [dialog, setDialog] = useState<'void' | 'restore' | null>(null);
 
+  // Rules of Hooks: every hook above is called on every render. Nothing below this line may call
+  // a hook, because the loading/error renders return early (React error #310 otherwise).
   if (expense.isPending) return <LoadingState label="Loading expense…" />;
   if (expense.isError) return <ErrorState title="Could not load this expense" error={expense.error} />;
   const e = expense.data;
   const voided = e.status === 'voided';
   const mutation = dialog === 'restore' ? restoreMutation : voidMutation;
-  const toast = useToast();
   const showLegacy = e.legacySupplierName !== null && e.legacySupplierName !== e.supplier?.name;
 
   return (

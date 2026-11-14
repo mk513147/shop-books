@@ -11,6 +11,9 @@ interface ImportMetaEnv {
   readonly VITE_BILL_ATTACHMENTS?: string;
 }
 
+/** Unique id of this frontend build (vite.config.ts); also published as /version.json. */
+declare const __SHOP_BOOKS_BUILD_ID__: string;
+
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }

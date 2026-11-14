@@ -27,6 +27,22 @@ describe('GET /api/v1/health', () => {
   });
 });
 
+describe('GET /api/v1/version', () => {
+  it('is public, never touches the database and reports only the release label and compatibility level', async () => {
+    const res = await request(appWith('down')).get('/api/v1/version');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ version: '1.2.3-test', clientCompat: 1 });
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('reports a null version when APP_VERSION is not set, and exposes no configuration', async () => {
+    const app = createApp({ config: { ...testConfig(), appVersion: undefined }, db: fakeDb('up'), logger: silentLogger });
+    const res = await request(app).get('/api/v1/version');
+    expect(res.body).toEqual({ version: null, clientCompat: 1 });
+    expect(JSON.stringify(res.body)).not.toMatch(/secret|postgres|localhost|database|env/i);
+  });
+});
+
 describe('unknown routes', () => {
   it('under /api are denied by default (401) before any 404 can reveal what exists', async () => {
     const res = await request(appWith('up')).get('/api/v1/does-not-exist');

@@ -23,7 +23,7 @@ Browser ──HTTPS──▶ (Vite proxy in dev / reverse proxy in prod)
         6. /api/v1 router (server/src/routes/index.ts), deny-by-default, in this order:
              a. verifyOrigin         state-changing requests: Origin/Referer must be a FRONTEND_URL origin
              b. requireJson          state-changing requests: Content-Type must be application/json
-             c. PUBLIC               GET /health, POST /auth/login       (nothing else is public)
+             c. PUBLIC               GET /health, GET /version, POST /auth/login (nothing else is public)
              d. requireAuth          valid server-side session or 401
              e. requireCsrf          state-changing requests: X-CSRF-Token must match the session
              f. /auth                me, logout, change-password
@@ -206,7 +206,7 @@ Code: `server/src/modules/supplierPayments/` (`supplierPayments.{schemas,service
 - Lock order: payment `FOR UPDATE` → bills `FOR UPDATE` (id order) → allocation rows. Expense edits/voids lock the expense row, so they serialise with allocations. Verified by a concurrency test (three simultaneous allocations to one bill → exactly one succeeds).
 - A bill with active allocations cannot be voided, moved to another supplier, or reduced below `amount_paid + allocated` (409 `EXPENSE_HAS_ALLOCATIONS` / 400 with an explanation); release the allocation first.
 - Payment amount and supplier are immutable (trigger). Corrections: **edit** date/mode/reference/notes (versioned, audited), **release** an allocation (reason), **reverse** the payment (reason + version). Reversal releases every active allocation in the same transaction ("Payment reversed: …"), keeps the original values, is final (trigger) and happens once (409 `PAYMENT_ALREADY_REVERSED`); a reversed payment cannot be edited or allocated (409 `PAYMENT_REVERSED`). Rows are never deleted (triggers).
-- Payments to **archived** suppliers are allowed (settling old dues); the record-payment picker offers active suppliers, the supplier page offers its own (also archived) supplier.
+- A payment can only be recorded for a supplier that is **still owed money**: `supplier_balances.payable > 0`, i.e. at least one non-voided bill that is unpaid or partly paid (after paid-at-purchase amounts and active allocations). The record-payment picker lists only those suppliers (`GET /suppliers?balance=payable&status=all`, with the amount owed), and `createPayment` re-checks it inside the payment transaction (`400`, path `supplierId`), so a stale list on a phone cannot record an invalid payment. Payments to **archived** suppliers that are still owed money are allowed (settling old dues). Unallocated amounts of earlier payments do not reduce `payable` (they can be allocated to the open bills instead).
 
 **API** (`/api/v1`, owner and managers):
 
@@ -495,6 +495,8 @@ Layout: desktop keeps a sticky 15 rem sidebar (navigation + user block). Phones 
 ## PWA and caching
 
 The service worker precaches only the built static assets and falls back to `index.html` for navigations (excluding `/api/*`). There is **no runtime caching**: API responses and private documents are never stored. In addition every `/api/v1` response carries `Cache-Control: no-store` (document downloads: `private, no-store`), so browsers and proxies do not keep financial data or bill files either. The navigation fallback denylist lives in `web/pwa-config.ts` (`/api` and everything below it). **Rule: every API endpoint and every private-document endpoint (bill photographs, report downloads) must live under `/api/`.** Production must be served over HTTPS (required for installability and service workers).
+
+**Updates of installed apps** (`web/src/features/system/app-update.ts`). Every web build gets a unique, non-sensitive build id (time + random) compiled into the bundle and published as `/version.json` (served `no-store`, never precached). `GET /api/v1/version` (public, no database access) returns only `{ version: APP_VERSION | null, clientCompat }`. An open app checks both on start-up, when it returns to the foreground or comes back online, and every 30 minutes while visible. It refreshes when the published build differs from its own, or when `clientCompat` is higher than its `API_COMPAT_LEVEL`; a backend restart or a new `APP_VERSION` alone never reloads it. Before reloading it updates the service worker and waits for it to take control (otherwise the reload would come from the old precache), shows "Shop-Books has been updated. Refreshing to the latest version…", and reloads **once**. It never reloads while there is unsaved input on the screen (anything typed in a form or dialog until the user moves to another screen), a dialog is open, a field has focus, or a save is in flight: it shows a prompt and refreshes when the user leaves the form. A reload that did not reach the new version, or a failed service-worker update, is not retried automatically (a "Refresh" button then also unregisters the service worker and clears its precache). A missing lazily loaded file from a replaced build (`vite:preloadError`, or a chunk error reaching the error boundary) triggers the same safe refresh. Raise `CLIENT_COMPAT_LEVEL` (server) and `API_COMPAT_LEVEL` (web) together only when an API change needs the new frontend.
 
 ## Authentication
 

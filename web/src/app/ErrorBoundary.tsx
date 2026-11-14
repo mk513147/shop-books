@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { isChunkLoadError, reloadOnceForChunkError } from '@/features/system/app-update';
 
 interface State {
   failed: boolean;
@@ -15,6 +16,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('Unhandled UI error', { name: error.name, componentStack: info.componentStack });
+    // A file of the previous release that no longer exists after a deployment: load the new one
+    // (at most once per few minutes, so a real outage cannot cause a reload loop).
+    if (isChunkLoadError(error)) reloadOnceForChunkError();
   }
 
   override render(): ReactNode {

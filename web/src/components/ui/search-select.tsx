@@ -1,6 +1,6 @@
 import { ChevronsUpDown, Search, X } from 'lucide-react';
 import { useEffect, useId, useState, type ComponentType, type ReactNode } from 'react';
-import { Dialog } from '@/components/ui/dialog';
+import { Dialog, SEARCH_SHEET_CLASS } from '@/components/ui/dialog';
 import { controlClass } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -66,6 +66,9 @@ export function SearchSelect({
   const rows: (SearchSelectOption | null)[] = [...(noneLabel !== null && !q ? [null] : []), ...matches];
 
   useEffect(() => setActive(0), [q]);
+  useEffect(() => {
+    if (open) document.getElementById(`${listId}-opt-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, active, listId]);
 
   function choose(option: SearchSelectOption | null) {
     onChange(option);
@@ -108,37 +111,40 @@ export function SearchSelect({
         )}
       </div>
 
-      <Dialog open={open} title={`Choose ${noun}`} onClose={() => setOpen(false)} size="sm" className="md:h-[min(36rem,85dvh)]">
+      <Dialog open={open} title={`Choose ${noun}`} onClose={() => setOpen(false)} size="sm" className={SEARCH_SHEET_CLASS}>
         <div className="space-y-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              autoFocus
-              type="search"
-              role="combobox"
-              aria-label={`Search ${noun}`}
-              aria-expanded="true"
-              aria-controls={listId}
-              aria-activedescendant={rows.length ? optionId(active) : undefined}
-              autoComplete="off"
-              enterKeyHint="search"
-              placeholder="Search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setActive((a) => Math.min(a + 1, rows.length - 1));
-                } else if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setActive((a) => Math.max(a - 1, 0));
-                } else if (e.key === 'Enter') {
-                  e.preventDefault();
-                  if (rows.length > 0) choose(rows[active] ?? null);
-                }
-              }}
-              className={cn(controlClass, 'h-11 pl-9 md:h-10')}
-            />
+          {/* Stays at the top while the results scroll (the sheet sits above the phone keyboard). */}
+          <div className="sticky top-0 z-10 -mt-4 bg-card pt-4 pb-1">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                autoFocus
+                type="search"
+                role="combobox"
+                aria-label={`Search ${noun}`}
+                aria-expanded="true"
+                aria-controls={listId}
+                aria-activedescendant={rows.length ? optionId(active) : undefined}
+                autoComplete="off"
+                enterKeyHint="search"
+                placeholder="Search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActive((a) => Math.min(a + 1, rows.length - 1));
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActive((a) => Math.max(a - 1, 0));
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (rows.length > 0) choose(rows[active] ?? null);
+                  }
+                }}
+                className={cn(controlClass, 'h-11 pl-9 md:h-10')}
+              />
+              </div>
           </div>
           <ul id={listId} role="listbox" aria-label={noun} className="-mx-1 space-y-0.5">
             {rows.map((option, i) => {

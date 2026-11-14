@@ -20,7 +20,7 @@ import { ApiError } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
 import { optionalText, pastOrTodayDate, positiveMoney } from '@/lib/form-schemas';
 import { newIdempotencyKey } from '@/lib/ids';
-import { formatInr, MONEY_INPUT } from '@/lib/money';
+import { formatInr, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import type { PaymentMode, SupplierRef } from '@/types/api';
 
@@ -83,6 +83,10 @@ export function NewSupplierPaymentPage() {
   const supplierId = supplier?.id ?? null;
   const bills = useOpenBills(supplierId);
   const balance = useSupplierBalance(supplierId);
+  // A supplier opened from a link (?supplierId=) may already be fully paid: payments are only for
+  // suppliers still owed money (the picker lists only those, and the server refuses the rest).
+  const nothingOwed = supplier !== null && balance.data !== undefined && toPaise(balance.data.payable) <= 0n;
+  const nothingOwedMessage = supplier ? `${supplier.name} has no outstanding bills. Choose a supplier you still owe.` : '';
   const amount = watch('amount').trim();
   const available = MONEY_INPUT.test(amount) ? amount : null;
 
@@ -109,6 +113,10 @@ export function NewSupplierPaymentPage() {
         className="space-y-4 md:space-y-5"
         onSubmit={handleSubmit(async (values) => {
           if (inFlight.current) return;
+          if (nothingOwed) {
+            setError('supplierId', { message: nothingOwedMessage });
+            return;
+          }
           const billList = bills.data ?? [];
           const problems = draftProblems(billList, draft, available);
           if (Object.keys(problems).length > 0) {
@@ -155,11 +163,17 @@ export function NewSupplierPaymentPage() {
                 value={supplier}
                 onChange={chooseSupplier}
                 noneLabel={null}
+                outstandingOnly
                 invalid={Boolean(errors.supplierId)}
                 describedBy={errors.supplierId ? 'supplier-error' : undefined}
               />
             </Field>
-            {balance.data && (
+            {nothingOwed && !errors.supplierId && (
+              <p role="status" className="text-sm text-warning">
+                {nothingOwedMessage}
+              </p>
+            )}
+            {balance.data && !nothingOwed && (
               <p className="text-sm text-muted-foreground">
                 Currently payable: <strong className="figure text-warning">{formatInr(balance.data.payable)}</strong>
                 {balance.data.unallocated !== '0.00' && (

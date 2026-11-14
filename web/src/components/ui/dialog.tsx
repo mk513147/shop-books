@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { KEYBOARD_MIN_PX, useViewportInset } from '@/lib/visual-viewport';
 
 interface DialogProps {
   open: boolean;
@@ -16,11 +17,19 @@ interface DialogProps {
   children: ReactNode;
 }
 
+/**
+ * For searchable pickers: a steady height (centred panel on desktop; on a phone with the keyboard
+ * open, the whole visible area above the keyboard), so the list does not jump while filtering.
+ */
+export const SEARCH_SHEET_CLASS = 'md:h-[min(36rem,85dvh)] max-md:data-[keyboard=open]:h-[calc(var(--vv-height)-0.5rem)]';
+
 const WIDTHS = { sm: 'md:w-[min(28rem,calc(100vw-2rem))]', md: 'md:w-[min(34rem,calc(100vw-2rem))]', lg: 'md:w-[min(44rem,calc(100vw-2rem))]' };
 
 /**
  * Modal built on native <dialog> (focus trap, Esc and top-layer stacking for free).
  * Phones: a bottom sheet that fits the screen, scrolls internally and respects the safe area.
+ * With the on-screen keyboard open it sits on top of the keyboard and shrinks to the visible area
+ * (see lib/visual-viewport.ts), so inputs and search results are never hidden behind it.
  * Desktop: a centred panel.
  */
 export function Dialog({
@@ -37,6 +46,11 @@ export function Dialog({
   const ref = useRef<HTMLDialogElement>(null);
   const pressedBackdrop = useRef(false);
   const id = useId();
+  const inset = useViewportInset(open);
+  const keyboardOpen = inset !== null && inset.bottom >= KEYBOARD_MIN_PX;
+  const viewportStyle = inset
+    ? ({ '--kb-bottom': `${inset.bottom}px`, '--vv-height': `${inset.height}px` } as CSSProperties)
+    : undefined;
 
   useEffect(() => {
     const dialog = ref.current;
@@ -54,6 +68,8 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={`${id}-title`}
+      data-keyboard={keyboardOpen ? 'open' : undefined}
+      style={viewportStyle}
       onCancel={(e) => {
         e.preventDefault();
         if (dismissible) onClose();
@@ -68,8 +84,8 @@ export function Dialog({
       }}
       className={cn(
         'border bg-card p-0 text-card-foreground shadow-raised backdrop:bg-black/40',
-        // phone: bottom sheet
-        'mx-0 mb-0 mt-auto max-h-[92dvh] w-full max-w-none rounded-t-2xl',
+        // phone: bottom sheet, lifted above the on-screen keyboard and never taller than what is visible
+        'mx-0 mt-auto mb-[var(--kb-bottom,0px)] max-h-[min(92dvh,calc(var(--vv-height,100dvh)-0.5rem))] w-full max-w-none rounded-t-2xl',
         // desktop: centred panel
         'md:m-auto md:max-h-[85dvh] md:rounded-2xl',
         WIDTHS[size],
@@ -101,7 +117,7 @@ export function Dialog({
           {footer && (
             <div className="border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-5 md:pb-3">{footer}</div>
           )}
-          {!footer && <div className="pb-[env(safe-area-inset-bottom)] md:pb-0" />}
+          {!footer && !keyboardOpen && <div className="pb-[env(safe-area-inset-bottom)] md:pb-0" />}
         </>
       )}
     </dialog>

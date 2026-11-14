@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '@/app/App';
+import { registerServiceWorker } from '@/features/system/app-update';
 import { apiBaseUrlProblem } from '@/lib/api-base-url';
 import '@/styles/index.css';
 
@@ -21,4 +22,6 @@ if (configProblem) {
       <App />
     </StrictMode>,
   );
+  // Offline app shell. Registered here (not by an injected script) so the app controls updates.
+  if (import.meta.env.PROD) window.addEventListener('load', () => void registerServiceWorker(), { once: true });
 }

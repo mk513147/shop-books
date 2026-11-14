@@ -364,6 +364,15 @@ export async function createPayment(
   const work = async (client: pg.PoolClient) => {
     const supplier = await client.query(`SELECT 1 FROM suppliers WHERE id = $1 FOR SHARE`, [input.supplierId]);
     if (supplier.rowCount === 0) throw new ValidationError([{ path: 'supplierId', message: 'Supplier not found' }]);
+    // A payment is only recorded for a supplier that is still owed money on at least one bill
+    // (unpaid or partly paid, never voided). Same derived figure as the ledger and open bills
+    // (supplier_balances.payable), checked here so a stale picker on a phone cannot slip through.
+    const owed = await client.query<{ owed: boolean }>(`SELECT payable > 0 AS owed FROM supplier_balances WHERE supplier_id = $1`, [
+      input.supplierId,
+    ]);
+    if (owed.rows[0]?.owed !== true) {
+      throw new ValidationError([{ path: 'supplierId', message: 'This supplier has no outstanding bills to pay' }]);
+    }
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO supplier_payments (supplier_id, payment_date, amount, payment_mode, reference, notes, created_by, updated_by)
        VALUES ($1, $2, $3::numeric, $4, $5, $6, $7, $7) RETURNING id`,

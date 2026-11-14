@@ -1,9 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
-import { loadEnv } from 'vite';
+import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { NAVIGATE_FALLBACK_DENYLIST } from './pwa-config';
 import { parseApiBaseUrl } from './src/lib/api-base-url';
@@ -29,15 +30,41 @@ function checkApiBaseUrl(mode: string, command: string): void {
   }
 }
 
+/**
+ * Unique, non-sensitive id of this build (time + random; no commit hash, host or environment
+ * name). Compiled into the bundle and published as /version.json so open apps can tell that a new
+ * release is live (src/features/system/app-update.ts). SHOP_BOOKS_BUILD_ID overrides it (tests).
+ */
+const BUILD_ID = process.env.SHOP_BOOKS_BUILD_ID || `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${randomBytes(4).toString('hex')}`;
+
+/** Emits /version.json (never precached: the service worker only precaches js/css/html/images). */
+function versionFile(buildId: string): Plugin {
+  return {
+    name: 'shop-books-version-file',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ buildId }) });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode, command }) => {
   checkApiBaseUrl(mode, command);
   return {
+    define: {
+      __SHOP_BOOKS_BUILD_ID__: JSON.stringify(BUILD_ID),
+    },
     plugins: [
       react(),
       tailwindcss(),
+      versionFile(BUILD_ID),
       VitePWA({
+        // The new service worker takes over at once (skipWaiting/clientsClaim); WHEN the page
+        // reloads onto it is decided by the app (src/features/system/app-update.ts), which also
+        // registers it (src/main.tsx), so no reload ever interrupts unsaved work.
         registerType: 'autoUpdate',
+        injectRegister: false,
         includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
         manifest: {
           name: 'Shop-Books',
@@ -64,6 +91,9 @@ export default defineConfig(({ mode, command }) => {
           navigateFallback: '/index.html',
           navigateFallbackDenylist: NAVIGATE_FALLBACK_DENYLIST,
           cleanupOutdatedCaches: true,
+          // Explicit: with injectRegister false the plugin no longer sets these for autoUpdate.
+          skipWaiting: true,
+          clientsClaim: true,
         },
         devOptions: { enabled: false },
       }),

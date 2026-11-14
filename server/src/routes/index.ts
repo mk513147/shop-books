@@ -16,6 +16,7 @@ import type { DocumentStorage } from '../modules/documents/storage.js';
 import type { EmailSender } from '../modules/email/email.js';
 import { createMonthlyReportsRouter } from '../modules/monthlyReports/monthlyReports.routes.js';
 import { createHealthRouter } from '../modules/health/health.routes.js';
+import { createVersionRouter } from '../modules/health/version.routes.js';
 import { createReportsRouter } from '../modules/reports/reports.routes.js';
 import { createSupplierPaymentsRouter } from '../modules/supplierPayments/supplierPayments.routes.js';
 import { createSuppliersRouter } from '../modules/suppliers/suppliers.routes.js';
@@ -33,7 +34,7 @@ export interface RouteDeps {
  * Mounts every module under /api/v1. ORDER MATTERS: this is deny-by-default.
  *
  *   1. cross-site guards for all state-changing requests (Origin/Referer + JSON only)
- *   2. PUBLIC:  /health, POST /auth/login           <- nothing else may go above requireAuth
+ *   2. PUBLIC:  /health, /version, POST /auth/login <- nothing else may go above requireAuth
  *   3. requireAuth + requireCsrf                     <- everything below needs a session
  *   4. /auth (me, logout, change-password)           <- usable while a password change is pending
  *   5. requirePasswordCurrent                        <- everything below needs a non-temporary password
@@ -52,6 +53,7 @@ export function createApiRouter({ db, config, storage, emailSender, onReportQueu
   router.use(requireJson);
 
   router.use('/health', createHealthRouter({ db, appVersion: config.appVersion }));
+  router.use('/version', createVersionRouter({ appVersion: config.appVersion }));
   router.post('/auth/login', createLoginHandler({ db, config }));
 
   router.use(requireAuth(db, config));

@@ -3,6 +3,7 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'rea
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { revealAboveKeyboard } from '@/lib/visual-viewport';
 
 export interface MultiSelectOption {
   id: string;
@@ -69,6 +70,8 @@ export function MultiSelect({
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const stopReveal = useRef<(() => void) | null>(null);
   const byId = new Map(options.map((o) => [o.id, o]));
   const chosen = new Set(selected);
 
@@ -150,7 +153,9 @@ export function MultiSelect({
         })}
       </ul>
 
-      <div className="relative">
+      {/* Phones: results are listed below this field, so it moves to the top of the screen when the
+          keyboard opens (clear of the sticky header) instead of leaving the results behind it. */}
+      <div ref={searchRef} data-search-field className="relative scroll-mt-[calc(4.5rem+env(safe-area-inset-top))]">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <Input
           ref={inputRef}
@@ -164,6 +169,14 @@ export function MultiSelect({
           className="pl-9"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
+          onFocus={() => {
+            stopReveal.current?.();
+            if (searchRef.current) stopReveal.current = revealAboveKeyboard(searchRef.current);
+          }}
+          onBlur={() => {
+            stopReveal.current?.();
+            stopReveal.current = null;
+          }}
           {...(error ? { 'aria-invalid': true } : {})}
         />
       </div>

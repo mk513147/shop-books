@@ -6,6 +6,13 @@ export const REPORTING_TIME_ZONE = 'Asia/Kolkata';
 /** Financial year runs January (1) through December. */
 export const FINANCIAL_YEAR_START_MONTH = 1;
 
+/**
+ * Web-app compatibility level required by this API (GET /api/v1/version). Raise it together with
+ * API_COMPAT_LEVEL in web/src/features/system/app-update.ts only when an API change needs the new
+ * frontend: open apps built for a lower level then refresh themselves (when nothing is unsaved).
+ */
+export const CLIENT_COMPAT_LEVEL = 1;
+
 /** Authentication policy (approved in Stage 2). See docs/architecture.md ("Authentication"). */
 export const AUTH = {
   /** A session unused for this long is dead. */

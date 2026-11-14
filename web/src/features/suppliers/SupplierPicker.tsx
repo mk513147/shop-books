@@ -1,9 +1,10 @@
 import { ChevronsUpDown, Plus, Search, Truck, X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
-import { Dialog } from '@/components/ui/dialog';
+import { Dialog, SEARCH_SHEET_CLASS } from '@/components/ui/dialog';
 import { controlClass } from '@/components/ui/input';
+import { formatInr } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import type { SupplierRef } from '@/types/api';
+import type { Supplier, SupplierRef } from '@/types/api';
 import { useSuppliers } from './suppliers-api';
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -25,20 +26,42 @@ interface SupplierPickerProps {
   noneLabel?: string | null;
   invalid?: boolean;
   describedBy?: string;
+  /**
+   * Only suppliers still owed money (unpaid or partly paid, non-voided bills), archived ones
+   * included, each with the amount outstanding. Used by the supplier payment form; the server
+   * applies the same rule when the payment is saved.
+   */
+  outstandingOnly?: boolean;
 }
 
-type Option = { kind: 'none' } | { kind: 'supplier'; supplier: SupplierRef & { phone: string | null } } | { kind: 'add' };
+type Option =
+  | { kind: 'none' }
+  | { kind: 'supplier'; supplier: Pick<Supplier, 'id' | 'name' | 'phone' | 'isActive' | 'payable'> }
+  | { kind: 'add' };
 
 /**
- * Searchable supplier selector backed by GET /suppliers (active only). Opens as a sheet on phones
- * and a dialog on desktop, so it works the same with touch, mouse and keyboard.
+ * Searchable supplier selector backed by GET /suppliers (active only, or with `outstandingOnly`
+ * every supplier with a payable balance). Opens as a sheet on phones and a dialog on desktop, so
+ * it works the same with touch, mouse and keyboard.
  */
-export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel = 'No supplier', invalid, describedBy }: SupplierPickerProps) {
+export function SupplierPicker({
+  id,
+  value,
+  onChange,
+  onAddSupplier,
+  noneLabel = 'No supplier',
+  invalid,
+  describedBy,
+  outstandingOnly = false,
+}: SupplierPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const q = useDebounced(query.trim(), 200);
-  const list = useSuppliers({ q, status: 'active', pageSize: 20 }, open);
+  const list = useSuppliers(
+    outstandingOnly ? { q, status: 'all', balance: 'payable', pageSize: 20 } : { q, status: 'active', pageSize: 20 },
+    open,
+  );
   const listId = useId();
 
   const options: Option[] = [
@@ -48,6 +71,9 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel =
   ];
 
   useEffect(() => setActive(0), [q]);
+  useEffect(() => {
+    if (open) document.getElementById(`${listId}-opt-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, active, listId]);
 
   function choose(option: Option) {
     if (option.kind === 'add') {
@@ -55,7 +81,7 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel =
       onAddSupplier?.(query.trim());
       return;
     }
-    onChange(option.kind === 'none' ? null : { id: option.supplier.id, name: option.supplier.name, isActive: true });
+    onChange(option.kind === 'none' ? null : { id: option.supplier.id, name: option.supplier.name, isActive: option.supplier.isActive });
     setOpen(false);
   }
 
@@ -95,38 +121,41 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel =
         )}
       </div>
 
-      <Dialog open={open} title="Choose supplier" onClose={() => setOpen(false)} size="sm" className="md:h-[min(36rem,85dvh)]">
+      <Dialog open={open} title="Choose supplier" onClose={() => setOpen(false)} size="sm" className={SEARCH_SHEET_CLASS}>
         <div className="space-y-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              autoFocus
-              type="search"
-              role="combobox"
-              aria-label="Search suppliers"
-              aria-expanded="true"
-              aria-controls={listId}
-              aria-activedescendant={optionId(active)}
-              autoComplete="off"
-              enterKeyHint="search"
-              placeholder="Search by name or phone"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setActive((a) => Math.min(a + 1, options.length - 1));
-                } else if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setActive((a) => Math.max(a - 1, 0));
-                } else if (e.key === 'Enter') {
-                  e.preventDefault();
-                  const option = options[active];
-                  if (option) choose(option);
-                }
-              }}
-              className={cn(controlClass, 'h-11 pl-9 md:h-10')}
-            />
+          {/* Stays at the top while the results scroll (the sheet sits above the phone keyboard). */}
+          <div className="sticky top-0 z-10 -mt-4 bg-card pt-4 pb-1">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <input
+                autoFocus
+                type="search"
+                role="combobox"
+                aria-label="Search suppliers"
+                aria-expanded="true"
+                aria-controls={listId}
+                aria-activedescendant={optionId(active)}
+                autoComplete="off"
+                enterKeyHint="search"
+                placeholder="Search by name or phone"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setActive((a) => Math.min(a + 1, options.length - 1));
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setActive((a) => Math.max(a - 1, 0));
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const option = options[active];
+                    if (option) choose(option);
+                  }
+                }}
+                className={cn(controlClass, 'h-11 pl-9 md:h-10')}
+              />
+              </div>
           </div>
 
           <ul id={listId} role="listbox" aria-label="Suppliers" className="-mx-1 space-y-0.5">
@@ -150,10 +179,20 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel =
                 >
                   {option.kind === 'none' && <span className="text-muted-foreground">{noneLabel}</span>}
                   {option.kind === 'supplier' && (
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{option.supplier.name}</span>
-                      {option.supplier.phone && <span className="block text-xs text-muted-foreground">{option.supplier.phone}</span>}
-                    </span>
+                    <>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">
+                          {option.supplier.name}
+                          {!option.supplier.isActive && <span className="text-muted-foreground"> (archived)</span>}
+                        </span>
+                        {option.supplier.phone && <span className="block text-xs text-muted-foreground">{option.supplier.phone}</span>}
+                      </span>
+                      {outstandingOnly && (
+                        <span className="shrink-0 text-right text-xs text-muted-foreground">
+                          Owed <span className="figure font-medium text-warning">{formatInr(option.supplier.payable)}</span>
+                        </span>
+                      )}
+                    </>
                   )}
                   {option.kind === 'add' && (
                     <>
@@ -168,7 +207,15 @@ export function SupplierPicker({ id, value, onChange, onAddSupplier, noneLabel =
           {list.isFetching && <p className="text-xs text-muted-foreground">Searching…</p>}
           {list.isError && <p className="text-sm text-destructive">Could not load suppliers. Check the connection and try again.</p>}
           {list.isSuccess && list.data.items.length === 0 && (
-            <p className="text-sm text-muted-foreground">{q ? `No active supplier matches “${q}”.` : 'No suppliers yet.'}</p>
+            <p className="text-sm text-muted-foreground">
+              {outstandingOnly
+                ? q
+                  ? `No supplier with an outstanding balance matches “${q}”.`
+                  : 'No supplier has an outstanding balance. Every recorded bill is fully paid.'
+                : q
+                  ? `No active supplier matches “${q}”.`
+                  : 'No suppliers yet.'}
+            </p>
           )}
         </div>
       </Dialog>
