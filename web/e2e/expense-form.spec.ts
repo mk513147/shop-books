@@ -48,24 +48,26 @@ test.describe('Add expense on a narrow Android phone', () => {
     await expect(amount).toHaveAttribute('inputmode', 'decimal');
     expect((await amount.boundingBox())!.height).toBeGreaterThanOrEqual(60);
 
-    // Sections stack in one column.
-    const s2 = (await page.getByTestId('expense-section-2').boundingBox())!;
-    const s3 = (await page.getByTestId('expense-section-3').boundingBox())!;
-    expect(s3.y).toBeGreaterThan(s2.y + s2.height - 1);
-    expect(Math.abs(s3.x - s2.x)).toBeLessThan(2);
+    // One column: the groups stack, and the summary with Save follows the form.
+    const form = (await page.getByLabel('Total expense amount').boundingBox())!;
+    const panel = (await page.getByTestId('expense-actions').boundingBox())!;
+    expect(panel.y).toBeGreaterThan(form.y);
+    expect(Math.abs(panel.width - (await page.getByTestId('expense-actions').evaluate((el) => el.parentElement!.getBoundingClientRect().width)))).toBeLessThan(2);
 
     // Every text control is at least 44px tall (touch target).
     for (const label of ['Description (optional)', 'Amount paid', 'Payment method', 'Expense date', 'Bill number (optional)']) {
       expect((await page.getByLabel(label).boundingBox())!.height, label).toBeGreaterThanOrEqual(44);
     }
 
-    // At the top of the form the Save button is already on screen, above the bottom navigation.
+    // Save is at the end of the form, never floating: scrolled to, it is fully above the bottom navigation.
     const save = page.getByRole('button', { name: 'Save expense' });
-    await expect(save).toBeInViewport();
+    await save.scrollIntoViewIfNeeded();
     const nav = (await page.locator('nav.fixed').first().boundingBox())!;
     const saveBox = (await save.boundingBox())!;
     expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(nav.y + 1);
     expect(saveBox.height).toBeGreaterThanOrEqual(48);
+    expect(await page.getByTestId('expense-actions').evaluate((el) => getComputedStyle(el).position)).toBe('static');
+    await amount.scrollIntoViewIfNeeded();
 
     await amount.fill('2500');
     await expect(page.getByTestId('payment-badge')).toHaveText(/Fully paid/);
@@ -78,34 +80,40 @@ test.describe('Add expense on a narrow Android phone', () => {
     await page.screenshot({ path: info.outputPath('add-expense-phone.png'), fullPage: true });
   });
 
-  test('the focused field is never hidden behind the sticky Save bar', async ({ page, context }) => {
+  test('category and supplier search still work on the redesigned form', async ({ page, context }) => {
     await openForm(page, context);
-    const field = page.getByLabel('Bill number (optional)');
-    await field.focus();
-    const box = (await field.boundingBox())!;
-    const bar = (await page.getByTestId('expense-actions').boundingBox())!;
-    expect(box.y + box.height).toBeLessThanOrEqual(bar.y + 1);
+    const search = page.getByLabel('Search or add category');
+    await search.fill('Tra');
+    await page.getByTestId('expense-categories').getByRole('button', { name: 'Transport' }).click();
+    await expect(page.getByTestId('expense-categories')).toContainText('Transport');
+    await page.getByRole('button', { name: 'Supplier (optional)' }).click();
+    await expect(page.getByRole('dialog', { name: 'Choose supplier' })).toBeVisible();
   });
 });
 
 test.describe('Add expense on desktop', () => {
   test.beforeEach(({ isMobile }) => test.skip(isMobile, 'desktop layout only'));
 
-  test('centred form, related fields side by side, payment summary next to the payment fields', async ({ page, context }, info) => {
+  test('form on the left, summary with Save on the right that stays in view while scrolling', async ({ page, context }, info) => {
     await openForm(page, context);
     expect(await noHorizontalScroll(page)).toBe(true);
-    const form = (await page.getByRole('form', { name: 'Add expense' }).boundingBox())!;
-    expect(form.width).toBeLessThanOrEqual(900);
 
     const date = (await page.getByLabel('Expense date').boundingBox())!;
     const bill = (await page.getByLabel('Bill number (optional)').boundingBox())!;
     expect(Math.abs(date.y - bill.y)).toBeLessThan(2); // same row
-    const fields = (await page.getByLabel('Amount paid').boundingBox())!;
-    const summary = (await page.getByTestId('payment-summary').boundingBox())!;
-    expect(summary.x).toBeGreaterThan(fields.x + fields.width);
+    const amount = (await page.getByLabel('Total expense amount').boundingBox())!;
+    const panel = (await page.getByTestId('expense-actions').boundingBox())!;
+    expect(panel.x).toBeGreaterThan(amount.x + amount.width);
+    expect(Math.abs(panel.y - amount.y)).toBeLessThan(120); // beside the top of the form
 
     await page.getByLabel('Total expense amount').fill('2500');
     await expect(page.getByTestId('payment-badge')).toHaveText(/Fully paid/);
     await page.screenshot({ path: info.outputPath('add-expense-desktop.png'), fullPage: true });
+
+    // Scrolled down to the last fields, Save is still on screen.
+    await page.getByLabel('Bill number (optional)').scrollIntoViewIfNeeded();
+    await page.mouse.wheel(0, 2000);
+    await expect(page.getByRole('button', { name: 'Save expense' })).toBeInViewport();
+    await page.screenshot({ path: info.outputPath('add-expense-desktop-scrolled.png') });
   });
 });

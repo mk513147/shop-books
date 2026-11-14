@@ -45,16 +45,23 @@ afterEach(() => {
 });
 
 describe('Add expense layout', () => {
-  it('shows the sections in paper-form order, amount first, each with a visible heading', () => {
+  it('amount comes first, then plain groups in order, then the summary with Save at the end', () => {
     renderForm();
-    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent?.replace(/^\d/, ''));
-    expect(headings).toEqual(['Amount', 'Supplier', 'What was this expense for?', 'Payment', 'Date and bill number']);
-    // Amount-first: the amount field has focus on a new expense and comes before everything else.
     const amount = screen.getByLabelText('Total expense amount');
     expect(amount).toHaveFocus();
     expect(amount).toHaveAttribute('inputmode', 'decimal');
-    const sections = screen.getAllByRole('group').filter((g) => g.dataset.testid?.startsWith('expense-section-'));
-    expect(within(sections[0]!).getByLabelText('Total expense amount')).toBe(amount);
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(['Supplier', 'What was it for?', 'Payment', 'Date and bill number']);
+    // No numbered steps.
+    expect(screen.queryByText(/^[1-9]$/)).not.toBeInTheDocument();
+    // Reading order: amount -> every field -> summary -> Save.
+    const save = screen.getByRole('button', { name: 'Save expense' });
+    const lastField = screen.getByLabelText('Bill number (optional)');
+    const summary = screen.getByTestId('payment-summary');
+    const follows = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(amount, screen.getAllByTestId('expense-group')[0]!)).toBe(true);
+    expect(follows(lastField, summary)).toBe(true);
+    expect(follows(summary, save)).toBe(true);
   });
 
   it('every field has a visible label that says whether it is optional', () => {
@@ -166,17 +173,21 @@ describe('Add expense on phones', () => {
       });
   }
 
-  it('the Save bar is sticky, and steps aside (not over the fields) while the keyboard is open', () => {
+  it('Save and Cancel sit in the summary panel at the end of the form: nothing floats over the fields or the keyboard', () => {
     const keyboard = fakePhoneKeyboard();
     renderForm();
-    const bar = screen.getByTestId('expense-actions');
-    expect(bar).toHaveAttribute('data-sticky', 'true');
-    expect(bar.className).toContain('sticky');
-    keyboard(320);
-    expect(bar).toHaveAttribute('data-sticky', 'false');
-    expect(bar.className).not.toContain('sticky');
-    keyboard(0);
-    expect(bar).toHaveAttribute('data-sticky', 'true');
+    const panel = screen.getByTestId('expense-actions');
+    const save = within(panel).getByRole('button', { name: 'Save expense' });
+    const cancel = within(panel).getByRole('link', { name: 'Cancel' });
+    expect(cancel).toHaveAttribute('href', '/expenses');
+    expect(within(panel).getByTestId('payment-summary')).toBeInTheDocument();
+    // In the page flow on phones (sticky only from the desktop breakpoint), with or without the keyboard.
+    for (const covered of [0, 320]) {
+      keyboard(covered);
+      expect(panel.className).not.toMatch(/(^|\s)(sticky|fixed)(\s|$)/);
+      expect(panel.className).toContain('lg:sticky');
+    }
+    expect(save).toHaveAttribute('type', 'submit');
   });
 
   it('saving shows a loading state and a second tap does not send twice', async () => {

@@ -1,13 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { CircleCheck, Clock, Plus, Tag, Truck, X } from 'lucide-react';
+import { Plus, Tag, Truck, X } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import { errorMessage } from '@/components/states';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -28,7 +27,6 @@ import { ApiError, apiRequest } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import { isPhoneLayout, KEYBOARD_MIN_PX, useViewportInset } from '@/lib/visual-viewport';
 import type { Category, ClassRef, Expense, ExpenseInput, PaymentMode, Supplier, SupplierRef } from '@/types/api';
 import {
   categoriesModified,
@@ -142,36 +140,21 @@ const STATUS_OPTIONS: { value: PaymentStatus; label: string }[] = [
 ];
 
 /**
- * One numbered part of the paper-like form: a tinted heading bar, then its fields. The heading names
- * the section in plain words; `description` says in one line what belongs there.
+ * One group of related fields inside the single form surface: a plain heading (no numbers, no
+ * card), separated from the group above by a hairline and generous space.
  */
-function Section({
-  step,
-  title,
-  description,
-  children,
-  className,
-}: {
-  step: number;
-  title: string;
-  description?: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  const headingId = `expense-section-${step}`;
+function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  const id = `expense-group-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`;
   return (
-    <Card className={cn('overflow-hidden', className)} role="group" aria-labelledby={headingId} data-testid={`expense-section-${step}`}>
-      <div className="border-b border-primary/15 bg-primary-soft px-4 py-3 md:px-6">
-        <h2 id={headingId} className="flex items-center gap-3 text-lg font-semibold text-foreground">
-          <span aria-hidden="true" className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-primary-foreground">
-            {step}
-          </span>
+    <section aria-labelledby={id} className="mt-8 space-y-5 border-t pt-7" data-testid="expense-group">
+      <div className="space-y-1">
+        <h2 id={id} className="text-lg font-semibold tracking-tight">
           {title}
         </h2>
-        {description && <p className="mt-1 pl-11 text-sm text-primary-soft-foreground">{description}</p>}
+        {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
       </div>
-      <div className="space-y-5 p-4 md:p-6">{children}</div>
-    </Card>
+      {children}
+    </section>
   );
 }
 
@@ -604,17 +587,11 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   // What is still owed on this bill after everything paid (the same split the server's rules use).
   const remainingDue = split.remaining === null ? null : split.remaining - supplierPaid;
 
-  // Phones: the sticky Save bar steps aside while the on-screen keyboard is open.
-  const [phone] = useState(isPhoneLayout);
-  const inset = useViewportInset(phone);
-  const keyboardOpen = (inset?.bottom ?? 0) >= KEYBOARD_MIN_PX;
-
   return (
     <>
       <form
         noValidate
         aria-label={initial ? 'Edit expense' : 'Add expense'}
-        className="space-y-4 md:space-y-6 [&_button]:scroll-mb-32 [&_input]:scroll-mb-32 [&_select]:scroll-mb-32"
         onKeyDown={enterMovesToNextField}
         onSubmit={handleSubmit(async (values) => {
           // Synchronous re-entry guard: a fast double tap must not send twice (the server's
@@ -651,11 +628,17 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           }
         })}
       >
-        <div className="space-y-4 md:space-y-6">
-          <Section step={1} title="Amount" description="The full bill amount, including anything not paid yet.">
-            <Field id="amount" label="Total expense amount" error={errors.amount?.message}>
+        {/* Desktop: the form on the left, the bill summary with Save on the right (stays in view).
+            Phones: one column; the summary and Save follow the payment details at the end. */}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start lg:gap-8">
+          <div className="min-w-0 rounded-2xl border bg-card px-4 py-6 shadow-card sm:px-6 md:px-8 md:py-8 [&_p.text-xs]:text-sm">
+            {/* Amount: the first and largest thing on the screen. */}
+            <div className="space-y-2">
+              <label htmlFor="amount" className="block text-base font-semibold">
+                Total expense amount
+              </label>
               <div className="relative">
-                <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-semibold text-muted-foreground">
+                <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-medium text-muted-foreground">
                   ₹
                 </span>
                 <Input
@@ -665,7 +648,10 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                   enterKeyHint="next"
                   placeholder="0.00"
                   autoFocus={!initial}
-                  className={cn('figure h-16 pl-11 text-3xl font-semibold md:h-16 md:text-3xl', amount !== '' && 'pr-14')}
+                  className={cn(
+                    'figure h-[4.5rem] rounded-xl bg-background pl-12 text-4xl font-semibold tracking-tight md:h-[4.5rem] md:text-4xl',
+                    amount !== '' && 'pr-14',
+                  )}
                   {...errorProps('amount', errors.amount)}
                   {...register('amount')}
                 />
@@ -683,389 +669,344 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                   </button>
                 )}
               </div>
-            </Field>
-            <p className="figure text-base text-muted-foreground" aria-live="polite" data-testid="amount-in-words">
-              {amountPositive ? `Amount: ${formatInr(amount)}` : 'Type the amount in rupees, e.g. 2500 or 2500.50.'}
-            </p>
-          </Section>
+              {errors.amount?.message ? (
+                <p id="amount-error" className="text-sm text-destructive">
+                  {errors.amount.message}
+                </p>
+              ) : (
+                <p className="figure text-sm text-muted-foreground" aria-live="polite" data-testid="amount-in-words">
+                  {amountPositive ? `Amount: ${formatInr(amount)}` : 'The full bill amount, including anything not paid yet.'}
+                </p>
+              )}
+            </div>
 
-          <Section step={2} title="Supplier" description="Who the bill is from. Leave it empty if there is no supplier, e.g. rent or tea.">
-            <div className="grid gap-5 md:grid-cols-2 md:items-start">
-              <Field id="brand" label="Brand (optional)" error={errors.brandId?.message} hint="Choosing a brand fills in its supplier for you.">
-                <SearchSelect
-                  id="brand"
-                  noun="brand"
-                  icon={Tag}
-                  options={brandOptions}
-                  value={brand}
-                  onChange={(next) => void selectBrand(next ? { id: next.id, name: next.name, isActive: next.isActive ?? true } : null)}
-                  placeholder="No brand"
-                  noneLabel="No brand"
-                  loading={brandsQuery.isPending}
-                  emptyText="No brands yet: add them on the Brands page."
+            <Group title="Supplier" hint="Who the bill is from. Leave it empty for expenses such as rent, wages or tea.">
+              <div className="grid gap-5 sm:grid-cols-2 sm:items-start">
+                <Field id="brand" label="Brand (optional)" error={errors.brandId?.message} hint="Choosing a brand fills in its supplier.">
+                  <SearchSelect
+                    id="brand"
+                    noun="brand"
+                    icon={Tag}
+                    options={brandOptions}
+                    value={brand}
+                    onChange={(next) => void selectBrand(next ? { id: next.id, name: next.name, isActive: next.isActive ?? true } : null)}
+                    placeholder="No brand"
+                    noneLabel="No brand"
+                    loading={brandsQuery.isPending}
+                    emptyText="No brands yet: add them on the Brands page."
+                  />
+                </Field>
+
+                <Field
+                  id="supplier"
+                  label="Supplier (optional)"
+                  error={errors.supplierId?.message}
+                  hint={
+                    <button type="button" className="min-h-11 text-left font-medium text-primary underline-offset-2 hover:underline" onClick={() => setAddSupplier({ name: '' })}>
+                      {brand ? `+ Add a new supplier for ${brand.name}` : '+ Add a new supplier'}
+                    </button>
+                  }
+                >
+                  {brand ? (
+                    <SearchSelect
+                      id="supplier"
+                      noun="supplier"
+                      icon={Truck}
+                      options={supplierOptions}
+                      value={supplier ? { id: supplier.id, name: supplier.name, isActive: supplier.isActive } : null}
+                      onChange={(next) => {
+                        const detail = brandSuppliers?.find((s) => s.id === next?.id);
+                        void selectSupplier(next ? toSupplierRef({ id: next.id, name: next.name, isActive: next.isActive ?? true }) : null, detail);
+                      }}
+                      placeholder={brandLoad === 'loading' ? 'Loading suppliers…' : brandHasSuppliers ? `Choose ${brand.name}'s supplier` : 'No supplier'}
+                      noneLabel={brandHasSuppliers || brandLoad === 'error' ? null : 'No supplier'}
+                      disabled={brandLoad === 'loading'}
+                      loading={brandLoad === 'loading'}
+                      invalid={Boolean(errors.supplierId)}
+                      describedBy={errors.supplierId ? 'supplier-error' : undefined}
+                      emptyText={`${brand.name} has no linked supplier.`}
+                    />
+                  ) : (
+                    <SupplierPicker
+                      id="supplier"
+                      value={supplier}
+                      onChange={(next) => void selectSupplier(next)}
+                      onAddSupplier={(name) => setAddSupplier({ name })}
+                      invalid={Boolean(errors.supplierId)}
+                      describedBy={errors.supplierId ? 'supplier-error' : undefined}
+                    />
+                  )}
+                </Field>
+              </div>
+              {!supplier && !errors.supplierId && (
+                <p className="sr-only" data-testid="no-supplier-note">
+                  No supplier chosen. That is fine for expenses such as rent, wages or tea.
+                </p>
+              )}
+              {brandLoad === 'error' && brand && (
+                <div role="alert" className="space-y-2 rounded-lg bg-warning-soft p-3 text-sm" data-testid="brand-suppliers-error">
+                  <p>Could not load the suppliers of {brand.name}. The supplier was not changed; try again.</p>
+                  <Button variant="outline" size="sm" onClick={() => void selectBrand(brand, true)}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              {brandNotice && (
+                <p role="status" className="rounded-lg bg-surface-muted px-3 py-2.5 text-sm" data-testid="brand-notice">
+                  {brandNotice}
+                </p>
+              )}
+              {loadingDefaults && <p className="text-sm text-muted-foreground">Loading the supplier’s usual categories…</p>}
+              {defaultsError && supplier?.id === defaultsError.id && (
+                <div role="alert" className="space-y-2 rounded-lg bg-warning-soft p-3 text-sm" data-testid="defaults-error">
+                  <p>
+                    Could not load the usual categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose them below,
+                    or try again. Everything else you entered is unchanged.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={loadingDefaults}
+                    onClick={() => void selectSupplier(supplier, brandSuppliers?.find((s) => s.id === supplier.id), true)}
+                  >
+                    {loadingDefaults ? 'Loading…' : 'Try again'}
+                  </Button>
+                </div>
+              )}
+            </Group>
+
+            <Group title="What was it for?">
+              <MultiSelect
+                label="Category"
+                noun="category"
+                options={categoryOptions}
+                selected={categoryIds}
+                onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+                suggestedIds={suggestedCategoryIds}
+                suggestedLabel={`Usual for ${supplierName}`}
+                onCreate={categoryCreator.create}
+                creating={categoryCreator.creating}
+                note={categoryCreator.note}
+                firstBadge="Main"
+                hint={
+                  <>
+                    Choose one or more. The first is the main category in reports.
+                    {categories.length === 0 && (
+                      <>
+                        {' '}
+                        No categories yet: type a name to add one, or{' '}
+                        <Link to="/categories" className="text-primary underline">
+                          manage categories
+                        </Link>
+                        .
+                      </>
+                    )}
+                  </>
+                }
+                error={categoryError}
+                testId="expense-categories"
+              />
+
+              <Field id="description" label="Description (optional)" error={errors.description?.message} hint="For example the shop name, or what was bought.">
+                <Input
+                  id="description"
+                  autoComplete="off"
+                  enterKeyHint="next"
+                  className={BIG_CONTROL}
+                  {...errorProps('description', errors.description)}
+                  {...register('description')}
                 />
               </Field>
+            </Group>
 
-              <Field
-                id="supplier"
-                label="Supplier (optional)"
-                error={errors.supplierId?.message}
-                hint={
-                  <button type="button" className="min-h-11 text-left font-medium text-primary underline underline-offset-2" onClick={() => setAddSupplier({ name: '' })}>
-                    {brand ? `+ Add a new supplier for ${brand.name}` : '+ Add a new supplier'}
-                  </button>
-                }
-              >
-                {brand ? (
-                  <SearchSelect
-                    id="supplier"
-                    noun="supplier"
-                    icon={Truck}
-                    options={supplierOptions}
-                    value={supplier ? { id: supplier.id, name: supplier.name, isActive: supplier.isActive } : null}
-                    onChange={(next) => {
-                      const detail = brandSuppliers?.find((s) => s.id === next?.id);
-                      void selectSupplier(next ? toSupplierRef({ id: next.id, name: next.name, isActive: next.isActive ?? true }) : null, detail);
-                    }}
-                    placeholder={brandLoad === 'loading' ? 'Loading suppliers…' : brandHasSuppliers ? `Choose ${brand.name}'s supplier` : 'No supplier'}
-                    noneLabel={brandHasSuppliers || brandLoad === 'error' ? null : 'No supplier'}
-                    disabled={brandLoad === 'loading'}
-                    loading={brandLoad === 'loading'}
-                    invalid={Boolean(errors.supplierId)}
-                    describedBy={errors.supplierId ? 'supplier-error' : undefined}
-                    emptyText={`${brand.name} has no linked supplier.`}
-                  />
-                ) : (
-                  <SupplierPicker
-                    id="supplier"
-                    value={supplier}
-                    onChange={(next) => void selectSupplier(next)}
-                    onAddSupplier={(name) => setAddSupplier({ name })}
-                    invalid={Boolean(errors.supplierId)}
-                    describedBy={errors.supplierId ? 'supplier-error' : undefined}
-                  />
-                )}
-                {!supplier && !errors.supplierId && (
-                  <p className="text-sm text-muted-foreground" data-testid="no-supplier-note">
-                    No supplier chosen. That is fine for expenses such as rent, wages or tea.
+            <Group title="Payment">
+              {status !== null && (
+                <div className="space-y-2">
+                  <p id="payment-status-label" className="text-sm font-medium">
+                    Was it paid?
                   </p>
-                )}
-              </Field>
-            </div>
-            {brandLoad === 'error' && brand && (
-              <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-base" data-testid="brand-suppliers-error">
-                <p>Could not load the suppliers of {brand.name}. The supplier was not changed; try again.</p>
-                <Button variant="outline" onClick={() => void selectBrand(brand, true)}>
-                  Try again
-                </Button>
-              </div>
-            )}
-            {brandNotice && (
-              <p role="status" className="rounded-lg bg-surface-muted p-3 text-base" data-testid="brand-notice">
-                {brandNotice}
-              </p>
-            )}
-            {loadingDefaults && <p className="text-sm text-muted-foreground">Loading the supplier’s usual categories…</p>}
-            {defaultsError && supplier?.id === defaultsError.id && (
-              <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-base" data-testid="defaults-error">
-                <p>
-                  Could not load the usual categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose them below,
-                  or try again. Everything else you entered is unchanged.
-                </p>
-                <Button
-                  variant="outline"
-                  loading={loadingDefaults}
-                  onClick={() => void selectSupplier(supplier, brandSuppliers?.find((s) => s.id === supplier.id), true)}
-                >
-                  {loadingDefaults ? 'Loading…' : 'Try again'}
-                </Button>
-              </div>
-            )}
-          </Section>
-
-          <Section step={3} title="What was this expense for?" description="Choose a category. A supplier's usual categories are picked for you.">
-            <MultiSelect
-              label="Category"
-              noun="category"
-              options={categoryOptions}
-              selected={categoryIds}
-              onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
-              suggestedIds={suggestedCategoryIds}
-              suggestedLabel={`Usual for ${supplierName}`}
-              onCreate={categoryCreator.create}
-              creating={categoryCreator.creating}
-              note={categoryCreator.note}
-              firstBadge="Main"
-              hint={
-                <>
-                  You can choose more than one. The first one is the main category used in reports. The amount is never split.
-                  {categories.length === 0 && (
-                    <>
-                      {' '}
-                      No categories yet: type a name to add one, or{' '}
-                      <Link to="/categories" className="text-primary underline">
-                        manage categories
-                      </Link>
-                      .
-                    </>
-                  )}
-                </>
-              }
-              error={categoryError}
-              testId="expense-categories"
-            />
-
-            <Field id="description" label="Description (optional)" error={errors.description?.message} hint="For example: shop name, or what was bought.">
-              <Input
-                id="description"
-                autoComplete="off"
-                enterKeyHint="next"
-                className={BIG_CONTROL}
-                {...errorProps('description', errors.description)}
-                {...register('description')}
-              />
-            </Field>
-          </Section>
-
-          <Section step={4} title="Payment" description="How much was paid now, and how.">
-            <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_17rem] md:items-start">
-              <div className="min-w-0 space-y-5">
-                {status !== null && (
-                  <div className="space-y-2">
-                    <p id="payment-status-label" className="text-base font-semibold">
-                      Was it paid?
-                    </p>
-                    <div
-                      role="radiogroup"
-                      aria-labelledby="payment-status-label"
-                      className="grid grid-cols-3 gap-1 rounded-xl bg-surface-muted p-1"
-                      data-testid="payment-status"
-                    >
-                      {STATUS_OPTIONS.map((o) => (
-                        <button
-                          key={o.value}
-                          type="button"
-                          role="radio"
-                          aria-checked={status === o.value}
-                          onClick={() => (o.value === 'full' ? choosePaidInFull() : o.value === 'partial' ? choosePartial() : chooseNotPaid())}
-                          className={cn(
-                            'min-h-12 rounded-lg px-2 text-base font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                            status === o.value ? 'bg-primary text-primary-foreground shadow-card' : 'text-foreground hover:bg-card',
-                          )}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-sm text-muted-foreground" role="status">
-                      {status === 'full' && 'The whole amount was paid now.'}
-                      {status !== 'full' &&
-                        (hasSupplier
-                          ? `Anything not paid now stays due to ${supplier?.name}.`
-                          : 'Choose the supplier above: an unpaid or part-paid bill stays due to them.')}
-                      {status === 'partial' && split.allocated === 0n && ' Enter the amount paid now.'}
-                    </p>
+                  <div role="radiogroup" aria-labelledby="payment-status-label" className="grid grid-cols-3 gap-1 rounded-xl bg-surface-muted p-1" data-testid="payment-status">
+                    {STATUS_OPTIONS.map((o) => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={status === o.value}
+                        onClick={() => (o.value === 'full' ? choosePaidInFull() : o.value === 'partial' ? choosePartial() : chooseNotPaid())}
+                        className={cn(
+                          'min-h-12 rounded-lg px-2 text-base leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          status === o.value
+                            ? 'bg-card font-semibold text-primary-soft-foreground shadow-card ring-2 ring-primary'
+                            : 'font-medium text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
                   </div>
-                )}
+                  <p className="text-sm text-muted-foreground" role="status">
+                    {status === 'full' && 'The whole amount was paid now.'}
+                    {status !== 'full' &&
+                      (hasSupplier ? `Anything not paid now stays due to ${supplier?.name}.` : 'Choose the supplier above: an unpaid or part-paid bill stays due to them.')}
+                    {status === 'partial' && split.allocated === 0n && ' Enter the amount paid now.'}
+                  </p>
+                </div>
+              )}
 
-                <fieldset className="space-y-3">
-                  <legend className="mb-2 text-base font-semibold">{status === 'none' ? 'Paid now (nothing yet)' : 'How it was paid'}</legend>
-                  {fields.map((field, i) => {
-                    const rowErrors = errors.payments?.[i];
-                    const suffix = i === 0 ? '' : ` (payment ${i + 1})`;
-                    return (
-                      <div key={field.id} className={cn('space-y-1.5', i > 0 && 'border-t pt-3')} data-testid="payment-row">
-                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
-                          <div className="min-w-0 space-y-1.5">
-                            <label htmlFor={`payment-${i}-amount`} className="block text-sm font-medium">
-                              Amount paid{suffix}
-                            </label>
-                            <div className="relative">
-                              <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                ₹
-                              </span>
-                              <Input
-                                id={`payment-${i}-amount`}
-                                inputMode="decimal"
-                                autoComplete="off"
-                                enterKeyHint="next"
-                                placeholder="0.00"
-                                className={cn('figure pl-7', BIG_CONTROL)}
-                                {...errorProps(`payment-${i}-amount`, rowErrors?.amount)}
-                                {...register(`payments.${i}.amount`, {
-                                  onChange: () => {
-                                    if (i === 0) followAmount.current = false;
-                                  },
-                                })}
-                              />
-                            </div>
+              <fieldset className="space-y-4">
+                <legend className="sr-only">{status === 'none' ? 'Paid now (nothing yet)' : 'How it was paid'}</legend>
+                {fields.map((field, i) => {
+                  const rowErrors = errors.payments?.[i];
+                  const suffix = i === 0 ? '' : ` (payment ${i + 1})`;
+                  return (
+                    <div key={field.id} className="space-y-1.5" data-testid="payment-row">
+                      <div
+                        className={cn(
+                          'grid items-end gap-3',
+                          fields.length > 1 ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]' : 'grid-cols-2',
+                        )}
+                      >
+                        <div className="min-w-0 space-y-1.5">
+                          <label htmlFor={`payment-${i}-amount`} className="block text-sm font-medium">
+                            Amount paid{suffix}
+                          </label>
+                          <div className="relative">
+                            <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                              ₹
+                            </span>
+                            <Input
+                              id={`payment-${i}-amount`}
+                              inputMode="decimal"
+                              autoComplete="off"
+                              enterKeyHint="next"
+                              placeholder="0.00"
+                              className={cn('figure pl-7', BIG_CONTROL)}
+                              {...errorProps(`payment-${i}-amount`, rowErrors?.amount)}
+                              {...register(`payments.${i}.amount`, {
+                                onChange: () => {
+                                  if (i === 0) followAmount.current = false;
+                                },
+                              })}
+                            />
                           </div>
-                          <div className="min-w-0 space-y-1.5">
-                            <label htmlFor={`payment-${i}-method`} className="block text-sm font-medium">
-                              Payment method{suffix}
-                            </label>
-                            <Select
-                              id={`payment-${i}-method`}
-                              className={BIG_CONTROL}
-                              {...errorProps(`payment-${i}-method`, rowErrors?.paymentMode)}
-                              {...register(`payments.${i}.paymentMode`)}
-                            >
-                              <option value="">Choose…</option>
-                              {PAYMENT_MODES.map((m) => (
-                                <option key={m} value={m}>
-                                  {PAYMENT_MODE_LABELS[m]}
-                                </option>
-                              ))}
-                            </Select>
-                          </div>
-                          {i > 0 ? (
-                            <Button variant="ghost" size="icon" className="size-12 shrink-0 md:size-12" aria-label={`Remove payment ${i + 1}`} onClick={() => removeRow(i)}>
-                              <X aria-hidden="true" />
-                            </Button>
-                          ) : (
-                            // The first row is never removable; keep its columns aligned with the rows below.
-                            fields.length > 1 && <span className="size-12 shrink-0" aria-hidden="true" />
-                          )}
                         </div>
-                        {rowErrors?.amount?.message && (
-                          <p id={`payment-${i}-amount-error`} className="text-sm text-destructive">
-                            Payment {i + 1} amount: {rowErrors.amount.message}
-                          </p>
-                        )}
-                        {rowErrors?.paymentMode?.message && (
-                          <p id={`payment-${i}-method-error`} className="text-sm text-destructive">
-                            Payment {i + 1} method: {rowErrors.paymentMode.message}
-                          </p>
-                        )}
-                        {i === lastIndex && split.remaining !== null && split.remaining > 0n && split.anyEntered && (
-                          <button
-                            type="button"
-                            className="min-h-11 text-sm font-medium text-primary underline underline-offset-2"
-                            onClick={() => {
-                              followAmount.current = false;
-                              const own = MONEY_INPUT.test(rows[i]!.amount.trim()) ? toPaise(rows[i]!.amount.trim()) : 0n;
-                              setValue(`payments.${i}.amount`, fromPaise(own + split.remaining!), { shouldValidate: submitCount > 0 });
-                            }}
+                        <div className="min-w-0 space-y-1.5">
+                          <label htmlFor={`payment-${i}-method`} className="block text-sm font-medium">
+                            Payment method{suffix}
+                          </label>
+                          <Select
+                            id={`payment-${i}-method`}
+                            className={BIG_CONTROL}
+                            {...errorProps(`payment-${i}-method`, rowErrors?.paymentMode)}
+                            {...register(`payments.${i}.paymentMode`)}
                           >
-                            Use remaining {formatInr(fromPaise(split.remaining))}
-                          </button>
+                            <option value="">Choose…</option>
+                            {PAYMENT_MODES.map((m) => (
+                              <option key={m} value={m}>
+                                {PAYMENT_MODE_LABELS[m]}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        {i > 0 ? (
+                          <Button variant="ghost" size="icon" className="size-12 shrink-0 md:size-12" aria-label={`Remove payment ${i + 1}`} onClick={() => removeRow(i)}>
+                            <X aria-hidden="true" />
+                          </Button>
+                        ) : (
+                          // The first row is never removable; keep its columns aligned with the rows below.
+                          fields.length > 1 && <span className="size-12 shrink-0" aria-hidden="true" />
                         )}
                       </div>
-                    );
-                  })}
-                  <Button variant="soft" disabled={fields.length >= MAX_PAYMENT_ROWS} onClick={addRow}>
-                    <Plus aria-hidden="true" /> Add payment (another method)
-                  </Button>
-                </fieldset>
-              </div>
-
-              <div className="space-y-3 rounded-xl border bg-surface-muted p-4" data-testid="payment-summary">
-                <dl className="space-y-2 text-base" aria-live="polite">
-                  <div className="flex items-center justify-between gap-3">
-                    <dt className="text-muted-foreground">Total expense</dt>
-                    <dd className="figure font-semibold">{split.total === null ? '—' : formatInr(fromPaise(split.total))}</dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <dt className="text-muted-foreground">Paid</dt>
-                    <dd className="figure font-semibold">{formatInr(fromPaise(split.allocated))}</dd>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 border-t pt-2">
-                    <dt className="font-semibold">
-                      Remaining due
-                      {supplierPaid > 0n && (
-                        <span className="block text-sm font-normal text-muted-foreground">after {formatInr(paiseToString(supplierPaid))} of supplier payments</span>
+                      {rowErrors?.amount?.message && (
+                        <p id={`payment-${i}-amount-error`} className="text-sm text-destructive">
+                          Payment {i + 1} amount: {rowErrors.amount.message}
+                        </p>
                       )}
-                    </dt>
-                    <dd className={cn('figure text-xl font-bold', remainingDue !== null && remainingDue < 0n && 'text-destructive')} data-testid="payment-remaining">
-                      {remainingDue === null ? '—' : formatInr(fromPaise(remainingDue))}
-                    </dd>
-                  </div>
-                </dl>
-                {remainingDue !== null && remainingDue >= 0n && (
-                  <p
-                    data-testid="payment-badge"
-                    className={cn(
-                      'inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-base font-semibold',
-                      remainingDue === 0n ? 'bg-primary-soft text-primary-soft-foreground' : 'bg-warning-soft text-foreground ring-1 ring-warning/40',
-                    )}
-                  >
-                    {remainingDue === 0n ? (
-                      <>
-                        <CircleCheck className="size-5 text-primary" aria-hidden="true" /> Fully paid
-                      </>
-                    ) : (
-                      <>
-                        <Clock className="size-5 text-warning" aria-hidden="true" /> Payment pending
-                      </>
-                    )}
-                  </p>
-                )}
-              </div>
-            </div>
-            {(showProblem || paymentsServerError) && (
-              <p role="alert" className="text-base text-destructive">
-                {showProblem ? split.problem : paymentsServerError}
-              </p>
-            )}
-            {!splitOk && submitCount > 0 && !showProblem && !paymentsServerError && !hasSupplier && split.total !== null && !split.anyEntered && (
-              <p role="alert" className="text-base text-destructive">
-                Enter how the expense was paid.
-              </p>
-            )}
-          </Section>
-
-          <Section step={5} title="Date and bill number">
-            <div className="grid gap-5 md:grid-cols-2 md:items-start">
-              <Field id="expenseDate" label="Expense date" error={errors.expenseDate?.message}>
-                <Input
-                  id="expenseDate"
-                  type="date"
-                  max={todayInKolkata()}
-                  className={BIG_CONTROL}
-                  {...errorProps('expenseDate', errors.expenseDate)}
-                  {...register('expenseDate')}
-                />
-              </Field>
-
-              <Field id="invoiceReference" label="Bill number (optional)" error={errors.invoiceReference?.message} hint="The number printed on the bill, if any.">
-                <Input
-                  id="invoiceReference"
-                  autoComplete="off"
-                  enterKeyHint="done"
-                  className={BIG_CONTROL}
-                  {...errorProps('invoiceReference', errors.invoiceReference)}
-                  {...register('invoiceReference')}
-                />
-              </Field>
-            </div>
-
-            {brand &&
-              (showExtraBrands ? (
-                <MultiSelect
-                  label="Other brands (optional)"
-                  noun="brand"
-                  options={extraBrandOptions}
-                  selected={extraBrandIds.filter((id) => id !== brandId)}
-                  onChange={(ids) => setValue('extraBrandIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
-                  onCreate={brandCreator.create}
-                  creating={brandCreator.creating}
-                  note={brandCreator.note}
-                  loading={brandsQuery.isPending}
-                  hint={`Only if the bill also covers other brands. ${brand.name} stays the main brand.`}
-                  error={errors.extraBrandIds?.message}
-                  testId="expense-brands"
-                />
-              ) : (
-                <button type="button" className="min-h-11 text-base font-medium text-primary underline underline-offset-2" onClick={() => setShowExtraBrands(true)}>
-                  + The bill covers other brands too
+                      {rowErrors?.paymentMode?.message && (
+                        <p id={`payment-${i}-method-error`} className="text-sm text-destructive">
+                          Payment {i + 1} method: {rowErrors.paymentMode.message}
+                        </p>
+                      )}
+                      {i === lastIndex && split.remaining !== null && split.remaining > 0n && split.anyEntered && (
+                        <button
+                          type="button"
+                          className="min-h-11 text-sm font-medium text-primary underline-offset-2 hover:underline"
+                          onClick={() => {
+                            followAmount.current = false;
+                            const own = MONEY_INPUT.test(rows[i]!.amount.trim()) ? toPaise(rows[i]!.amount.trim()) : 0n;
+                            setValue(`payments.${i}.amount`, fromPaise(own + split.remaining!), { shouldValidate: submitCount > 0 });
+                          }}
+                        >
+                          Use remaining {formatInr(fromPaise(split.remaining))}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  disabled={fields.length >= MAX_PAYMENT_ROWS}
+                  onClick={addRow}
+                  className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  <Plus className="size-4" aria-hidden="true" /> Add payment (another method)
                 </button>
-              ))}
-          </Section>
-        </div>
+              </fieldset>
+              {(showProblem || paymentsServerError) && (
+                <p role="alert" className="text-sm text-destructive">
+                  {showProblem ? split.problem : paymentsServerError}
+                </p>
+              )}
+              {!splitOk && submitCount > 0 && !showProblem && !paymentsServerError && !hasSupplier && split.total !== null && !split.anyEntered && (
+                <p role="alert" className="text-sm text-destructive">
+                  Enter how the expense was paid.
+                </p>
+              )}
+            </Group>
+
+            <Group title="Date and bill number">
+              <div className="grid gap-5 sm:grid-cols-2 sm:items-start">
+                <Field id="expenseDate" label="Expense date" error={errors.expenseDate?.message}>
+                  <Input id="expenseDate" type="date" max={todayInKolkata()} className={BIG_CONTROL} {...errorProps('expenseDate', errors.expenseDate)} {...register('expenseDate')} />
+                </Field>
+                <Field id="invoiceReference" label="Bill number (optional)" error={errors.invoiceReference?.message}>
+                  <Input
+                    id="invoiceReference"
+                    autoComplete="off"
+                    enterKeyHint="done"
+                    className={BIG_CONTROL}
+                    {...errorProps('invoiceReference', errors.invoiceReference)}
+                    {...register('invoiceReference')}
+                  />
+                </Field>
+              </div>
+
+              {brand &&
+                (showExtraBrands ? (
+                  <MultiSelect
+                    label="Other brands (optional)"
+                    noun="brand"
+                    options={extraBrandOptions}
+                    selected={extraBrandIds.filter((id) => id !== brandId)}
+                    onChange={(ids) => setValue('extraBrandIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+                    onCreate={brandCreator.create}
+                    creating={brandCreator.creating}
+                    note={brandCreator.note}
+                    loading={brandsQuery.isPending}
+                    hint={`Only if the bill also covers other brands. ${brand.name} stays the main brand.`}
+                    error={errors.extraBrandIds?.message}
+                    testId="expense-brands"
+                  />
+                ) : (
+                  <button type="button" className="min-h-11 text-sm font-medium text-primary underline-offset-2 hover:underline" onClick={() => setShowExtraBrands(true)}>
+                    + The bill covers other brands too
+                  </button>
+                ))}
+            </Group>
 
         {/* Bill attachments are postponed: no upload step at all (docs/bill-attachments-postponed.md). */}
         {billAttachmentsEnabled() && (
-          <Section step={6} title="Bill photos and documents">
+          <Group title="Bill photos and documents">
             {initial && initial.documentCount > 0 && (
               <p className="text-sm text-muted-foreground">
                 {initial.documentCount} document{initial.documentCount === 1 ? ' is' : 's are'} already attached; manage them on the expense
@@ -1126,11 +1067,60 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                 When you save, the files are kept on this device and sent to the shop PC automatically (also later, if it is offline now).
               </p>
             )}
-          </Section>
+          </Group>
         )}
 
+          </div>
+
+          {/* The bill summary and the actions belong together: check the figures, then save. */}
+          <aside aria-label="Summary and save" className="space-y-4 lg:sticky lg:top-6" data-testid="expense-actions">
+            <div className="rounded-2xl border bg-card p-5 shadow-card md:p-6">
+              <div data-testid="payment-summary">
+                <dl className="space-y-3 text-base" aria-live="polite">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-muted-foreground">Total expense</dt>
+                    <dd className="figure font-medium">{split.total === null ? '—' : formatInr(fromPaise(split.total))}</dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-muted-foreground">Paid</dt>
+                    <dd className="figure font-medium">{formatInr(fromPaise(split.allocated))}</dd>
+                  </div>
+                  {supplierPaid > 0n && (
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <dt className="text-muted-foreground">Supplier payments</dt>
+                      <dd className="figure">{formatInr(paiseToString(supplierPaid))}</dd>
+                    </div>
+                  )}
+                  <div className="flex items-baseline justify-between gap-3 border-t pt-3">
+                    <dt className="font-semibold">Remaining due</dt>
+                    <dd
+                      className={cn(
+                        'figure text-2xl font-semibold tracking-tight',
+                        remainingDue !== null && remainingDue > 0n && 'text-foreground',
+                        remainingDue !== null && remainingDue < 0n && 'text-destructive',
+                      )}
+                      data-testid="payment-remaining"
+                    >
+                      {remainingDue === null ? '—' : formatInr(fromPaise(remainingDue))}
+                    </dd>
+                  </div>
+                </dl>
+                {remainingDue !== null && remainingDue >= 0n && (
+                  <p
+                    data-testid="payment-badge"
+                    className={cn(
+                      'mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold',
+                      remainingDue === 0n ? 'bg-primary-soft text-primary-soft-foreground' : 'bg-warning-soft text-foreground',
+                    )}
+                  >
+                    <span aria-hidden="true" className={cn('size-2 rounded-full', remainingDue === 0n ? 'bg-primary' : 'bg-warning')} />
+                    {remainingDue === 0n ? 'Fully paid' : 'Payment pending'}
+                  </p>
+                )}
+              </div>
+
         {saved && (
-          <div role="alert" className="space-y-3 rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm">
+          <div role="alert" className="mt-4 space-y-3 rounded-xl bg-warning-soft p-4 text-sm">
             <p>
               <strong>{savedNotice}</strong> {pending.pendingCount} file{pending.pendingCount === 1 ? '' : 's'} could not be{' '}
               {queue ? 'kept for upload' : 'uploaded'} (see the errors {queue ? 'below' : 'above'}). The expense is stored; you can retry now or add
@@ -1165,7 +1155,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
         )}
 
         {formError && (
-          <div role="alert" className="space-y-2 rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm text-destructive">
+          <div role="alert" className="mt-4 space-y-2 rounded-xl bg-destructive-soft p-4 text-sm text-destructive">
             <p>{formError.message}</p>
             {formError.conflict && (
               <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
@@ -1175,25 +1165,16 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           </div>
         )}
 
-        {/* Save bar: sticky above the phone's bottom navigation (and near the bottom on desktop) so it
-            is always easy to reach. While the on-screen keyboard is open it stays in place in the page
-            instead, so it can never cover the field being typed in. */}
-        <div
-          data-testid="expense-actions"
-          data-sticky={keyboardOpen ? 'false' : 'true'}
-          className={cn(
-            'z-10 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur md:mx-0 md:rounded-xl md:border md:px-5',
-            keyboardOpen ? 'static' : 'sticky bottom-[calc(var(--bottom-nav-height)+env(safe-area-inset-bottom))] md:bottom-4',
-          )}
-        >
-          <div className="flex flex-col-reverse gap-2 md:flex-row md:items-center md:justify-end">
-            <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg', className: 'h-12 text-base' })}>
-              Cancel
-            </Link>
-            <Button type="submit" size="lg" className="h-14 text-lg md:h-12 md:min-w-52 md:text-base" loading={isSubmitting || pending.uploading} disabled={saved !== null}>
-              {pending.uploading ? 'Uploading files…' : isSubmitting ? (initial ? 'Updating…' : 'Saving…') : submitLabel}
-            </Button>
-          </div>
+              <div className="mt-5 space-y-2">
+                <Button type="submit" size="lg" className="h-12 w-full text-base md:h-12" loading={isSubmitting || pending.uploading} disabled={saved !== null}>
+                  {pending.uploading ? 'Uploading files…' : isSubmitting ? (initial ? 'Updating…' : 'Saving…') : submitLabel}
+                </Button>
+                <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg', className: 'h-11 w-full text-base text-muted-foreground' })}>
+                  Cancel
+                </Link>
+              </div>
+            </div>
+          </aside>
         </div>
       </form>
 
