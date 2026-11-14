@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:deploy": "node e2e/deploy-sim/build.mjs && playwright test -c playwright.deploy.config.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^6.0.2",

@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Tag, Truck, X } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CircleCheck, Clock, Plus, Tag, Truck, X } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
@@ -28,6 +28,7 @@ import { ApiError, apiRequest } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
+import { isPhoneLayout, KEYBOARD_MIN_PX, useViewportInset } from '@/lib/visual-viewport';
 import type { Category, ClassRef, Expense, ExpenseInput, PaymentMode, Supplier, SupplierRef } from '@/types/api';
 import {
   categoriesModified,
@@ -140,18 +141,56 @@ const STATUS_OPTIONS: { value: PaymentStatus; label: string }[] = [
   { value: 'none', label: 'Not paid yet' },
 ];
 
-function Section({ step, title, children, className }: { step: number; title: string; children: ReactNode; className?: string }) {
+/**
+ * One numbered part of the paper-like form: a tinted heading bar, then its fields. The heading names
+ * the section in plain words; `description` says in one line what belongs there.
+ */
+function Section({
+  step,
+  title,
+  description,
+  children,
+  className,
+}: {
+  step: number;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const headingId = `expense-section-${step}`;
   return (
-    <Card className={cn('p-4 md:p-5', className)}>
-      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold">
-        <span className="inline-flex size-6 items-center justify-center rounded-full bg-primary-soft text-xs text-primary-soft-foreground">
-          {step}
-        </span>
-        {title}
-      </h2>
-      <div className="space-y-4">{children}</div>
+    <Card className={cn('overflow-hidden', className)} role="group" aria-labelledby={headingId} data-testid={`expense-section-${step}`}>
+      <div className="border-b border-primary/15 bg-primary-soft px-4 py-3 md:px-6">
+        <h2 id={headingId} className="flex items-center gap-3 text-lg font-semibold text-foreground">
+          <span aria-hidden="true" className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-primary-foreground">
+            {step}
+          </span>
+          {title}
+        </h2>
+        {description && <p className="mt-1 pl-11 text-sm text-primary-soft-foreground">{description}</p>}
+      </div>
+      <div className="space-y-5 p-4 md:p-6">{children}</div>
     </Card>
   );
+}
+
+/** Larger, easier controls on this form (48px tall, 16px text on every screen). */
+const BIG_CONTROL = 'h-12 text-base md:h-12 md:text-base';
+
+/**
+ * Enter in a text field moves to the next field instead of saving the form, so the phone keyboard's
+ * Enter/Go key can never save a half-filled expense. Saving is only ever the "Save expense" button.
+ */
+function enterMovesToNextField(e: KeyboardEvent<HTMLFormElement>) {
+  const target = e.target;
+  if (e.key !== 'Enter' || !(target instanceof HTMLInputElement) || e.defaultPrevented) return;
+  if (['submit', 'button', 'checkbox', 'radio', 'file'].includes(target.type)) return;
+  e.preventDefault();
+  const fields = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('input, select, textarea, button[aria-haspopup]')).filter(
+    (el) => !(el as HTMLInputElement).disabled && el.getAttribute('aria-hidden') !== 'true' && el.tabIndex >= 0,
+  );
+  fields[fields.indexOf(target) + 1]?.focus();
 }
 
 /** A brand change that needs the user's confirmation before it is applied. */
@@ -562,12 +601,21 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
     supplierOptions.unshift({ id: supplier.id, name: supplier.name, detail: `Saved on this expense; not linked to ${brand?.name ?? 'this brand'}`, isActive: supplier.isActive });
   }
   const brandHasSuppliers = (brandSuppliers?.length ?? 0) > 0;
+  // What is still owed on this bill after everything paid (the same split the server's rules use).
+  const remainingDue = split.remaining === null ? null : split.remaining - supplierPaid;
+
+  // Phones: the sticky Save bar steps aside while the on-screen keyboard is open.
+  const [phone] = useState(isPhoneLayout);
+  const inset = useViewportInset(phone);
+  const keyboardOpen = (inset?.bottom ?? 0) >= KEYBOARD_MIN_PX;
 
   return (
     <>
       <form
         noValidate
-        className="space-y-4 md:space-y-5"
+        aria-label={initial ? 'Edit expense' : 'Add expense'}
+        className="space-y-4 md:space-y-6 [&_button]:scroll-mb-32 [&_input]:scroll-mb-32 [&_select]:scroll-mb-32"
+        onKeyDown={enterMovesToNextField}
         onSubmit={handleSubmit(async (values) => {
           // Synchronous re-entry guard: a fast double tap must not send twice (the server's
           // idempotency key is the second line of defence).
@@ -603,11 +651,11 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           }
         })}
       >
-        <div className="grid gap-4 md:gap-5 lg:grid-cols-2 lg:items-start">
-          <Section step={1} title="Amount">
+        <div className="space-y-4 md:space-y-6">
+          <Section step={1} title="Amount" description="The full bill amount, including anything not paid yet.">
             <Field id="amount" label="Total expense amount" error={errors.amount?.message}>
               <div className="relative">
-                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-medium text-muted-foreground">
+                <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-semibold text-muted-foreground">
                   ₹
                 </span>
                 <Input
@@ -617,308 +665,379 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                   enterKeyHint="next"
                   placeholder="0.00"
                   autoFocus={!initial}
-                  className="figure h-16 pl-10 text-3xl font-semibold md:h-16 md:text-3xl"
+                  className={cn('figure h-16 pl-11 text-3xl font-semibold md:h-16 md:text-3xl', amount !== '' && 'pr-14')}
                   {...errorProps('amount', errors.amount)}
                   {...register('amount')}
                 />
+                {amount !== '' && (
+                  <button
+                    type="button"
+                    aria-label="Clear amount"
+                    className="absolute right-2 top-1/2 inline-flex size-11 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => {
+                      setValue('amount', '', { shouldValidate: submitCount > 0, shouldDirty: true });
+                      setFocus('amount');
+                    }}
+                  >
+                    <X className="size-5" aria-hidden="true" />
+                  </button>
+                )}
               </div>
             </Field>
-            <p className="figure text-sm text-muted-foreground" aria-live="polite">
-              {amountPositive ? formatInr(amount) : 'Enter the full bill amount, including anything still unpaid.'}
+            <p className="figure text-base text-muted-foreground" aria-live="polite" data-testid="amount-in-words">
+              {amountPositive ? `Amount: ${formatInr(amount)}` : 'Type the amount in rupees, e.g. 2500 or 2500.50.'}
             </p>
           </Section>
 
-          <Section step={2} title="Brand and supplier">
-            <Field id="brand" label="Brand" error={errors.brandId?.message} hint="Choose the brand first: its supplier is filled in for you.">
-              <SearchSelect
-                id="brand"
-                noun="brand"
-                icon={Tag}
-                options={brandOptions}
-                value={brand}
-                onChange={(next) => void selectBrand(next ? { id: next.id, name: next.name, isActive: next.isActive ?? true } : null)}
-                placeholder="No brand"
-                noneLabel="No brand"
-                loading={brandsQuery.isPending}
-                emptyText="No brands yet: add them on the Brands page."
-              />
-            </Field>
-
-            <Field
-              id="supplier"
-              label="Supplier"
-              error={errors.supplierId?.message}
-              hint={
-                <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setAddSupplier({ name: '' })}>
-                  {brand ? `+ Add a new supplier for ${brand.name}` : '+ Add a new supplier'}
-                </button>
-              }
-            >
-              {brand ? (
+          <Section step={2} title="Supplier" description="Who the bill is from. Leave it empty if there is no supplier, e.g. rent or tea.">
+            <div className="grid gap-5 md:grid-cols-2 md:items-start">
+              <Field id="brand" label="Brand (optional)" error={errors.brandId?.message} hint="Choosing a brand fills in its supplier for you.">
                 <SearchSelect
-                  id="supplier"
-                  noun="supplier"
-                  icon={Truck}
-                  options={supplierOptions}
-                  value={supplier ? { id: supplier.id, name: supplier.name, isActive: supplier.isActive } : null}
-                  onChange={(next) => {
-                    const detail = brandSuppliers?.find((s) => s.id === next?.id);
-                    void selectSupplier(next ? toSupplierRef({ id: next.id, name: next.name, isActive: next.isActive ?? true }) : null, detail);
-                  }}
-                  placeholder={brandLoad === 'loading' ? 'Loading suppliers…' : brandHasSuppliers ? `Choose ${brand.name}'s supplier` : 'No supplier'}
-                  noneLabel={brandHasSuppliers || brandLoad === 'error' ? null : 'No supplier'}
-                  disabled={brandLoad === 'loading'}
-                  loading={brandLoad === 'loading'}
-                  invalid={Boolean(errors.supplierId)}
-                  describedBy={errors.supplierId ? 'supplier-error' : undefined}
-                  emptyText={`${brand.name} has no linked supplier.`}
+                  id="brand"
+                  noun="brand"
+                  icon={Tag}
+                  options={brandOptions}
+                  value={brand}
+                  onChange={(next) => void selectBrand(next ? { id: next.id, name: next.name, isActive: next.isActive ?? true } : null)}
+                  placeholder="No brand"
+                  noneLabel="No brand"
+                  loading={brandsQuery.isPending}
+                  emptyText="No brands yet: add them on the Brands page."
                 />
-              ) : (
-                <SupplierPicker
-                  id="supplier"
-                  value={supplier}
-                  onChange={(next) => void selectSupplier(next)}
-                  onAddSupplier={(name) => setAddSupplier({ name })}
-                  invalid={Boolean(errors.supplierId)}
-                  describedBy={errors.supplierId ? 'supplier-error' : undefined}
-                />
-              )}
-              {brandLoad === 'error' && brand && (
-                <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="brand-suppliers-error">
-                  <p>Could not load the suppliers of {brand.name}. The supplier was not changed; try again.</p>
-                  <Button size="sm" variant="outline" onClick={() => void selectBrand(brand, true)}>
-                    Try again
-                  </Button>
-                </div>
-              )}
-              {brandNotice && (
-                <p role="status" className="text-xs text-muted-foreground" data-testid="brand-notice">
-                  {brandNotice}
-                </p>
-              )}
-              {loadingDefaults && <p className="text-xs text-muted-foreground">Loading the supplier’s usual categories…</p>}
-              {defaultsError && supplier?.id === defaultsError.id && (
-                <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="defaults-error">
-                  <p>
-                    Could not load the usual categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose them below,
-                    or try again. Everything else you entered is unchanged.
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    loading={loadingDefaults}
-                    onClick={() => void selectSupplier(supplier, brandSuppliers?.find((s) => s.id === supplier.id), true)}
-                  >
-                    {loadingDefaults ? 'Loading…' : 'Try again'}
-                  </Button>
-                </div>
-              )}
-            </Field>
-          </Section>
-        </div>
+              </Field>
 
-        <Section step={3} title="Categories">
-          <MultiSelect
-            label="Categories"
-            noun="category"
-            options={categoryOptions}
-            selected={categoryIds}
-            onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
-            suggestedIds={suggestedCategoryIds}
-            suggestedLabel={`Usual for ${supplierName}`}
-            onCreate={categoryCreator.create}
-            creating={categoryCreator.creating}
-            note={categoryCreator.note}
-            firstBadge="Primary"
-            hint={
-              <>
-                Choose one or more. The first is the primary category (used for category totals); the amount is never split or counted twice.
-                {categories.length === 0 && (
-                  <>
-                    {' '}
-                    No categories yet: type a name to add one, or{' '}
-                    <Link to="/categories" className="text-primary underline">
-                      manage categories
-                    </Link>
-                    .
-                  </>
+              <Field
+                id="supplier"
+                label="Supplier (optional)"
+                error={errors.supplierId?.message}
+                hint={
+                  <button type="button" className="min-h-11 text-left font-medium text-primary underline underline-offset-2" onClick={() => setAddSupplier({ name: '' })}>
+                    {brand ? `+ Add a new supplier for ${brand.name}` : '+ Add a new supplier'}
+                  </button>
+                }
+              >
+                {brand ? (
+                  <SearchSelect
+                    id="supplier"
+                    noun="supplier"
+                    icon={Truck}
+                    options={supplierOptions}
+                    value={supplier ? { id: supplier.id, name: supplier.name, isActive: supplier.isActive } : null}
+                    onChange={(next) => {
+                      const detail = brandSuppliers?.find((s) => s.id === next?.id);
+                      void selectSupplier(next ? toSupplierRef({ id: next.id, name: next.name, isActive: next.isActive ?? true }) : null, detail);
+                    }}
+                    placeholder={brandLoad === 'loading' ? 'Loading suppliers…' : brandHasSuppliers ? `Choose ${brand.name}'s supplier` : 'No supplier'}
+                    noneLabel={brandHasSuppliers || brandLoad === 'error' ? null : 'No supplier'}
+                    disabled={brandLoad === 'loading'}
+                    loading={brandLoad === 'loading'}
+                    invalid={Boolean(errors.supplierId)}
+                    describedBy={errors.supplierId ? 'supplier-error' : undefined}
+                    emptyText={`${brand.name} has no linked supplier.`}
+                  />
+                ) : (
+                  <SupplierPicker
+                    id="supplier"
+                    value={supplier}
+                    onChange={(next) => void selectSupplier(next)}
+                    onAddSupplier={(name) => setAddSupplier({ name })}
+                    invalid={Boolean(errors.supplierId)}
+                    describedBy={errors.supplierId ? 'supplier-error' : undefined}
+                  />
                 )}
-              </>
-            }
-            error={categoryError}
-            testId="expense-categories"
-          />
-        </Section>
-
-        <div className="grid gap-4 md:gap-5 lg:grid-cols-2 lg:items-start">
-          <Section step={4} title="Payment">
-            {status !== null && (
-              <div className="space-y-1.5">
-                <p id="payment-status-label" className="text-sm font-medium">
-                  Payment status
-                </p>
-                <div role="radiogroup" aria-labelledby="payment-status-label" className="grid grid-cols-3 gap-1 rounded-lg bg-surface-muted p-1" data-testid="payment-status">
-                  {STATUS_OPTIONS.map((o) => (
-                    <button
-                      key={o.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={status === o.value}
-                      onClick={() => (o.value === 'full' ? choosePaidInFull() : o.value === 'partial' ? choosePartial() : chooseNotPaid())}
-                      className={cn(
-                        'h-10 rounded-md px-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        status === o.value ? 'bg-card text-foreground shadow-card' : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground" role="status">
-                  {status === 'full' && 'The whole amount was paid now.'}
-                  {status !== 'full' &&
-                    (hasSupplier
-                      ? `Anything not paid now stays payable to ${supplier?.name}.`
-                      : 'Choose the supplier above: an unpaid or part-paid bill stays payable to them.')}
-                  {status === 'partial' && split.allocated === 0n && ' Enter the amount paid now.'}
-                </p>
-              </div>
-            )}
-
-            <fieldset className="space-y-2">
-              <legend className="mb-1.5 text-sm font-medium">{status === 'none' ? 'Paid now (nothing yet)' : 'How it was paid'}</legend>
-              {fields.map((field, i) => {
-                const rowErrors = errors.payments?.[i];
-                return (
-                  <div key={field.id} className="space-y-1" data-testid="payment-row">
-                    <div className="flex items-start gap-2">
-                      <div className="relative min-w-0 flex-1">
-                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
-                        <Input
-                          inputMode="decimal"
-                          autoComplete="off"
-                          placeholder="0.00"
-                          aria-label={`Payment ${i + 1} amount`}
-                          className="figure pl-7"
-                          {...errorProps(`payment-${i}-amount`, rowErrors?.amount)}
-                          {...register(`payments.${i}.amount`, {
-                            onChange: () => {
-                              if (i === 0) followAmount.current = false;
-                            },
-                          })}
-                        />
-                      </div>
-                      <Select
-                        aria-label={`Payment ${i + 1} method`}
-                        className="w-40 shrink-0 sm:w-44"
-                        {...errorProps(`payment-${i}-method`, rowErrors?.paymentMode)}
-                        {...register(`payments.${i}.paymentMode`)}
-                      >
-                        <option value="">Method…</option>
-                        {PAYMENT_MODES.map((m) => (
-                          <option key={m} value={m}>
-                            {PAYMENT_MODE_LABELS[m]}
-                          </option>
-                        ))}
-                      </Select>
-                      {i > 0 ? (
-                        <Button variant="ghost" size="icon" className="shrink-0" aria-label={`Remove payment ${i + 1}`} onClick={() => removeRow(i)}>
-                          <X aria-hidden="true" />
-                        </Button>
-                      ) : (
-                        // The first row is never removable; keep its columns aligned with the rows below.
-                        fields.length > 1 && <span className="size-11 shrink-0 md:size-10" aria-hidden="true" />
-                      )}
-                    </div>
-                    {rowErrors?.amount?.message && (
-                      <p id={`payment-${i}-amount-error`} className="text-sm text-destructive">
-                        Payment {i + 1} amount: {rowErrors.amount.message}
-                      </p>
-                    )}
-                    {rowErrors?.paymentMode?.message && (
-                      <p id={`payment-${i}-method-error`} className="text-sm text-destructive">
-                        Payment {i + 1} method: {rowErrors.paymentMode.message}
-                      </p>
-                    )}
-                    {i === lastIndex && split.remaining !== null && split.remaining > 0n && split.anyEntered && (
-                      <button
-                        type="button"
-                        className="text-xs text-primary underline-offset-2 hover:underline"
-                        onClick={() => {
-                          followAmount.current = false;
-                          const own = MONEY_INPUT.test(rows[i]!.amount.trim()) ? toPaise(rows[i]!.amount.trim()) : 0n;
-                          setValue(`payments.${i}.amount`, fromPaise(own + split.remaining!), { shouldValidate: submitCount > 0 });
-                        }}
-                      >
-                        Use remaining {formatInr(fromPaise(split.remaining))}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <Button variant="soft" size="sm" disabled={fields.length >= MAX_PAYMENT_ROWS} onClick={addRow}>
-                  <Plus aria-hidden="true" /> Add payment
+                {!supplier && !errors.supplierId && (
+                  <p className="text-sm text-muted-foreground" data-testid="no-supplier-note">
+                    No supplier chosen. That is fine for expenses such as rent, wages or tea.
+                  </p>
+                )}
+              </Field>
+            </div>
+            {brandLoad === 'error' && brand && (
+              <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-base" data-testid="brand-suppliers-error">
+                <p>Could not load the suppliers of {brand.name}. The supplier was not changed; try again.</p>
+                <Button variant="outline" onClick={() => void selectBrand(brand, true)}>
+                  Try again
                 </Button>
               </div>
-            </fieldset>
-
-            <dl className="space-y-1.5 rounded-lg bg-surface-muted px-3 py-2.5 text-sm" aria-live="polite" data-testid="payment-summary">
-              <div className="flex items-center justify-between">
-                <dt className="text-muted-foreground">Total expense</dt>
-                <dd className="figure font-medium">{split.total === null ? '—' : formatInr(fromPaise(split.total))}</dd>
-              </div>
-              <div className="flex items-center justify-between">
-                <dt className="text-muted-foreground">Total allocated</dt>
-                <dd className="figure font-medium">{formatInr(fromPaise(split.allocated))}</dd>
-              </div>
-              <div className="flex items-center justify-between border-t pt-1.5">
-                <dt className="text-muted-foreground">
-                  Remaining
-                  {supplierPaid > 0n && <span className="block text-xs">after {formatInr(paiseToString(supplierPaid))} of supplier payments</span>}
-                </dt>
-                <dd
-                  className={cn(
-                    'figure text-base font-semibold',
-                    split.remaining !== null && split.remaining > 0n && (hasSupplier ? 'text-warning' : 'text-destructive'),
-                    split.remaining !== null && split.remaining < 0n && 'text-destructive',
-                  )}
-                  data-testid="payment-remaining"
+            )}
+            {brandNotice && (
+              <p role="status" className="rounded-lg bg-surface-muted p-3 text-base" data-testid="brand-notice">
+                {brandNotice}
+              </p>
+            )}
+            {loadingDefaults && <p className="text-sm text-muted-foreground">Loading the supplier’s usual categories…</p>}
+            {defaultsError && supplier?.id === defaultsError.id && (
+              <div role="alert" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-base" data-testid="defaults-error">
+                <p>
+                  Could not load the usual categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose them below,
+                  or try again. Everything else you entered is unchanged.
+                </p>
+                <Button
+                  variant="outline"
+                  loading={loadingDefaults}
+                  onClick={() => void selectSupplier(supplier, brandSuppliers?.find((s) => s.id === supplier.id), true)}
                 >
-                  {split.remaining === null ? '—' : formatInr(fromPaise(split.remaining - supplierPaid))}
-                </dd>
+                  {loadingDefaults ? 'Loading…' : 'Try again'}
+                </Button>
               </div>
-            </dl>
+            )}
+          </Section>
+
+          <Section step={3} title="What was this expense for?" description="Choose a category. A supplier's usual categories are picked for you.">
+            <MultiSelect
+              label="Category"
+              noun="category"
+              options={categoryOptions}
+              selected={categoryIds}
+              onChange={(ids) => setValue('categoryIds', ids, { shouldValidate: submitCount > 0, shouldDirty: true })}
+              suggestedIds={suggestedCategoryIds}
+              suggestedLabel={`Usual for ${supplierName}`}
+              onCreate={categoryCreator.create}
+              creating={categoryCreator.creating}
+              note={categoryCreator.note}
+              firstBadge="Main"
+              hint={
+                <>
+                  You can choose more than one. The first one is the main category used in reports. The amount is never split.
+                  {categories.length === 0 && (
+                    <>
+                      {' '}
+                      No categories yet: type a name to add one, or{' '}
+                      <Link to="/categories" className="text-primary underline">
+                        manage categories
+                      </Link>
+                      .
+                    </>
+                  )}
+                </>
+              }
+              error={categoryError}
+              testId="expense-categories"
+            />
+
+            <Field id="description" label="Description (optional)" error={errors.description?.message} hint="For example: shop name, or what was bought.">
+              <Input
+                id="description"
+                autoComplete="off"
+                enterKeyHint="next"
+                className={BIG_CONTROL}
+                {...errorProps('description', errors.description)}
+                {...register('description')}
+              />
+            </Field>
+          </Section>
+
+          <Section step={4} title="Payment" description="How much was paid now, and how.">
+            <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_17rem] md:items-start">
+              <div className="min-w-0 space-y-5">
+                {status !== null && (
+                  <div className="space-y-2">
+                    <p id="payment-status-label" className="text-base font-semibold">
+                      Was it paid?
+                    </p>
+                    <div
+                      role="radiogroup"
+                      aria-labelledby="payment-status-label"
+                      className="grid grid-cols-3 gap-1 rounded-xl bg-surface-muted p-1"
+                      data-testid="payment-status"
+                    >
+                      {STATUS_OPTIONS.map((o) => (
+                        <button
+                          key={o.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={status === o.value}
+                          onClick={() => (o.value === 'full' ? choosePaidInFull() : o.value === 'partial' ? choosePartial() : chooseNotPaid())}
+                          className={cn(
+                            'min-h-12 rounded-lg px-2 text-base font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            status === o.value ? 'bg-primary text-primary-foreground shadow-card' : 'text-foreground hover:bg-card',
+                          )}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status === 'full' && 'The whole amount was paid now.'}
+                      {status !== 'full' &&
+                        (hasSupplier
+                          ? `Anything not paid now stays due to ${supplier?.name}.`
+                          : 'Choose the supplier above: an unpaid or part-paid bill stays due to them.')}
+                      {status === 'partial' && split.allocated === 0n && ' Enter the amount paid now.'}
+                    </p>
+                  </div>
+                )}
+
+                <fieldset className="space-y-3">
+                  <legend className="mb-2 text-base font-semibold">{status === 'none' ? 'Paid now (nothing yet)' : 'How it was paid'}</legend>
+                  {fields.map((field, i) => {
+                    const rowErrors = errors.payments?.[i];
+                    const suffix = i === 0 ? '' : ` (payment ${i + 1})`;
+                    return (
+                      <div key={field.id} className={cn('space-y-1.5', i > 0 && 'border-t pt-3')} data-testid="payment-row">
+                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
+                          <div className="min-w-0 space-y-1.5">
+                            <label htmlFor={`payment-${i}-amount`} className="block text-sm font-medium">
+                              Amount paid{suffix}
+                            </label>
+                            <div className="relative">
+                              <span aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                ₹
+                              </span>
+                              <Input
+                                id={`payment-${i}-amount`}
+                                inputMode="decimal"
+                                autoComplete="off"
+                                enterKeyHint="next"
+                                placeholder="0.00"
+                                className={cn('figure pl-7', BIG_CONTROL)}
+                                {...errorProps(`payment-${i}-amount`, rowErrors?.amount)}
+                                {...register(`payments.${i}.amount`, {
+                                  onChange: () => {
+                                    if (i === 0) followAmount.current = false;
+                                  },
+                                })}
+                              />
+                            </div>
+                          </div>
+                          <div className="min-w-0 space-y-1.5">
+                            <label htmlFor={`payment-${i}-method`} className="block text-sm font-medium">
+                              Payment method{suffix}
+                            </label>
+                            <Select
+                              id={`payment-${i}-method`}
+                              className={BIG_CONTROL}
+                              {...errorProps(`payment-${i}-method`, rowErrors?.paymentMode)}
+                              {...register(`payments.${i}.paymentMode`)}
+                            >
+                              <option value="">Choose…</option>
+                              {PAYMENT_MODES.map((m) => (
+                                <option key={m} value={m}>
+                                  {PAYMENT_MODE_LABELS[m]}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                          {i > 0 ? (
+                            <Button variant="ghost" size="icon" className="size-12 shrink-0 md:size-12" aria-label={`Remove payment ${i + 1}`} onClick={() => removeRow(i)}>
+                              <X aria-hidden="true" />
+                            </Button>
+                          ) : (
+                            // The first row is never removable; keep its columns aligned with the rows below.
+                            fields.length > 1 && <span className="size-12 shrink-0" aria-hidden="true" />
+                          )}
+                        </div>
+                        {rowErrors?.amount?.message && (
+                          <p id={`payment-${i}-amount-error`} className="text-sm text-destructive">
+                            Payment {i + 1} amount: {rowErrors.amount.message}
+                          </p>
+                        )}
+                        {rowErrors?.paymentMode?.message && (
+                          <p id={`payment-${i}-method-error`} className="text-sm text-destructive">
+                            Payment {i + 1} method: {rowErrors.paymentMode.message}
+                          </p>
+                        )}
+                        {i === lastIndex && split.remaining !== null && split.remaining > 0n && split.anyEntered && (
+                          <button
+                            type="button"
+                            className="min-h-11 text-sm font-medium text-primary underline underline-offset-2"
+                            onClick={() => {
+                              followAmount.current = false;
+                              const own = MONEY_INPUT.test(rows[i]!.amount.trim()) ? toPaise(rows[i]!.amount.trim()) : 0n;
+                              setValue(`payments.${i}.amount`, fromPaise(own + split.remaining!), { shouldValidate: submitCount > 0 });
+                            }}
+                          >
+                            Use remaining {formatInr(fromPaise(split.remaining))}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <Button variant="soft" disabled={fields.length >= MAX_PAYMENT_ROWS} onClick={addRow}>
+                    <Plus aria-hidden="true" /> Add payment (another method)
+                  </Button>
+                </fieldset>
+              </div>
+
+              <div className="space-y-3 rounded-xl border bg-surface-muted p-4" data-testid="payment-summary">
+                <dl className="space-y-2 text-base" aria-live="polite">
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted-foreground">Total expense</dt>
+                    <dd className="figure font-semibold">{split.total === null ? '—' : formatInr(fromPaise(split.total))}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-muted-foreground">Paid</dt>
+                    <dd className="figure font-semibold">{formatInr(fromPaise(split.allocated))}</dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t pt-2">
+                    <dt className="font-semibold">
+                      Remaining due
+                      {supplierPaid > 0n && (
+                        <span className="block text-sm font-normal text-muted-foreground">after {formatInr(paiseToString(supplierPaid))} of supplier payments</span>
+                      )}
+                    </dt>
+                    <dd className={cn('figure text-xl font-bold', remainingDue !== null && remainingDue < 0n && 'text-destructive')} data-testid="payment-remaining">
+                      {remainingDue === null ? '—' : formatInr(fromPaise(remainingDue))}
+                    </dd>
+                  </div>
+                </dl>
+                {remainingDue !== null && remainingDue >= 0n && (
+                  <p
+                    data-testid="payment-badge"
+                    className={cn(
+                      'inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-base font-semibold',
+                      remainingDue === 0n ? 'bg-primary-soft text-primary-soft-foreground' : 'bg-warning-soft text-foreground ring-1 ring-warning/40',
+                    )}
+                  >
+                    {remainingDue === 0n ? (
+                      <>
+                        <CircleCheck className="size-5 text-primary" aria-hidden="true" /> Fully paid
+                      </>
+                    ) : (
+                      <>
+                        <Clock className="size-5 text-warning" aria-hidden="true" /> Payment pending
+                      </>
+                    )}
+                  </p>
+                )}
+              </div>
+            </div>
             {(showProblem || paymentsServerError) && (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-base text-destructive">
                 {showProblem ? split.problem : paymentsServerError}
               </p>
             )}
             {!splitOk && submitCount > 0 && !showProblem && !paymentsServerError && !hasSupplier && split.total !== null && !split.anyEntered && (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-base text-destructive">
                 Enter how the expense was paid.
               </p>
             )}
           </Section>
 
-          <Section step={5} title="Other details">
-            <Field id="description" label="Description (optional)" error={errors.description?.message}>
-              <Input
-                id="description"
-                autoComplete="off"
-                placeholder="What was bought or paid for (optional)"
-                {...errorProps('description', errors.description)}
-                {...register('description')}
-              />
-            </Field>
+          <Section step={5} title="Date and bill number">
+            <div className="grid gap-5 md:grid-cols-2 md:items-start">
+              <Field id="expenseDate" label="Expense date" error={errors.expenseDate?.message}>
+                <Input
+                  id="expenseDate"
+                  type="date"
+                  max={todayInKolkata()}
+                  className={BIG_CONTROL}
+                  {...errorProps('expenseDate', errors.expenseDate)}
+                  {...register('expenseDate')}
+                />
+              </Field>
 
-            <Field id="expenseDate" label="Expense date" error={errors.expenseDate?.message}>
-              <Input id="expenseDate" type="date" max={todayInKolkata()} {...errorProps('expenseDate', errors.expenseDate)} {...register('expenseDate')} />
-            </Field>
-
-            <Field id="invoiceReference" label="Invoice / bill number (optional)" error={errors.invoiceReference?.message}>
-              <Input id="invoiceReference" autoComplete="off" {...errorProps('invoiceReference', errors.invoiceReference)} {...register('invoiceReference')} />
-            </Field>
+              <Field id="invoiceReference" label="Bill number (optional)" error={errors.invoiceReference?.message} hint="The number printed on the bill, if any.">
+                <Input
+                  id="invoiceReference"
+                  autoComplete="off"
+                  enterKeyHint="done"
+                  className={BIG_CONTROL}
+                  {...errorProps('invoiceReference', errors.invoiceReference)}
+                  {...register('invoiceReference')}
+                />
+              </Field>
+            </div>
 
             {brand &&
               (showExtraBrands ? (
@@ -937,7 +1056,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                   testId="expense-brands"
                 />
               ) : (
-                <button type="button" className="text-sm text-primary underline-offset-2 hover:underline" onClick={() => setShowExtraBrands(true)}>
+                <button type="button" className="min-h-11 text-base font-medium text-primary underline underline-offset-2" onClick={() => setShowExtraBrands(true)}>
                   + The bill covers other brands too
                 </button>
               ))}
@@ -1056,13 +1175,25 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           </div>
         )}
 
-        <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end">
-          <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
-            Cancel
-          </Link>
-          <Button type="submit" size="lg" className="md:min-w-44" loading={isSubmitting || pending.uploading} disabled={saved !== null}>
-            {pending.uploading ? 'Uploading files…' : isSubmitting ? (initial ? 'Updating…' : 'Saving…') : submitLabel}
-          </Button>
+        {/* Save bar: sticky above the phone's bottom navigation (and near the bottom on desktop) so it
+            is always easy to reach. While the on-screen keyboard is open it stays in place in the page
+            instead, so it can never cover the field being typed in. */}
+        <div
+          data-testid="expense-actions"
+          data-sticky={keyboardOpen ? 'false' : 'true'}
+          className={cn(
+            'z-10 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur md:mx-0 md:rounded-xl md:border md:px-5',
+            keyboardOpen ? 'static' : 'sticky bottom-[calc(var(--bottom-nav-height)+env(safe-area-inset-bottom))] md:bottom-4',
+          )}
+        >
+          <div className="flex flex-col-reverse gap-2 md:flex-row md:items-center md:justify-end">
+            <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg', className: 'h-12 text-base' })}>
+              Cancel
+            </Link>
+            <Button type="submit" size="lg" className="h-14 text-lg md:h-12 md:min-w-52 md:text-base" loading={isSubmitting || pending.uploading} disabled={saved !== null}>
+              {pending.uploading ? 'Uploading files…' : isSubmitting ? (initial ? 'Updating…' : 'Saving…') : submitLabel}
+            </Button>
+          </div>
         </div>
       </form>
 

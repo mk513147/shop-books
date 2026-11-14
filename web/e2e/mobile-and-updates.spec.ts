@@ -3,7 +3,6 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 /**
  * Real-browser checks (production build, real CSS and service worker) for:
  *   - search results staying above the phone keyboard (supplier sheet, inline category search);
- *   - the app-update mechanism (new frontend build, backend compatibility change, unsaved input).
  *
  * The API is mocked with context.route (no server or database needed). The on-screen keyboard is
  * simulated by replacing window.visualViewport, which is exactly what a real keyboard changes.
@@ -177,75 +176,4 @@ test.describe('desktop dropdowns are unchanged', () => {
   });
 });
 
-test.describe('app updates', () => {
-  // One browser is enough for the update logic.
-  test.beforeEach(({ isMobile }) => test.skip(!isMobile, 'run once (installed-PWA-like phone context)'));
-
-  async function open(page: Page, context: BrowserContext, state: MockState) {
-    await mockApi(context, state);
-    // Full page loads only (in-app route changes are not reloads).
-    const loads: string[] = [];
-    page.on('load', () => loads.push(page.url()));
-    await page.goto('/supplier-payments/new');
-    await expect(page.getByRole('heading', { name: 'Record supplier payment' })).toBeVisible();
-    return loads;
-  }
-  const currentBuild = async (page: Page) => (await (await page.request.get('/version.json')).json()).buildId as string;
-  const foreground = (page: Page) =>
-    page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
-
-  test('a new frontend build: notice, one refresh, no loop', async ({ page, context }) => {
-    const state: MockState = { serverVersion: { version: '1', clientCompat: 1 }, publishedBuild: null };
-    const loads = await open(page, context, state);
-    await expect(page.getByTestId('app-update-notice')).toHaveCount(0);
-
-    state.publishedBuild = `${await currentBuild(page)}-next`; // deployment of a new frontend
-    const reloaded = page.waitForEvent('load');
-    await foreground(page);
-    await expect(page.getByTestId('app-update-notice')).toContainText('Shop-Books has been updated. Refreshing to the latest version');
-    await reloaded;
-    // The preview still serves the old files, so the reloaded page is not on the new build: it must
-    // ask instead of reloading again.
-    await expect(page.getByTestId('app-update-notice')).toContainText('Tap Refresh', { timeout: 10_000 });
-    await page.waitForTimeout(2500);
-    expect(loads).toHaveLength(2);
-  });
-
-  test('backend: a new release label never reloads; a compatibility raise refreshes once', async ({ page, context }) => {
-    const state: MockState = { serverVersion: { version: '1', clientCompat: 1 }, publishedBuild: null };
-    const loads = await open(page, context, state);
-
-    state.serverVersion = { version: '2', clientCompat: 1 }; // restart / ordinary backend release
-    await foreground(page);
-    await page.waitForTimeout(2500);
-    await expect(page.getByTestId('app-update-notice')).toHaveCount(0);
-    expect(loads).toHaveLength(1);
-
-    state.serverVersion = { version: '3', clientCompat: 2 }; // API needs a newer web app
-    const reloaded = page.waitForEvent('load');
-    await foreground(page);
-    await reloaded;
-    await expect(page.getByTestId('app-update-notice')).toContainText('Tap Refresh', { timeout: 10_000 });
-    await page.waitForTimeout(2500);
-    expect(loads).toHaveLength(2);
-  });
-
-  test('unsaved input defers the refresh until the user leaves the form', async ({ page, context }) => {
-    const state: MockState = { serverVersion: { version: '1', clientCompat: 1 }, publishedBuild: null };
-    const loads = await open(page, context, state);
-    await page.getByLabel('Amount paid').fill('250');
-    await page.getByLabel('Amount paid').blur();
-
-    state.publishedBuild = `${await currentBuild(page)}-next`;
-    await foreground(page);
-    await expect(page.getByTestId('app-update-notice')).toContainText('It will refresh after you save or leave this screen');
-    await page.waitForTimeout(4000); // longer than the safety re-check: still no reload
-    expect(loads).toHaveLength(1);
-    await expect(page.getByLabel('Amount paid')).toHaveValue('250');
-
-    const reloaded = page.waitForEvent('load');
-    await page.getByRole('link', { name: 'Supplier payments' }).first().click(); // leaves the form
-    await reloaded;
-    expect(loads.length).toBeGreaterThanOrEqual(2);
-  });
-});
+// App updates are verified against two real production builds: e2e/deploy-sim/pwa-updates.deploy.ts.

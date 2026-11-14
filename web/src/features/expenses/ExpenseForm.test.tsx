@@ -124,11 +124,11 @@ const selected = (box: () => ReturnType<typeof within>) =>
     .map((b: HTMLElement) => b.getAttribute('aria-label')!.replace(/^Remove /, ''));
 
 async function chooseSupplier(user: User, name: RegExp) {
-  await user.click(screen.getByRole('button', { name: 'Supplier' }));
+  await user.click(screen.getByRole('button', { name: 'Supplier (optional)' }));
   await user.click(await screen.findByRole('option', { name }));
 }
 async function chooseBrand(user: User, name: string) {
-  await user.click(screen.getByRole('button', { name: 'Brand' }));
+  await user.click(screen.getByRole('button', { name: 'Brand (optional)' }));
   await user.click(await screen.findByRole('option', { name }));
 }
 async function addCategory(user: User, name: string) {
@@ -173,7 +173,7 @@ describe('ExpenseForm: multiple categories (Feature 6)', () => {
     await addCategory(user, 'Packaging');
     await addCategory(user, 'Maintenance');
     expect(selected(categoriesBox)).toEqual(['Transport', 'Packaging', 'Maintenance']);
-    expect(categoriesBox().getByText('Primary')).toBeInTheDocument();
+    expect(categoriesBox().getByText('Main')).toBeInTheDocument();
     // A selected category is no longer offered (no duplicates).
     expect(categoriesBox().queryByRole('button', { name: 'Transport' })).not.toBeInTheDocument();
     await user.click(categoriesBox().getByRole('button', { name: 'Remove Packaging' }));
@@ -200,26 +200,27 @@ describe('ExpenseForm: payment breakdown', () => {
     expect(screen.getAllByTestId('payment-row')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /Remove payment/ })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('2500');
-    expect(summary().getByText('Total allocated').nextSibling).toHaveTextContent('₹2,500.00');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('2500');
+    expect(summary().getByText('Paid').nextSibling).toHaveTextContent('₹2,500.00');
+    expect(screen.getByTestId('payment-badge')).toHaveTextContent('Fully paid');
     expect(screen.getByTestId('payment-remaining')).toHaveTextContent('₹0.00');
   });
 
   it('adds and removes rows (three or more) and updates the totals immediately', async () => {
     const { user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
-    await user.clear(screen.getByLabelText('Payment 1 amount'));
-    await user.type(screen.getByLabelText('Payment 1 amount'), '1000');
+    await user.clear(screen.getByLabelText('Amount paid'));
+    await user.type(screen.getByLabelText('Amount paid'), '1000');
     expect(screen.getByTestId('payment-remaining')).toHaveTextContent('₹1,500.00');
 
     await user.click(screen.getByRole('button', { name: /Add payment/ }));
     expect(screen.getAllByTestId('payment-row')).toHaveLength(2);
-    expect(screen.getByLabelText('Payment 2 amount')).toHaveValue('1500.00');
+    expect(screen.getByLabelText('Amount paid (payment 2)')).toHaveValue('1500.00');
     expect(screen.getByTestId('payment-remaining')).toHaveTextContent('₹0.00');
 
     await user.click(screen.getByRole('button', { name: /Add payment/ }));
     expect(screen.getAllByTestId('payment-row')).toHaveLength(3);
-    await user.type(screen.getByLabelText('Payment 3 amount'), '100');
+    await user.type(screen.getByLabelText('Amount paid (payment 3)'), '100');
     expect(screen.getByTestId('payment-remaining')).toHaveTextContent('-₹100.00');
 
     await user.click(screen.getByRole('button', { name: 'Remove payment 3' }));
@@ -234,14 +235,14 @@ describe('ExpenseForm: payment breakdown', () => {
     const { onSubmit, user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
     await addCategory(user, 'Packaging');
-    await user.clear(screen.getByLabelText('Payment 1 amount'));
-    await user.type(screen.getByLabelText('Payment 1 amount'), '1000');
+    await user.clear(screen.getByLabelText('Amount paid'));
+    await user.type(screen.getByLabelText('Amount paid'), '1000');
     expect(screen.getByRole('alert')).toHaveTextContent(/₹1,500\.00 is still unallocated/);
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     expect(onSubmit).not.toHaveBeenCalled();
 
-    await user.clear(screen.getByLabelText('Payment 1 amount'));
-    await user.type(screen.getByLabelText('Payment 1 amount'), '3000');
+    await user.clear(screen.getByLabelText('Amount paid'));
+    await user.type(screen.getByLabelText('Amount paid'), '3000');
     expect(screen.getByRole('alert')).toHaveTextContent(/₹500\.00 more than the expense amount ₹2,500\.00/);
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -251,11 +252,11 @@ describe('ExpenseForm: payment breakdown', () => {
     const { onSubmit, user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
     await addCategory(user, 'Packaging');
-    await user.clear(screen.getByLabelText('Payment 1 amount'));
-    await user.type(screen.getByLabelText('Payment 1 amount'), '1000');
-    await user.selectOptions(screen.getByLabelText('Payment 1 method'), 'upi');
+    await user.clear(screen.getByLabelText('Amount paid'));
+    await user.type(screen.getByLabelText('Amount paid'), '1000');
+    await user.selectOptions(screen.getByLabelText('Payment method'), 'upi');
     await user.click(screen.getByRole('button', { name: /Add payment/ }));
-    await user.selectOptions(screen.getByLabelText('Payment 2 method'), 'cash');
+    await user.selectOptions(screen.getByLabelText('Payment method (payment 2)'), 'cash');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0]![0].payments).toEqual([
@@ -270,7 +271,7 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
     const { user } = renderForm();
     expect(screen.queryByTestId('payment-status')).not.toBeInTheDocument(); // nothing to pay yet
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('2500');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('2500');
     expect(status().getByRole('radio', { name: 'Paid in full' })).toHaveAttribute('aria-checked', 'true');
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'false');
     expect(status().getByRole('radio', { name: 'Not paid yet' })).toBeInTheDocument();
@@ -279,17 +280,17 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
   it('selecting a supplier keeps the entered payment amount, method and status', async () => {
     const { onSubmit, user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
-    await user.selectOptions(screen.getByLabelText('Payment 1 method'), 'upi');
+    await user.selectOptions(screen.getByLabelText('Payment method'), 'upi');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('ABC Distributors'));
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('2500');
-    expect(screen.getByLabelText('Payment 1 method')).toHaveValue('upi');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('ABC Distributors'));
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('2500');
+    expect(screen.getByLabelText('Payment method')).toHaveValue('upi');
     expect(status().getByRole('radio', { name: 'Paid in full' })).toHaveAttribute('aria-checked', 'true');
     // Changing the supplier again, or removing it, does not touch the payment either.
     await chooseSupplier(user, /XYZ Traders/);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('XYZ Traders'));
     await removeSupplier(user);
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('2500');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('2500');
     await addCategory(user, 'Packaging');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -300,9 +301,9 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
     const { user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '250');
     await chooseSupplier(user, /ABC Distributors/);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('ABC'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('ABC'));
     await user.type(screen.getByLabelText('Total expense amount'), '0');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('2500');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('2500');
   });
 
   it('part paid: the remainder stays payable to the supplier', async () => {
@@ -312,11 +313,11 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
     await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     await user.click(status().getByRole('radio', { name: 'Part paid' }));
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveFocus();
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('');
+    expect(screen.getByLabelText('Amount paid')).toHaveFocus();
     await user.keyboard('1000');
     expect(screen.getByTestId('payment-remaining')).toHaveTextContent('₹1,500.00');
-    expect(screen.getByText(/stays payable to ABC Distributors/)).toBeInTheDocument();
+    expect(screen.getByText(/stays due to ABC Distributors/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0]![0]).toMatchObject({ supplierId: 's1', payments: [{ amount: '1000', paymentMode: 'cash' }] });
@@ -327,7 +328,7 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
     await user.type(screen.getByLabelText('Total expense amount'), '2500');
     await addCategory(user, 'Packaging');
     await user.click(status().getByRole('radio', { name: 'Not paid yet' }));
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('');
     expect(screen.getByRole('alert')).toHaveTextContent(/without a supplier must be paid in full/);
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -351,7 +352,7 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
       } as unknown as Expense,
     });
     expect(status().getByRole('radio', { name: 'Not paid yet' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('');
     await user.clear(screen.getByLabelText(/Description/));
     await user.type(screen.getByLabelText(/Description/), 'Boxes and tape');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
@@ -371,7 +372,7 @@ describe('ExpenseForm: payment status bug fix (Feature 5)', () => {
     });
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
     await user.type(screen.getByLabelText('Total expense amount'), '0');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1000.00');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('1000.00');
   });
 });
 
@@ -383,7 +384,7 @@ describe('ExpenseForm: supplier default categories (Feature 7, without a brand)'
     await waitFor(() => expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging']));
     // 16. archived defaults are never auto-selected; brands are chosen first, never by the supplier
     expect(screen.queryByText('Retired category')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('No brand');
+    expect(screen.getByRole('button', { name: 'Brand (optional)' })).toHaveTextContent('No brand');
 
     await user.click(categoriesBox().getByRole('button', { name: 'Remove Packaging' }));
     await addCategory(user, 'Maintenance');
@@ -419,15 +420,15 @@ describe('ExpenseForm: supplier default categories (Feature 7, without a brand)'
     await chooseSupplier(user, /XYZ Traders/);
     expect(await screen.findByText(/Replace them with the usual ones for XYZ Traders/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('ABC Distributors');
+    expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('ABC Distributors');
     expect(selected(categoriesBox)).toEqual(['Electronics']);
 
     await chooseSupplier(user, /XYZ Traders/);
     await user.click(await screen.findByRole('button', { name: 'Use XYZ Traders’s' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('XYZ Traders'));
     expect(selected(categoriesBox)).toEqual(['Transport']);
     expect(screen.getByLabelText('Total expense amount')).toHaveValue('3000');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1000');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('1000');
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText(/Description/)).toHaveValue('TV stock');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
@@ -467,10 +468,10 @@ describe('ExpenseForm: supplier defaults cannot be loaded (M3)', () => {
     failDetailFor.add('s2');
     await chooseSupplier(user, /XYZ Traders/);
     expect(await screen.findByTestId('defaults-error')).toHaveTextContent(/Could not load the usual categories of XYZ Traders/);
-    expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders');
+    expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('XYZ Traders');
     noneSelected(categoriesBox);
     expect(screen.getByLabelText('Total expense amount')).toHaveValue('3000');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1000');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('1000');
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText(/Description/)).toHaveValue('TV stock');
     expect(screen.getByText('bill.pdf')).toBeInTheDocument();
@@ -495,12 +496,12 @@ describe('ExpenseForm: supplier defaults cannot be loaded (M3)', () => {
     await chooseSupplier(user, /XYZ Traders/);
     expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('ABC Distributors');
+    expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('ABC Distributors');
     expect(selected(categoriesBox)).toEqual(['Electronics', 'Packaging', 'Maintenance']);
 
     await chooseSupplier(user, /XYZ Traders/);
     await user.click(await screen.findByRole('button', { name: 'Remove them' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('XYZ Traders'));
     expect(selected(categoriesBox)).toEqual(['Maintenance']); // only what the user added themselves
     expect(screen.getByTestId('defaults-error')).toBeInTheDocument();
   });
@@ -515,7 +516,7 @@ describe('ExpenseForm: supplier defaults cannot be loaded (M3)', () => {
     failDetailFor.add('s2');
     await chooseSupplier(user, /XYZ Traders/);
     await user.click(await screen.findByRole('button', { name: 'Keep my selections' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier' })).toHaveTextContent('XYZ Traders'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Supplier (optional)' })).toHaveTextContent('XYZ Traders'));
     expect(selected(categoriesBox)).toEqual(['Electronics']);
 
     failDetailFor.clear();
@@ -530,7 +531,7 @@ describe('ExpenseForm: supplier defaults cannot be loaded (M3)', () => {
 });
 
 describe('ExpenseForm: brand-first entry (Feature 3)', () => {
-  const supplierButton = () => screen.getByRole('button', { name: 'Supplier' });
+  const supplierButton = () => screen.getByRole('button', { name: 'Supplier (optional)' });
   const supplierChoices = async (user: User) => {
     await user.click(supplierButton());
     const names = (await within(await screen.findByRole('listbox', { name: 'supplier' })).findAllByRole('option')).map((o) => o.textContent ?? '');
@@ -609,22 +610,22 @@ describe('ExpenseForm: brand-first entry (Feature 3)', () => {
     await chooseBrand(user, 'HP');
     expect(await screen.findByText(/ABC Distributors is not linked to HP\. XYZ Traders, its only supplier, will be selected instead/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('Samsung');
+    expect(screen.getByRole('button', { name: 'Brand (optional)' })).toHaveTextContent('Samsung');
     expect(supplierButton()).toHaveTextContent('ABC Distributors');
 
     await chooseBrand(user, 'HP');
     await user.click(await screen.findByRole('button', { name: 'Change brand' }));
     await waitFor(() => expect(supplierButton()).toHaveTextContent('XYZ Traders'));
-    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('HP');
+    expect(screen.getByRole('button', { name: 'Brand (optional)' })).toHaveTextContent('HP');
     expect(selected(categoriesBox)).toEqual(['Transport']); // untouched defaults follow the supplier
     expect(screen.getByLabelText('Total expense amount')).toHaveValue('4000');
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveValue('1500');
+    expect(screen.getByLabelText('Amount paid')).toHaveValue('1500');
     expect(status().getByRole('radio', { name: 'Part paid' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText(/Description/)).toHaveValue('Printers');
 
     // A brand the current supplier also supplies keeps it, silently.
     await chooseBrand(user, 'LG');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('LG'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Brand (optional)' })).toHaveTextContent('LG'));
     expect(supplierButton()).toHaveTextContent('XYZ Traders');
     expect(screen.queryByRole('button', { name: 'Change brand' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
@@ -657,7 +658,7 @@ describe('ExpenseForm: brand-first entry (Feature 3)', () => {
         allocatedPayments: '0.00', outstanding: '0.00', paymentMode: 'cash', invoiceReference: null, status: 'active', version: 1, documentCount: 0,
       } as unknown as Expense,
     });
-    expect(screen.getByRole('button', { name: 'Brand' })).toHaveTextContent('LG');
+    expect(screen.getByRole('button', { name: 'Brand (optional)' })).toHaveTextContent('LG');
     expect(supplierButton()).toHaveTextContent('XYZ Traders');
     expect(selected(categoriesBox)).toEqual(['Maintenance']);
     expect(selected(brandsBox)).toEqual(['HP']); // the other brand of this expense
@@ -773,12 +774,12 @@ describe('ExpenseForm: payment row accessibility (L3)', () => {
   it('links amount and method errors to their own inputs and shows both', async () => {
     const { user } = renderForm();
     await user.type(screen.getByLabelText('Total expense amount'), '100');
-    await user.clear(screen.getByLabelText('Payment 1 amount'));
-    await user.type(screen.getByLabelText('Payment 1 amount'), '0');
-    await user.selectOptions(screen.getByLabelText('Payment 1 method'), '');
+    await user.clear(screen.getByLabelText('Amount paid'));
+    await user.type(screen.getByLabelText('Amount paid'), '0');
+    await user.selectOptions(screen.getByLabelText('Payment method'), '');
     await user.click(screen.getByRole('button', { name: 'Save expense' }));
-    const amount = screen.getByLabelText('Payment 1 amount');
-    const method = screen.getByLabelText('Payment 1 method');
+    const amount = screen.getByLabelText('Amount paid');
+    const method = screen.getByLabelText('Payment method');
     await waitFor(() => expect(amount).toHaveAttribute('aria-invalid', 'true'));
     expect(amount).toHaveAccessibleDescription('Payment 1 amount: Must be more than zero');
     expect(method).toHaveAttribute('aria-invalid', 'true');
@@ -791,9 +792,9 @@ describe('ExpenseForm: payment row accessibility (L3)', () => {
     await user.click(screen.getByRole('button', { name: /Add payment/ }));
     await user.click(screen.getByRole('button', { name: /Add payment/ }));
     await user.click(screen.getByRole('button', { name: 'Remove payment 3' }));
-    expect(screen.getByLabelText('Payment 2 amount')).toHaveFocus();
+    expect(screen.getByLabelText('Amount paid (payment 2)')).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Remove payment 2' }));
-    expect(screen.getByLabelText('Payment 1 amount')).toHaveFocus();
+    expect(screen.getByLabelText('Amount paid')).toHaveFocus();
   });
 });
 

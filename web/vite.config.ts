@@ -60,10 +60,12 @@ export default defineConfig(({ mode, command }) => {
       tailwindcss(),
       versionFile(BUILD_ID),
       VitePWA({
-        // The new service worker takes over at once (skipWaiting/clientsClaim); WHEN the page
-        // reloads onto it is decided by the app (src/features/system/app-update.ts), which also
-        // registers it (src/main.tsx), so no reload ever interrupts unsaved work.
-        registerType: 'autoUpdate',
+        // A new service worker installs next to the running page and WAITS: it never takes over
+        // (or deletes the old precache) under a page that is still using the old files. The app
+        // (src/features/system/app-update.ts) detects the release via /version.json, tells the
+        // waiting worker to take over (SKIP_WAITING message) when it is safe, then reloads once.
+        // The app also registers it (src/main.tsx).
+        registerType: 'prompt',
         injectRegister: false,
         includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
         manifest: {
@@ -91,8 +93,9 @@ export default defineConfig(({ mode, command }) => {
           navigateFallback: '/index.html',
           navigateFallbackDenylist: NAVIGATE_FALLBACK_DENYLIST,
           cleanupOutdatedCaches: true,
-          // Explicit: with injectRegister false the plugin no longer sets these for autoUpdate.
-          skipWaiting: true,
+          // No automatic skipWaiting: Workbox then adds the SKIP_WAITING message listener used by
+          // prepareServiceWorker(). clientsClaim: once it takes over, it controls the open page.
+          skipWaiting: false,
           clientsClaim: true,
         },
         devOptions: { enabled: false },

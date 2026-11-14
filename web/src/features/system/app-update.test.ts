@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { AppUpdater, isChunkLoadError, MIN_CHECK_INTERVAL_MS, RELOAD_GUARD_MS, reloadOnceForChunkError, type AppUpdaterDeps, type ServerVersion, type UpdateStatus } from './app-update';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AppUpdater, fetchPublishedBuild, isChunkLoadError, MIN_CHECK_INTERVAL_MS, RELOAD_GUARD_MS, reloadOnceForChunkError, type AppUpdaterDeps, type ServerVersion, type UpdateStatus } from './app-update';
 
 class MemoryStorage {
   private map = new Map<string, string>();
@@ -23,7 +23,7 @@ interface Harness {
   prepare: ReturnType<typeof vi.fn>;
   fetchBuild: ReturnType<typeof vi.fn>;
   fetchServer: ReturnType<typeof vi.fn>;
-  state: { build: string | null; server: ServerVersion | null; safe: boolean; time: number };
+  state: { build: string | null; server: ServerVersion | null; safe: boolean; time: number; online: boolean };
 }
 
 /** One "page load" of the app. Pass the same storage to simulate the page after a reload. */
@@ -33,6 +33,7 @@ function load(opts: { currentBuild?: string; build?: string | null; server?: Ser
     server: opts.server === undefined ? { version: '1.0', clientCompat: 1 } : opts.server,
     safe: opts.safe ?? true,
     time: 1_000_000,
+    online: true,
   };
   const statuses: UpdateStatus[] = [];
   const reload = vi.fn();
@@ -53,6 +54,8 @@ function load(opts: { currentBuild?: string; build?: string | null; server?: Ser
     storage: opts.storage ?? new MemoryStorage(),
     now: () => state.time,
     wait: async () => undefined,
+    isOnline: () => state.online,
+    timeoutMs: 50,
   };
   return { updater: new AppUpdater(deps), deps, statuses, reload, hardReload, prepare, fetchBuild, fetchServer, state };
 }
@@ -65,126 +68,192 @@ describe('frontend releases', () => {
     expect(h.reload).not.toHaveBeenCalled();
   });
 
-  it('refreshes once, after preparing the service worker, when a new build is published and nothing is unsaved', async () => {
+  it('on start-up a new build is applied at once when nothing is unsaved: service worker first, one reload', async () => {
     const h = load({ build: 'build-B' });
     await h.updater.start();
-    expect(h.statuses).toEqual(['refreshing']);
+    expect(h.statuses).toEqual(['updating']);
     expect(h.prepare).toHaveBeenCalledTimes(1);
     expect(h.prepare.mock.invocationCallOrder[0]!).toBeLessThan(h.reload.mock.invocationCallOrder[0]!);
     expect(h.reload).toHaveBeenCalledTimes(1);
-    // Further triggers while refreshing do nothing.
-    h.state.time += MIN_CHECK_INTERVAL_MS * 2;
-    await h.updater.check(true);
+  });
+
+  it('while the app is open (foreground / periodic check) the update is offered, not forced: "Update now" applies it', async () => {
+    const h = load();
+    await h.updater.start();
+    h.state.build = 'build-B';
+    h.state.time += MIN_CHECK_INTERVAL_MS;
+    await h.updater.check();
+    expect(h.updater.getStatus()).toBe('available');
+    expect(h.updater.getTarget()).toBe('build-B');
+    expect(h.reload).not.toHaveBeenCalled();
+
+    await h.updater.updateNow();
+    expect(h.statuses).toEqual(['available', 'updating']);
     expect(h.reload).toHaveBeenCalledTimes(1);
   });
 
-  it('after a successful reload the new page forgets the attempt (a later release refreshes again)', async () => {
-    const storage = new MemoryStorage();
-    const first = load({ build: 'build-B', storage });
-    await first.updater.start();
-    expect(first.reload).toHaveBeenCalledTimes(1);
-
-    const second = load({ currentBuild: 'build-B', build: 'build-B', storage });
-    await second.updater.start();
-    expect(second.updater.getStatus()).toBe('current');
-
-    const third = load({ currentBuild: 'build-B', build: 'build-C', storage });
-    await third.updater.start();
-    expect(third.reload).toHaveBeenCalledTimes(1);
+  it('an offered update is applied by itself at the next safe moment (another screen)', async () => {
+    const h = load();
+    await h.updater.start();
+    h.state.build = 'build-B';
+    await h.updater.check(true);
+    h.state.safe = false;
+    await h.updater.atSafeMoment();
+    expect(h.reload).not.toHaveBeenCalled();
+    h.state.safe = true;
+    await h.updater.atSafeMoment();
+    expect(h.reload).toHaveBeenCalledTimes(1);
   });
 
-  it('never loops: if the reload did not reach the new build, the user is asked instead', async () => {
+  it('after a successful reload the new page forgets the attempt (a later release updates again)', async () => {
     const storage = new MemoryStorage();
-    const first = load({ build: 'build-B', storage });
-    await first.updater.start();
-    expect(first.reload).toHaveBeenCalledTimes(1);
+    const a = load({ build: 'build-B', storage });
+    await a.updater.start();
+    expect(a.reload).toHaveBeenCalledTimes(1);
 
-    // Same old build came back (stale cache): no second automatic reload.
-    const second = load({ currentBuild: 'build-A', build: 'build-B', storage });
-    await second.updater.start();
-    expect(second.reload).not.toHaveBeenCalled();
-    expect(second.updater.getStatus()).toBe('manual');
-    // The Refresh button resets the service worker instead of reloading into the same cache.
-    await second.updater.refreshNow();
-    expect(second.hardReload).toHaveBeenCalledTimes(1);
+    const b = load({ currentBuild: 'build-B', build: 'build-B', storage });
+    await b.updater.start();
+    expect(b.updater.getStatus()).toBe('current');
+    b.state.build = 'build-C';
+    await b.updater.check(true);
+    await b.updater.updateNow();
+    expect(b.reload).toHaveBeenCalledTimes(1);
   });
 
-  it('a failed service-worker update asks the user instead of reloading into old files', async () => {
+  it('never loops: if the reload did not reach the new build, the user is told and "Update now" resets the service worker', async () => {
+    const storage = new MemoryStorage();
+    const a = load({ build: 'build-B', storage });
+    await a.updater.start();
+    expect(a.reload).toHaveBeenCalledTimes(1);
+
+    // Same old build again (e.g. the service worker served the old files).
+    const b = load({ build: 'build-B', storage });
+    await b.updater.start();
+    expect(b.reload).not.toHaveBeenCalled();
+    expect(b.updater.getStatus()).toBe('failed');
+    await b.updater.updateNow();
+    expect(b.hardReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed service-worker update is reported instead of reloading into old files', async () => {
     const h = load({ build: 'build-B', prepareOk: false });
     await h.updater.start();
     expect(h.reload).not.toHaveBeenCalled();
-    expect(h.updater.getStatus()).toBe('manual');
+    expect(h.updater.getStatus()).toBe('failed');
   });
 
-  it('cannot reach /version.json or the API: no change, no reload', async () => {
+  it('a newer version that is already installed (waiting) is used: prepare succeeds and one reload follows', async () => {
+    const h = load();
+    await h.updater.start();
+    h.state.build = 'build-B';
+    await h.updater.check(true);
+    await h.updater.updateNow();
+    expect(h.prepare).toHaveBeenCalledTimes(1);
+    expect(h.reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('network problems', () => {
+  it('cannot reach /version.json or the API: no change, no reload, and the next trigger checks again at once', async () => {
     const h = load({ build: null, server: null });
-    h.fetchBuild.mockRejectedValueOnce(new TypeError('offline'));
     await h.updater.start();
     expect(h.updater.getStatus()).toBe('current');
     expect(h.reload).not.toHaveBeenCalled();
+    h.state.build = 'build-B';
+    await h.updater.check(); // not throttled: the last check did not get an answer
+    expect(h.updater.getStatus()).toBe('available');
+  });
+
+  it('a request that never answers times out instead of blocking every later check', async () => {
+    const h = load();
+    h.fetchBuild.mockImplementationOnce(() => new Promise(() => undefined));
+    h.fetchServer.mockImplementationOnce(() => new Promise(() => undefined));
+    await h.updater.start(); // resolves after the 50 ms test timeout
+    expect(h.updater.getStatus()).toBe('current');
+    h.state.build = 'build-B';
+    await h.updater.check();
+    expect(h.updater.getStatus()).toBe('available');
+  });
+
+  it('a slow or sleeping API never delays detecting a new frontend build', async () => {
+    const h = load();
+    await h.updater.start();
+    h.fetchServer.mockImplementationOnce(() => new Promise(() => undefined));
+    h.state.build = 'build-B';
+    const started = Date.now();
+    await h.updater.check(true);
+    expect(h.updater.getStatus()).toBe('available');
+    expect(Date.now() - started).toBeLessThan(45);
+  });
+
+  it('offline: the update is kept on offer and never started', async () => {
+    const h = load();
+    await h.updater.start();
+    h.state.build = 'build-B';
+    await h.updater.check(true);
+    h.state.online = false;
+    await h.updater.updateNow();
+    expect(h.prepare).not.toHaveBeenCalled();
+    expect(h.updater.getStatus()).toBe('available');
   });
 });
 
 describe('unsaved work', () => {
-  it('defers the refresh with a prompt while the user has unsaved input, then refreshes once it is safe', async () => {
+  it('on start-up with unsaved input (restored form) the update is only offered, then applied once it is safe', async () => {
     const h = load({ build: 'build-B', safe: false });
     await h.updater.start();
-    expect(h.updater.getStatus()).toBe('waiting');
+    expect(h.updater.getStatus()).toBe('available');
     expect(h.reload).not.toHaveBeenCalled();
-    expect(h.prepare).not.toHaveBeenCalled();
-
-    await h.updater.safeNow(); // still unsafe
-    expect(h.reload).not.toHaveBeenCalled();
-
-    h.state.safe = true; // saved / left the form
-    await h.updater.safeNow();
-    expect(h.statuses).toEqual(['waiting', 'refreshing']);
+    h.state.safe = true;
+    await h.updater.atSafeMoment();
     expect(h.reload).toHaveBeenCalledTimes(1);
   });
 
-  it('goes back to waiting if the user starts typing while "Refreshing…" is shown', async () => {
+  it('goes back to "available" if the user starts typing while "Updating..." is shown', async () => {
     const h = load({ build: 'build-B' });
-    let calls = 0;
-    h.deps.isSafe = () => ++calls === 1; // safe at first, not after the notice delay
-    await h.updater.start();
+    const updater = new AppUpdater({
+      ...h.deps,
+      wait: async () => {
+        h.state.safe = false;
+      },
+    });
+    await updater.start();
     expect(h.reload).not.toHaveBeenCalled();
-    expect(h.updater.getStatus()).toBe('waiting');
+    expect(updater.getStatus()).toBe('available');
   });
 });
 
 describe('backend releases', () => {
   it('a backend restart or a new release label alone never reloads the app', async () => {
-    const h = load({ server: { version: '1.0', clientCompat: 1 } });
+    const h = load();
     await h.updater.start();
-    h.state.server = { version: '1.1', clientCompat: 1 };
-    h.state.time += MIN_CHECK_INTERVAL_MS + 1;
-    await h.updater.check();
-    expect(h.updater.getServerVersion()).toBe('1.1');
-    expect(h.reload).not.toHaveBeenCalled();
+    h.state.server = { version: '2.0', clientCompat: 1 };
+    await h.updater.check(true);
+    h.state.server = null; // restarting
+    await h.updater.check(true);
     expect(h.updater.getStatus()).toBe('current');
+    expect(h.reload).not.toHaveBeenCalled();
   });
 
-  it('a backend that needs a newer web app (compat raised) refreshes once, then asks', async () => {
+  it('a backend that needs a newer web app (compat raised) is offered as an update; it never loops', async () => {
     const storage = new MemoryStorage();
-    const first = load({ server: { version: '2.0', clientCompat: 2 }, storage });
-    await first.updater.start();
-    expect(first.reload).toHaveBeenCalledTimes(1);
-
-    // No newer frontend was published yet: same build after the reload -> ask, do not loop.
-    const second = load({ server: { version: '2.0', clientCompat: 2 }, storage });
-    await second.updater.start();
-    expect(second.reload).not.toHaveBeenCalled();
-    expect(second.updater.getStatus()).toBe('manual');
+    const a = load({ server: { version: '2', clientCompat: 2 }, storage });
+    await a.updater.start();
+    expect(a.reload).toHaveBeenCalledTimes(1);
+    const b = load({ server: { version: '2', clientCompat: 2 }, storage });
+    await b.updater.start();
+    expect(b.reload).not.toHaveBeenCalled();
+    expect(b.updater.getStatus()).toBe('failed');
   });
 
   it('allows another automatic attempt only after the guard window', async () => {
     const storage = new MemoryStorage();
-    const first = load({ server: { version: '2.0', clientCompat: 2 }, storage });
-    await first.updater.start();
-    const later = load({ server: { version: '2.0', clientCompat: 2 }, storage });
-    later.state.time += RELOAD_GUARD_MS + 1;
-    await later.updater.start();
-    expect(later.reload).toHaveBeenCalledTimes(1);
+    const a = load({ build: 'build-B', storage });
+    await a.updater.start();
+    const b = load({ build: 'build-B', storage });
+    b.state.time += RELOAD_GUARD_MS + 1;
+    await b.updater.start();
+    expect(b.reload).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -192,13 +261,32 @@ describe('checks are cheap', () => {
   it('throttles foreground checks and never runs two at once', async () => {
     const h = load();
     await h.updater.start();
+    await h.updater.check();
     expect(h.fetchBuild).toHaveBeenCalledTimes(1);
-    await h.updater.check(); // within the interval: skipped
-    expect(h.fetchBuild).toHaveBeenCalledTimes(1);
-    h.state.time += MIN_CHECK_INTERVAL_MS + 1;
-    await Promise.all([h.updater.check(), h.updater.check(), h.updater.check()]);
+    h.state.time += MIN_CHECK_INTERVAL_MS;
+    await Promise.all([h.updater.check(), h.updater.check()]);
     expect(h.fetchBuild).toHaveBeenCalledTimes(2);
-    expect(h.fetchServer).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the published version file', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is fetched with caching disabled and a unique query, and only a real version file counts', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ buildId: '20261114-abc' }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await fetchPublishedBuild()).toBe('20261114-abc');
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/^\/version\.json\?t=\d+$/);
+    expect(init.cache).toBe('no-store');
+
+    // The SPA fallback (index.html) or an error page is "unknown", never a version.
+    fetchMock.mockImplementationOnce(async () => new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } }));
+    expect(await fetchPublishedBuild()).toBeNull();
+    fetchMock.mockImplementationOnce(async () => Response.json({}, { status: 503 }));
+    expect(await fetchPublishedBuild()).toBeNull();
+    fetchMock.mockImplementationOnce(async () => Response.json({ buildId: '<script>' }));
+    expect(await fetchPublishedBuild()).toBeNull();
   });
 });
 
