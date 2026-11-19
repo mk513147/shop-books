@@ -55,11 +55,11 @@ function displayValue(field: string, value: unknown): string {
   return String(value);
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex flex-col gap-0.5 py-2.5 text-sm sm:grid sm:grid-cols-[10rem_1fr] sm:gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
+    <div className={cn('min-w-0', wide && 'sm:col-span-2')}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 min-w-0 break-words text-sm font-medium">{children}</dd>
     </div>
   );
 }
@@ -134,7 +134,7 @@ function EditDialog({ payment, open, onClose }: { payment: SupplierPaymentDetail
           <Textarea id="edit-notes" {...register('notes')} />
         </Field>
         {update.isError && (
-          <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+          <p role="alert" className="callout callout-danger">
             {errorMessage(update.error)}
           </p>
         )}
@@ -201,7 +201,7 @@ function AllocateDialog({ payment, open, onClose }: { payment: SupplierPaymentDe
         </DialogActions>
       }
     >
-      {bills.isPending && <LoadingState label="Loading unpaid bills…" />}
+      {bills.isPending && <LoadingState label="Loading unpaid bills…" skeleton="list" />}
       {bills.isError && <ErrorState error={bills.error} onRetry={() => void bills.refetch()} />}
       {bills.data && (
         <AllocationEditor
@@ -217,7 +217,7 @@ function AllocateDialog({ payment, open, onClose }: { payment: SupplierPaymentDe
         />
       )}
       {allocate.isError && (
-        <p role="alert" className="mt-3 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+        <p role="alert" className="mt-3 callout callout-danger">
           {errorMessage(allocate.error)}
         </p>
       )}
@@ -237,7 +237,7 @@ export function SupplierPaymentDetailPage() {
   const [releasing, setReleasing] = useState<PaymentAllocation | null>(null);
   const [showReleased, setShowReleased] = useState(false);
 
-  if (payment.isPending) return <LoadingState label="Loading payment…" />;
+  if (payment.isPending) return <LoadingState label="Loading payment…" skeleton="detail" />;
   if (payment.isError) return <ErrorState title="Could not load this payment" error={payment.error} />;
   const p = payment.data;
   const reversed = p.status === 'reversed';
@@ -256,7 +256,7 @@ export function SupplierPaymentDetailPage() {
               <Button variant="outline" size="sm" onClick={() => setDialog('edit')}>
                 <Pencil aria-hidden="true" /> Edit
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setDialog('reverse')}>
+              <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDialog('reverse')}>
                 <Ban aria-hidden="true" /> Reverse
               </Button>
             </>
@@ -265,50 +265,57 @@ export function SupplierPaymentDetailPage() {
       />
 
       {notice && !reversed && (
-        <p role="status" className="rounded-xl border border-primary/20 bg-primary-soft p-3 text-sm text-primary-soft-foreground">
+        <p role="status" className="callout callout-success">
           {notice}
         </p>
       )}
       {reversed && (
-        <div role="status" className="rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm">
-          <p className="font-medium text-destructive">Reversed — this payment no longer counts.</p>
-          <p className="mt-1">
+        <div role="status" className="callout callout-danger text-foreground">
+          <p className="font-semibold text-destructive">Reversed — this payment no longer counts.</p>
+          <p className="mt-1 text-muted-foreground">
             By {p.reversedBy?.name} on {p.reversedAt && formatDateTime(p.reversedAt)}. Reason: {p.reversalReason}
           </p>
         </div>
       )}
 
       <Card>
-        <CardContent className="space-y-4 pt-4 md:pt-5">
+        <CardContent className="space-y-5 pt-4 md:pt-5">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs text-muted-foreground">Amount paid</p>
-              <p className={cn('figure text-3xl font-semibold tracking-tight', reversed && 'text-muted-foreground line-through')}>
+            <div className="min-w-0">
+              <p className="eyebrow">Amount paid</p>
+              <p className={cn('figure mt-1 text-2xl font-semibold tracking-tight md:text-3xl', reversed && 'text-muted-foreground line-through')}>
                 {formatInr(p.amount)}
               </p>
             </div>
             <StatusBadge status={p.status} />
           </div>
           {!reversed && (
-            <div className="grid grid-cols-2 gap-2">
-              <StatTile label="Allocated to bills" amount={p.allocatedAmount} />
-              <StatTile label="Unallocated" amount={p.unallocatedAmount} tone={p.unallocatedAmount !== '0.00' ? 'warning' : 'muted'} />
+            <div className="grid grid-cols-2 gap-2 md:gap-3">
+              <StatTile label="Allocated to bills" amount={p.allocatedAmount} tone="accent" />
+              <StatTile
+                label="Unallocated"
+                amount={p.unallocatedAmount}
+                tone={p.unallocatedAmount !== '0.00' ? 'info' : 'muted'}
+                hint={p.unallocatedAmount !== '0.00' ? 'Not yet set against a bill' : undefined}
+              />
             </div>
           )}
-          <dl className="divide-y border-t">
+          <dl className="grid gap-x-6 gap-y-4 border-t pt-4 sm:grid-cols-2">
             <Row label="Supplier">
               <Link to={`/suppliers/${p.supplier.id}`} className="text-primary hover:underline">
                 {p.supplier.name}
               </Link>
-              {!p.supplier.isActive && <span className="text-muted-foreground"> (archived)</span>}
+              {!p.supplier.isActive && <span className="font-normal text-muted-foreground"> (archived)</span>}
             </Row>
             <Row label="Reference">{p.reference ?? '—'}</Row>
-            <Row label="Notes">{p.notes ?? '—'}</Row>
+            <Row label="Notes" wide>
+              <span className="whitespace-pre-line font-normal">{p.notes ?? '—'}</span>
+            </Row>
             <Row label="Recorded by">
-              {p.createdBy.name} · {formatDateTime(p.createdAt)}
+              {p.createdBy.name} <span className="font-normal text-muted-foreground">· {formatDateTime(p.createdAt)}</span>
             </Row>
             <Row label="Last changed">
-              {p.updatedBy.name} · {formatDateTime(p.updatedAt)}
+              {p.updatedBy.name} <span className="font-normal text-muted-foreground">· {formatDateTime(p.updatedAt)}</span>
             </Row>
           </dl>
         </CardContent>
@@ -331,14 +338,14 @@ export function SupplierPaymentDetailPage() {
           )}
           <ul className="space-y-2">
             {shownAllocations.map((a) => (
-              <li key={a.id} className={cn('flex flex-wrap items-center gap-3 rounded-lg border p-3', a.status === 'released' && 'bg-surface-muted')}>
+              <li key={a.id} className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border p-3', a.status === 'released' && 'bg-surface-muted')}>
                 <div className="min-w-0 flex-1 basis-48">
-                  <Link to={`/expenses/${a.expense.id}`} className="block truncate text-sm font-medium text-primary hover:underline">
+                  <Link to={`/expenses/${a.expense.id}`} className="block truncate text-sm font-semibold text-primary hover:underline">
                     {a.expense.description}
                   </Link>
                   <p className="text-xs text-muted-foreground">
                     Bill of {formatDate(a.expense.expenseDate)}
-                    {a.expense.invoiceReference && ` · ${a.expense.invoiceReference}`} · {formatInr(a.expense.amount)}
+                    {a.expense.invoiceReference && ` · ${a.expense.invoiceReference}`} · <span className="figure">{formatInr(a.expense.amount)}</span>
                   </p>
                   {a.status === 'released' && (
                     <p className="mt-0.5 text-xs break-words text-muted-foreground">
@@ -346,8 +353,8 @@ export function SupplierPaymentDetailPage() {
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={cn('figure text-sm font-semibold', a.status === 'released' && 'text-muted-foreground line-through')}>
+                <div className="ml-auto flex items-center gap-2">
+                  <span className={cn('figure whitespace-nowrap text-sm font-semibold', a.status === 'released' && 'text-muted-foreground line-through')}>
                     {formatInr(a.amount)}
                   </span>
                   {a.status === 'released' && <StatusBadge status="released" />}
@@ -361,7 +368,11 @@ export function SupplierPaymentDetailPage() {
             ))}
           </ul>
           {p.allocations.length > activeAllocations.length && (
-            <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setShowReleased((v) => !v)}>
+            <button
+              type="button"
+              className="inline-flex min-h-9 items-center rounded-md text-xs font-medium text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setShowReleased((v) => !v)}
+            >
               {showReleased ? 'Hide released allocations' : `Show released allocations (${p.allocations.length - activeAllocations.length})`}
             </button>
           )}

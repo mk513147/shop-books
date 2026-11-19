@@ -91,7 +91,7 @@ export function ReasonDialog({
           {touched && empty && <p className="text-sm text-destructive">Enter a reason</p>}
         </div>
         {error && (
-          <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+          <p role="alert" className="callout callout-danger">
             {error}
           </p>
         )}

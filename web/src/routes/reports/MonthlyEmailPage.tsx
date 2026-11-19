@@ -79,7 +79,7 @@ function ProviderBanner({ email }: { email: EmailInfo }) {
   if (email.provider === 'outbox') lines.push('Development outbox: e-mails are written to a folder on the server and marked "Simulated". Nothing is sent to anyone.');
   if (!email.schedulerEnabled) lines.push('The scheduler is switched off on this server (REPORT_SCHEDULER_ENABLED=false); scheduled and queued reports will not be processed.');
   return (
-    <div role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm">
+    <div role="status" className="flex gap-3 callout callout-warning p-4">
       <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" aria-hidden="true" />
       <div className="space-y-1">
         {lines.map((l) => (
@@ -116,12 +116,12 @@ function SettingsCard({ settings, email }: { settings: Settings; email: EmailInf
         <p className="text-xs text-muted-foreground">The previous month's summary is e-mailed on this day and time (India Standard Time).</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+        <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border bg-surface-muted/60 p-3.5 transition-colors hover:bg-surface-muted">
           <span>
             <span className="block text-sm font-medium">Send monthly reports</span>
             <span className="block text-xs text-muted-foreground">{draft.enabled ? 'On' : 'Off'}</span>
           </span>
-          <input type="checkbox" className="size-5" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
+          <input type="checkbox" className="size-5 accent-[var(--primary)]" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <Field id="delivery-day" label="Day of month">
@@ -137,13 +137,13 @@ function SettingsCard({ settings, email }: { settings: Settings; email: EmailInf
             <Input id="delivery-time" type="time" value={draft.deliveryTime} onChange={(e) => setDraft({ ...draft, deliveryTime: e.target.value })} />
           </Field>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" className="size-4" checked={draft.includeExcel} onChange={(e) => setDraft({ ...draft, includeExcel: e.target.checked })} />
+        <label className="flex min-h-10 cursor-pointer items-center gap-2.5 text-sm">
+          <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={draft.includeExcel} onChange={(e) => setDraft({ ...draft, includeExcel: e.target.checked })} />
           Attach the Excel workbook
         </label>
         {settings.nextRunAt && settings.enabled && <p className="text-xs text-muted-foreground">Next run: {formatDateTime(settings.nextRunAt)} IST</p>}
-        {save.isError && <p role="alert" className="text-sm text-destructive">{errorMessage(save.error)}</p>}
-        <div className="flex items-center justify-between gap-2">
+        {save.isError && <p role="alert" className="callout callout-danger">{errorMessage(save.error)}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <span className="text-xs text-muted-foreground">{settings.updatedBy ? `Last changed by ${settings.updatedBy}, ${formatDateTime(settings.updatedAt)}` : 'Default settings'}</span>
           <Button size="sm" loading={save.isPending} disabled={!dirty || !/^\d{2}:\d{2}$/.test(draft.deliveryTime)} onClick={() => save.mutate()}>
             {save.isPending ? 'Saving…' : 'Save'}
@@ -183,9 +183,9 @@ function RecipientsCard({ recipients }: { recipients: Recipient[] }) {
         {active.length === 0 && <p className="text-sm text-muted-foreground">No recipients yet.</p>}
         <ul className="divide-y">
           {active.map((r) => (
-            <li key={r.id} className="flex items-center justify-between gap-2 py-2">
+            <li key={r.id} className="flex items-center justify-between gap-2 py-2.5">
               <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{r.email}</span>
+                <span className="block truncate text-sm font-semibold">{r.email}</span>
                 {r.name && <span className="block text-xs text-muted-foreground">{r.name}</span>}
               </span>
               <Button size="icon" variant="ghost" aria-label={`Remove ${r.email}`} disabled={toggle.isPending} onClick={() => toggle.mutate(r)}>
@@ -207,13 +207,13 @@ function RecipientsCard({ recipients }: { recipients: Recipient[] }) {
             <UserPlus aria-hidden="true" /> Add
           </Button>
         </form>
-        {add.isError && <p role="alert" className="text-sm text-destructive">{errorMessage(add.error)}</p>}
+        {add.isError && <p role="alert" className="callout callout-danger">{errorMessage(add.error)}</p>}
         {inactive.length > 0 && (
           <details className="text-sm">
-            <summary className="cursor-pointer text-muted-foreground">Removed recipients ({inactive.length})</summary>
-            <ul className="mt-2 space-y-1">
+            <summary className="cursor-pointer py-1 font-medium text-muted-foreground hover:text-foreground">Removed recipients ({inactive.length})</summary>
+            <ul className="mt-2 divide-y rounded-lg border bg-surface-muted/50 px-3">
               {inactive.map((r) => (
-                <li key={r.id} className="flex items-center justify-between gap-2">
+                <li key={r.id} className="flex items-center justify-between gap-2 py-1.5">
                   <span className="truncate text-muted-foreground">{r.email}</span>
                   <Button size="sm" variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate(r)}>
                     Restore
@@ -223,7 +223,7 @@ function RecipientsCard({ recipients }: { recipients: Recipient[] }) {
             </ul>
           </details>
         )}
-        {toggle.isError && <p role="alert" className="text-sm text-destructive">{errorMessage(toggle.error)}</p>}
+        {toggle.isError && <p role="alert" className="callout callout-danger">{errorMessage(toggle.error)}</p>}
       </CardContent>
     </Card>
   );
@@ -254,17 +254,17 @@ function SendNowCard() {
         <p className="text-xs text-muted-foreground">For a completed month that has not been sent yet. Each month is sent at most once per recipient.</p>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input type="month" aria-label="Month" className="w-48" max={previousMonth()} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+        <Input type="month" aria-label="Month" className="w-full sm:w-52" max={previousMonth()} value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={show.isPending} onClick={() => show.mutate()}>
-            <Eye aria-hidden="true" /> {show.isPending ? 'Preparing…' : 'Preview e-mail'}
+          <Button size="sm" variant="outline" loading={show.isPending} onClick={() => show.mutate()}>
+            {!show.isPending && <Eye aria-hidden="true" />} {show.isPending ? 'Preparing…' : 'Preview e-mail'}
           </Button>
           <Button size="sm" loading={run.isPending} onClick={() => run.mutate()}>
             <Send aria-hidden="true" /> {run.isPending ? 'Queuing…' : 'Send to recipients'}
           </Button>
         </div>
-        {run.isSuccess && <p role="status" className="text-sm text-primary">Queued for {run.data.deliveries} recipient(s). Progress appears in the history below.</p>}
-        {(run.isError || show.isError) && <p role="alert" className="text-sm text-destructive">{errorMessage(run.error ?? show.error)}</p>}
+        {run.isSuccess && <p role="status" className="callout callout-success">Queued for {run.data.deliveries} recipient(s). Progress appears in the history below.</p>}
+        {(run.isError || show.isError) && <p role="alert" className="callout callout-danger">{errorMessage(run.error ?? show.error)}</p>}
       </CardContent>
       <Dialog open={preview !== null} title={preview?.subject ?? ''} onClose={() => setPreview(null)} size="lg">
         {/* Sandboxed: the preview HTML cannot run scripts or navigate the app. */}
@@ -313,7 +313,7 @@ function HistoryCard() {
             ))}
           </Select>
         </div>
-        {list.isPending && <LoadingState />}
+        {list.isPending && <LoadingState skeleton="list" />}
         {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
         {list.data?.items.length === 0 && <p className="text-sm text-muted-foreground">No deliveries yet.</p>}
         <ul className="divide-y">
@@ -321,7 +321,7 @@ function HistoryCard() {
             <li key={d.id} className="flex flex-wrap items-start justify-between gap-2 py-3">
               <div className="min-w-0 flex-1 basis-56 space-y-0.5">
                 <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                  <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
+                  <Mail className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   {d.periodLabel}
                   <span className="truncate font-normal text-muted-foreground">→ {d.recipientEmail}</span>
                 </p>
@@ -331,10 +331,10 @@ function HistoryCard() {
                   {d.nextAttemptAt && d.status === 'retry_scheduled' && ` · next ${formatDateTime(d.nextAttemptAt)}`}
                   {d.providerMessageId && ` · ref ${d.providerMessageId}`}
                 </p>
-                {d.lastError && d.status !== 'sent' && <p className="text-xs break-words text-destructive">{d.lastError}</p>}
+                {d.lastError && d.status !== 'sent' && <p className="mt-1 text-xs font-medium break-words text-destructive">{d.lastError}</p>}
               </div>
-              <div className="flex items-center gap-2">
-                <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Badge>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge tone={STATUS[d.status].tone} dot>{STATUS[d.status].label}</Badge>
                 {d.status === 'failed' && (
                   <Button size="sm" variant="outline" onClick={() => setConfirm(d)}>
                     <RotateCcw aria-hidden="true" /> Retry
@@ -367,7 +367,7 @@ function HistoryCard() {
             ? 'The previous attempt was interrupted, so the e-mail may already have been delivered. Retry only if the recipient confirms they did not receive it.'
             : `The ${confirm?.periodLabel} report will be sent to ${confirm?.recipientEmail} again shortly.`}
         </p>
-        {retry.isError && <p role="alert" className="mt-2 text-sm text-destructive">{errorMessage(retry.error)}</p>}
+        {retry.isError && <p role="alert" className="callout callout-danger mt-3">{errorMessage(retry.error)}</p>}
       </Dialog>
     </Card>
   );
@@ -387,7 +387,7 @@ export function MonthlyEmailPage() {
     <Page>
       <PageHeader title="Monthly e-mail report" description="The previous month's financial summary, e-mailed automatically by the server." />
       <ReportTabs />
-      {(settings.isPending || recipients.isPending) && <LoadingState />}
+      {(settings.isPending || recipients.isPending) && <LoadingState skeleton="cards" />}
       {settings.isError && <ErrorState error={settings.error} onRetry={() => void settings.refetch()} />}
       {settings.data && <ProviderBanner email={settings.data.email} />}
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Tag, Truck, X } from 'lucide-react';
+import { Check, Plus, Tag, Truck, X } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
@@ -27,6 +27,7 @@ import { ApiError, apiRequest } from '@/lib/api-client';
 import { todayInKolkata } from '@/lib/dates';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
+import { useKeyboardOpen } from '@/lib/visual-viewport';
 import type { Category, ClassRef, Expense, ExpenseInput, PaymentMode, Supplier, SupplierRef } from '@/types/api';
 import {
   categoriesModified,
@@ -220,6 +221,8 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
   const [confirmDiscardDrafts, setConfirmDiscardDrafts] = useState(false);
   const { queue } = useAttachmentQueue();
   const toast = useToast();
+  // Phones: the sticky Save dock steps aside while the on-screen keyboard is open.
+  const keyboardOpen = useKeyboardOpen();
   const queryClient = useQueryClient();
   // Set once the expense is saved but some files could not be uploaded/kept: the form then offers a retry.
   const [saved, setSaved] = useState<Expense | null>(null);
@@ -670,7 +673,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                 )}
               </div>
               {errors.amount?.message ? (
-                <p id="amount-error" className="text-sm text-destructive">
+                <p id="amount-error" className="animate-fade-in text-sm font-medium text-destructive">
                   {errors.amount.message}
                 </p>
               ) : (
@@ -744,7 +747,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                 </p>
               )}
               {brandLoad === 'error' && brand && (
-                <div role="alert" className="space-y-2 rounded-lg bg-warning-soft p-3 text-sm" data-testid="brand-suppliers-error">
+                <div role="alert" className="space-y-2 callout callout-warning" data-testid="brand-suppliers-error">
                   <p>Could not load the suppliers of {brand.name}. The supplier was not changed; try again.</p>
                   <Button variant="outline" size="sm" onClick={() => void selectBrand(brand, true)}>
                     Try again
@@ -758,7 +761,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               )}
               {loadingDefaults && <p className="text-sm text-muted-foreground">Loading the supplier’s usual categories…</p>}
               {defaultsError && supplier?.id === defaultsError.id && (
-                <div role="alert" className="space-y-2 rounded-lg bg-warning-soft p-3 text-sm" data-testid="defaults-error">
+                <div role="alert" className="space-y-2 callout callout-warning" data-testid="defaults-error">
                   <p>
                     Could not load the usual categories of <strong>{defaultsError.name}</strong>. Nothing was pre-selected: choose them below,
                     or try again. Everything else you entered is unchanged.
@@ -834,7 +837,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                         aria-checked={status === o.value}
                         onClick={() => (o.value === 'full' ? choosePaidInFull() : o.value === 'partial' ? choosePartial() : chooseNotPaid())}
                         className={cn(
-                          'min-h-12 rounded-lg px-2 text-base leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          'min-h-12 rounded-lg px-2 text-base leading-tight transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                           status === o.value
                             ? 'bg-card font-semibold text-primary-soft-foreground shadow-card ring-2 ring-primary'
                             : 'font-medium text-muted-foreground hover:text-foreground',
@@ -918,12 +921,12 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                         )}
                       </div>
                       {rowErrors?.amount?.message && (
-                        <p id={`payment-${i}-amount-error`} className="text-sm text-destructive">
+                        <p id={`payment-${i}-amount-error`} className="animate-fade-in text-sm font-medium text-destructive">
                           Payment {i + 1} amount: {rowErrors.amount.message}
                         </p>
                       )}
                       {rowErrors?.paymentMode?.message && (
-                        <p id={`payment-${i}-method-error`} className="text-sm text-destructive">
+                        <p id={`payment-${i}-method-error`} className="animate-fade-in text-sm font-medium text-destructive">
                           Payment {i + 1} method: {rowErrors.paymentMode.message}
                         </p>
                       )}
@@ -1014,7 +1017,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
               </p>
             )}
             {drafts.recoverable.length > 0 && (
-              <div role="status" className="space-y-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm" data-testid="draft-recovery">
+              <div role="status" className="space-y-2 callout callout-warning" data-testid="draft-recovery">
                 {confirmDiscardDrafts ? (
                   <>
                     <p>
@@ -1072,9 +1075,12 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
 
           </div>
 
-          {/* The bill summary and the actions belong together: check the figures, then save. */}
-          <aside aria-label="Summary and save" className="space-y-4 lg:sticky lg:top-6" data-testid="expense-actions">
+          {/* The bill summary and the actions belong together: check the figures, then save.
+              Desktop: one sticky column beside the form. Phones/tablets: the aside dissolves into the
+              grid (display: contents) so the Save dock can stay docked while the whole form scrolls. */}
+          <aside aria-label="Summary and save" className="max-lg:contents lg:sticky lg:top-6 lg:space-y-3">
             <div className="rounded-2xl border bg-card p-5 shadow-card md:p-6">
+              <p className="eyebrow mb-3">Bill summary</p>
               <div data-testid="payment-summary">
                 <dl className="space-y-3 text-base" aria-live="polite">
                   <div className="flex items-baseline justify-between gap-3">
@@ -1109,18 +1115,18 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
                   <p
                     data-testid="payment-badge"
                     className={cn(
-                      'mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold',
-                      remainingDue === 0n ? 'bg-primary-soft text-primary-soft-foreground' : 'bg-warning-soft text-foreground',
+                      'mt-4 flex animate-fade-in items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold ring-1 ring-inset',
+                      remainingDue === 0n ? 'bg-primary-soft text-primary-soft-foreground ring-primary/15' : 'bg-warning-soft text-foreground ring-warning-strong/30',
                     )}
                   >
-                    <span aria-hidden="true" className={cn('size-2 rounded-full', remainingDue === 0n ? 'bg-primary' : 'bg-warning')} />
+                    <span aria-hidden="true" className={cn('size-2 rounded-full', remainingDue === 0n ? 'bg-primary' : 'bg-warning-strong')} />
                     {remainingDue === 0n ? 'Fully paid' : 'Payment pending'}
                   </p>
                 )}
               </div>
 
         {saved && (
-          <div role="alert" className="mt-4 space-y-3 rounded-xl bg-warning-soft p-4 text-sm">
+          <div role="alert" className="mt-4 space-y-3 callout callout-warning p-4">
             <p>
               <strong>{savedNotice}</strong> {pending.pendingCount} file{pending.pendingCount === 1 ? '' : 's'} could not be{' '}
               {queue ? 'kept for upload' : 'uploaded'} (see the errors {queue ? 'below' : 'above'}). The expense is stored; you can retry now or add
@@ -1155,7 +1161,7 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
         )}
 
         {formError && (
-          <div role="alert" className="mt-4 space-y-2 rounded-xl bg-destructive-soft p-4 text-sm text-destructive">
+          <div role="alert" className="mt-4 space-y-2 callout callout-danger p-4">
             <p>{formError.message}</p>
             {formError.conflict && (
               <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
@@ -1165,11 +1171,36 @@ export function ExpenseForm({ initial, categories, submitLabel, cancelTo, onSubm
           </div>
         )}
 
-              <div className="mt-5 space-y-2">
-                <Button type="submit" size="lg" className="h-12 w-full text-base md:h-12" loading={isSubmitting || pending.uploading} disabled={saved !== null}>
+            </div>
+
+            {/* Phones/tablets: a dock just above the bottom navigation that follows the form while it
+                scrolls and rests after the summary; hidden at once while the keyboard is open so it
+                never covers the field being typed in. Desktop: plain buttons under the summary. */}
+            <div
+              className="action-dock"
+              data-action-dock
+              data-keyboard={keyboardOpen ? 'open' : undefined}
+              data-testid="expense-actions"
+            >
+              <div className="mx-auto flex max-w-4xl items-center gap-2.5 lg:flex-col lg:items-stretch lg:gap-2">
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="h-12 min-w-0 text-base max-lg:order-2 max-lg:flex-1 md:h-12 lg:w-full"
+                  loading={isSubmitting || pending.uploading}
+                  disabled={saved !== null}
+                >
+                  {!isSubmitting && !pending.uploading && <Check strokeWidth={2.5} aria-hidden="true" />}
                   {pending.uploading ? 'Uploading files…' : isSubmitting ? (initial ? 'Updating…' : 'Saving…') : submitLabel}
                 </Button>
-                <Link to={cancelTo} className={buttonVariants({ variant: 'ghost', size: 'lg', className: 'h-11 w-full text-base text-muted-foreground' })}>
+                <Link
+                  to={cancelTo}
+                  className={buttonVariants({
+                    variant: 'ghost',
+                    size: 'lg',
+                    className: 'h-12 shrink-0 px-5 text-base text-muted-foreground max-lg:order-1 max-lg:border max-lg:border-input max-lg:bg-card lg:h-11 lg:w-full',
+                  })}
+                >
                   Cancel
                 </Link>
               </div>

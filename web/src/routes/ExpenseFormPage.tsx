@@ -63,7 +63,7 @@ export function EditExpensePage() {
     <Page width="medium">
       <PageHeader title="Edit expense" back={{ to: `/expenses/${current.id}`, label: 'Expense details' }} />
       {changedElsewhere && (
-        <div role="status" className="mb-4 space-y-2 rounded-xl border border-warning/30 bg-warning-soft p-4 text-sm" data-testid="changed-elsewhere">
+        <div role="status" className="mb-4 space-y-2 callout callout-warning p-4" data-testid="changed-elsewhere">
           <p>
             <strong>{current.updatedBy.name}</strong> changed this expense while you were editing it
             {current.status === 'voided' ? ' (it is now voided)' : ''}. Your entries are kept, but saving will be refused until you load

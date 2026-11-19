@@ -18,16 +18,16 @@ export function ReportTabs() {
   const { user } = useAuth();
   const tabs = [...REPORT_TABS, ...(user?.role === 'owner' ? [{ to: '/reports/email', label: 'Monthly e-mail' }] : [])];
   return (
-    <nav aria-label="Reports" className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
-      <ul className="flex w-max gap-1.5 md:w-auto md:flex-wrap">
+    <nav aria-label="Reports" className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] md:mx-0 md:px-0 [&::-webkit-scrollbar]:hidden">
+      <ul className="flex w-max gap-1 rounded-xl bg-surface-muted p-1 md:w-fit md:max-w-full md:flex-wrap">
         {tabs.map((t) => (
           <li key={t.to}>
             <NavLink
               to={t.to}
               className={({ isActive }) =>
                 cn(
-                  'inline-flex h-9 items-center rounded-full border px-3.5 text-sm font-medium whitespace-nowrap transition-colors',
-                  isActive ? 'border-primary bg-primary-soft text-primary-soft-foreground' : 'bg-card text-muted-foreground hover:bg-accent',
+                  'inline-flex h-10 items-center rounded-lg px-3.5 text-sm whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  isActive ? 'bg-card font-semibold text-foreground shadow-card' : 'font-medium text-muted-foreground hover:text-foreground',
                 )
               }
             >

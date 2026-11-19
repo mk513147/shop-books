@@ -1,6 +1,7 @@
 import { Pencil, RotateCcw, Ban } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
+import { PaymentStatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
 import { Badge } from '@/components/ui/badge';
@@ -68,20 +69,20 @@ function displayValue(field: string, value: unknown): string {
   return String(value);
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex flex-col gap-0.5 py-2.5 text-sm sm:grid sm:grid-cols-[10rem_1fr] sm:gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
+    <div className={cn('min-w-0', wide && 'sm:col-span-2')}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 min-w-0 break-words text-sm font-medium">{children}</dd>
     </div>
   );
 }
 
 function Figure({ label, value, tone }: { label: string; value: string; tone?: 'warning' }) {
   return (
-    <div className="min-w-0 rounded-lg bg-surface-muted px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn('figure truncate text-base font-semibold', tone === 'warning' && 'text-warning')}>{value}</p>
+    <div className="min-w-0 rounded-lg border bg-surface-muted px-3 py-2.5">
+      <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
+      <p className={cn('figure mt-0.5 truncate text-base font-semibold', tone === 'warning' && 'text-warning')}>{value}</p>
     </div>
   );
 }
@@ -99,7 +100,7 @@ export function ExpenseDetailPage() {
 
   // Rules of Hooks: every hook above is called on every render. Nothing below this line may call
   // a hook, because the loading/error renders return early (React error #310 otherwise).
-  if (expense.isPending) return <LoadingState label="Loading expense…" />;
+  if (expense.isPending) return <LoadingState label="Loading expense…" skeleton="detail" />;
   if (expense.isError) return <ErrorState title="Could not load this expense" error={expense.error} />;
   const e = expense.data;
   const voided = e.status === 'voided';
@@ -130,12 +131,12 @@ export function ExpenseDetailPage() {
       />
 
       {notice && !voided && (
-        <p role="status" className="rounded-xl border border-primary/20 bg-primary-soft p-3 text-sm text-primary-soft-foreground">
+        <p role="status" className="callout callout-success">
           {notice}
         </p>
       )}
       {voided && (
-        <div role="status" className="rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm">
+        <div role="status" className="callout callout-danger p-4 text-foreground">
           <p className="font-medium text-destructive">Voided — excluded from totals.</p>
           <p className="mt-1">
             By {e.voidedBy?.name} on {e.voidedAt && formatDateTime(e.voidedAt)}. Reason: {e.voidReason}
@@ -146,13 +147,13 @@ export function ExpenseDetailPage() {
       <Card>
         <CardContent className="space-y-4 pt-4 md:pt-5">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs text-muted-foreground">Total amount</p>
-              <p className={cn('figure text-3xl font-semibold tracking-tight', voided && 'text-muted-foreground line-through')}>
+            <div className="min-w-0">
+              <p className="eyebrow">Total amount</p>
+              <p className={cn('figure mt-1 text-2xl font-semibold tracking-tight md:text-3xl', voided && 'text-muted-foreground line-through')}>
                 {formatInr(e.amount)}
               </p>
             </div>
-            <Badge tone={voided ? 'danger' : 'accent'}>{voided ? 'Voided' : 'Active'}</Badge>
+            <PaymentStatusBadge amount={e.amount} outstanding={e.outstanding} voided={voided} className="mt-0.5" />
           </div>
           <div className={cn('grid gap-2', e.allocatedPayments !== '0.00' ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2')}>
             <Figure label="Paid at purchase" value={formatInr(e.amountPaid)} />
@@ -160,27 +161,35 @@ export function ExpenseDetailPage() {
             <Figure label="Outstanding" value={formatInr(e.outstanding)} tone={e.outstanding !== '0.00' ? 'warning' : undefined} />
           </div>
           {e.supplier && e.outstanding !== '0.00' && !voided && (
-            <Link to={`/supplier-payments/new?supplierId=${e.supplier.id}`} className="inline-block text-sm text-primary hover:underline">
+            <Link to={`/supplier-payments/new?supplierId=${e.supplier.id}`} className={buttonVariants({ variant: 'soft', size: 'sm' })}>
               Record a payment to {e.supplier.name}
             </Link>
           )}
-          <dl className="divide-y border-t">
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Details</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
             <Row label="Date">{formatDate(e.expenseDate)}</Row>
             <Row label="Supplier">
               {e.supplier ? (
                 <>
-                  <Link to={`/suppliers/${e.supplier.id}`} className="text-primary hover:underline">
+                  <Link to={`/suppliers/${e.supplier.id}`} className="text-primary underline-offset-4 hover:underline">
                     {e.supplier.name}
                   </Link>
-                  {!e.supplier.isActive && <span className="text-muted-foreground"> (archived)</span>}
+                  {!e.supplier.isActive && <span className="font-normal text-muted-foreground"> (archived)</span>}
                 </>
               ) : (
                 '—'
               )}
-              {showLegacy && <span className="block text-xs text-muted-foreground">Originally typed as “{e.legacySupplierName}”</span>}
+              {showLegacy && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">Originally typed as “{e.legacySupplierName}”</span>}
             </Row>
-            <Row label={(e.categories?.length ?? 1) > 1 ? 'Categories' : 'Category'}>
-              <ul className="flex flex-wrap gap-1.5" data-testid="expense-categories">
+            <Row label={(e.categories?.length ?? 1) > 1 ? 'Categories' : 'Category'} wide>
+              <ul className="mt-1 flex flex-wrap gap-1.5" data-testid="expense-categories">
                 {(e.categories?.length ? e.categories : [e.category]).map((c, i, all) => (
                   <li key={c.id}>
                     <Badge tone={i === 0 && all.length > 1 ? 'accent' : 'neutral'}>
@@ -192,12 +201,12 @@ export function ExpenseDetailPage() {
                 ))}
               </ul>
               {(e.categories?.length ?? 1) > 1 && (
-                <span className="mt-1 block text-xs text-muted-foreground">Labels only: the amount is counted once, under the primary category.</span>
+                <span className="mt-1.5 block text-xs font-normal text-muted-foreground">Labels only: the amount is counted once, under the primary category.</span>
               )}
             </Row>
-            <Row label="Brands">
+            <Row label="Brands" wide>
               {e.brands?.length ? (
-                <ul className="flex flex-wrap gap-1.5" data-testid="expense-brands">
+                <ul className="mt-1 flex flex-wrap gap-1.5" data-testid="expense-brands">
                   {e.brands.map((b) => (
                     <li key={b.id}>
                       <Badge tone="neutral">
@@ -211,16 +220,16 @@ export function ExpenseDetailPage() {
                 '—'
               )}
             </Row>
-            <Row label={e.payments.length > 1 ? 'Payments' : 'Payment mode'}>
+            <Row label={e.payments.length > 1 ? 'Payments' : 'Payment mode'} wide={e.payments.length > 1}>
               {e.payments.length === 0 ? (
                 '—'
               ) : e.payments.length === 1 ? (
                 PAYMENT_MODE_LABELS[e.payments[0]!.paymentMode]
               ) : (
-                <ul className="space-y-0.5">
+                <ul className="mt-1 divide-y rounded-lg border sm:max-w-sm">
                   {e.payments.map((p, i) => (
-                    <li key={i} className="flex justify-between gap-3 sm:max-w-xs">
-                      <span>{PAYMENT_MODE_LABELS[p.paymentMode]}</span>
+                    <li key={i} className="flex justify-between gap-3 px-3 py-2">
+                      <span className="text-muted-foreground">{PAYMENT_MODE_LABELS[p.paymentMode]}</span>
                       <span className="figure">{formatInr(p.amount)}</span>
                     </li>
                   ))}
@@ -229,10 +238,12 @@ export function ExpenseDetailPage() {
             </Row>
             <Row label="Invoice ref.">{e.invoiceReference ?? '—'}</Row>
             <Row label="Recorded by">
-              {e.createdBy.name} · {formatDateTime(e.createdAt)}
+              {e.createdBy.name}
+              <span className="font-normal text-muted-foreground"> · {formatDateTime(e.createdAt)}</span>
             </Row>
             <Row label="Last changed">
-              {e.updatedBy.name} · {formatDateTime(e.updatedAt)}
+              {e.updatedBy.name}
+              <span className="font-normal text-muted-foreground"> · {formatDateTime(e.updatedAt)}</span>
             </Row>
           </dl>
         </CardContent>

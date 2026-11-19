@@ -99,3 +99,47 @@ export function revealAboveKeyboard(element: HTMLElement, win: Window = window):
     vv?.removeEventListener('resize', onResize);
   };
 }
+
+/**
+ * True while the on-screen keyboard is (very likely) open on a phone or tablet layout. Works in
+ * both Android modes: the keyboard either shrinks only the visual viewport (Chrome's default; the
+ * covered height is measured) or resizes the whole page (older WebViews / `resizes-content`; the
+ * window gets much shorter than it was at the same width). Desktop always reports false.
+ * Used to hide bottom-docked UI (navigation, sticky Save bar) so it never sits over the keyboard
+ * or the field being typed in.
+ */
+export function useKeyboardOpen(enabled = true): boolean {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const tablet = () => typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1023.98px)').matches;
+    // Tallest window height seen per width (rotation changes the width, and resets the baseline).
+    let baseline = { width: window.innerWidth, height: window.innerHeight };
+    let frame = 0;
+    const measure = () => {
+      if (!tablet()) return setOpen(false);
+      if (window.innerWidth !== baseline.width) baseline = { width: window.innerWidth, height: window.innerHeight };
+      else if (window.innerHeight > baseline.height) baseline = { ...baseline, height: window.innerHeight };
+      const inset = readViewportInset();
+      const covered = inset !== null && inset.bottom >= KEYBOARD_MIN_PX;
+      const resized = baseline.height - window.innerHeight >= KEYBOARD_MIN_PX + 50;
+      setOpen(covered || resized);
+    };
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', update);
+    window.addEventListener('resize', update);
+    return () => {
+      cancelAnimationFrame(frame);
+      vv?.removeEventListener('resize', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [enabled]);
+
+  return enabled && open;
+}

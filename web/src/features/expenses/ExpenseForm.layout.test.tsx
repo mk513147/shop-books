@@ -173,21 +173,29 @@ describe('Add expense on phones', () => {
       });
   }
 
-  it('Save and Cancel sit in the summary panel at the end of the form: nothing floats over the fields or the keyboard', () => {
+  it('Save and Cancel sit in a docked bar after the summary that steps aside while the keyboard is open', () => {
     const keyboard = fakePhoneKeyboard();
     renderForm();
-    const panel = screen.getByTestId('expense-actions');
-    const save = within(panel).getByRole('button', { name: 'Save expense' });
-    const cancel = within(panel).getByRole('link', { name: 'Cancel' });
+    const dock = screen.getByTestId('expense-actions');
+    const save = within(dock).getByRole('button', { name: 'Save expense' });
+    const cancel = within(dock).getByRole('link', { name: 'Cancel' });
     expect(cancel).toHaveAttribute('href', '/expenses');
-    expect(within(panel).getByTestId('payment-summary')).toBeInTheDocument();
-    // In the page flow on phones (sticky only from the desktop breakpoint), with or without the keyboard.
-    for (const covered of [0, 320]) {
-      keyboard(covered);
-      expect(panel.className).not.toMatch(/(^|\s)(sticky|fixed)(\s|$)/);
-      expect(panel.className).toContain('lg:sticky');
-    }
     expect(save).toHaveAttribute('type', 'submit');
+    // Exactly one Save button: the dock is the form's only submit control (no duplicate floating copy).
+    expect(screen.getAllByRole('button', { name: 'Save expense' })).toHaveLength(1);
+    // The dock is the sticky action bar (styles/index.css .action-dock), and the summary stays next to it.
+    expect(dock).toHaveClass('action-dock');
+    expect(dock).toHaveAttribute('data-action-dock');
+    const summary = screen.getByTestId('payment-summary');
+    expect(summary.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('complementary', { name: 'Summary and save' })).toContainElement(dock);
+
+    // Keyboard closed: shown. Keyboard open: hidden (never over the field being typed in). Closed again: back.
+    expect(dock).not.toHaveAttribute('data-keyboard');
+    keyboard(320);
+    expect(dock).toHaveAttribute('data-keyboard', 'open');
+    keyboard(0);
+    expect(dock).not.toHaveAttribute('data-keyboard');
   });
 
   it('saving shows a loading state and a second tap does not send twice', async () => {

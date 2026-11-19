@@ -3,70 +3,108 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * Inter (variable, latin subset only: 48 KB, precached by the service worker so it works offline).
+ * Characters outside the subset (₹ and non-latin text) fall back to the system font.
+ */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
  * Shop-Books design tokens (see docs/architecture.md → "Design system").
- * Neutral surfaces, one teal/emerald accent, subtle borders, restrained shadows.
- * Components use these through Tailwind utilities (bg-card, text-muted-foreground, shadow-card, …);
- * never hard-code colours in pages.
+ *
+ * Identity "Ledger": cool porcelain surfaces, slate ink text and one deep jade accent. Status
+ * colours are reserved for meaning (amber = money still owed, red = voided / errors, blue = neutral
+ * information such as advances). Components use these through Tailwind utilities (bg-card,
+ * text-muted-foreground, shadow-card, …); pages never hard-code colours.
  */
 :root {
   /* Surfaces */
-  --background: oklch(0.982 0.003 170);
+  --background: oklch(0.982 0.0025 240);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.02 250);
-  --surface-muted: oklch(0.966 0.004 170);
+  --card-foreground: oklch(0.21 0.018 255);
+  --surface-muted: oklch(0.966 0.0035 240);
+  --surface-strong: oklch(0.94 0.005 240);
+  --row-hover: oklch(0.976 0.007 170);
 
   /* Text */
-  --foreground: oklch(0.22 0.02 250);
-  --muted-foreground: oklch(0.5 0.02 250);
+  --foreground: oklch(0.21 0.018 255);
+  --muted-foreground: oklch(0.48 0.017 255);
 
-  /* Accent: teal/emerald */
-  --primary: oklch(0.52 0.1 172);
-  --primary-hover: oklch(0.46 0.095 172);
-  --primary-foreground: oklch(0.99 0.005 170);
-  --primary-soft: oklch(0.955 0.03 172);
-  --primary-soft-foreground: oklch(0.38 0.08 172);
+  /* Accent: deep jade */
+  --primary: oklch(0.49 0.088 170);
+  --primary-hover: oklch(0.435 0.083 170);
+  --primary-foreground: oklch(0.99 0.004 170);
+  --primary-soft: oklch(0.962 0.022 170);
+  --primary-soft-foreground: oklch(0.38 0.072 170);
+
+  /* Brand ink (logo mark, desktop accents) */
+  --ink: oklch(0.24 0.03 200);
+  --ink-foreground: oklch(0.97 0.01 170);
 
   /* Neutral roles */
-  --secondary: oklch(0.955 0.005 170);
-  --secondary-foreground: oklch(0.25 0.02 250);
-  --muted: oklch(0.966 0.004 170);
-  --accent: oklch(0.955 0.006 170);
-  --accent-foreground: oklch(0.22 0.02 250);
+  --secondary: oklch(0.955 0.004 240);
+  --secondary-foreground: oklch(0.25 0.018 255);
+  --muted: oklch(0.966 0.0035 240);
+  --accent: oklch(0.955 0.005 240);
+  --accent-foreground: oklch(0.21 0.018 255);
 
-  /* Status */
-  --destructive: oklch(0.56 0.2 27);
-  --destructive-soft: oklch(0.965 0.02 27);
-  --warning: oklch(0.6 0.13 70);
-  --warning-soft: oklch(0.97 0.035 85);
+  /* Status (text colours keep ≥ 4.5:1 on white) */
+  --destructive: oklch(0.54 0.19 27);
+  --destructive-soft: oklch(0.966 0.018 27);
+  --destructive-text: oklch(0.44 0.16 27);
+  --warning: oklch(0.54 0.12 58);
+  --warning-soft: oklch(0.973 0.03 82);
+  --warning-strong: oklch(0.74 0.15 72);
+  --info: oklch(0.5 0.11 255);
+  --info-soft: oklch(0.966 0.018 255);
 
   /* Lines and focus */
-  --border: oklch(0.915 0.006 170);
-  --input: oklch(0.88 0.008 170);
-  --ring: oklch(0.6 0.1 172);
+  --border: oklch(0.918 0.005 245);
+  --input: oklch(0.87 0.007 245);
+  --ring: oklch(0.55 0.095 170);
 
   /* Shape and depth */
   --radius: 0.75rem;
-  --shadow-card: 0 1px 2px oklch(0.25 0.02 250 / 0.04), 0 1px 3px oklch(0.25 0.02 250 / 0.05);
-  --shadow-raised: 0 8px 24px oklch(0.25 0.02 250 / 0.12), 0 2px 6px oklch(0.25 0.02 250 / 0.06);
+  --shadow-card: 0 1px 2px oklch(0.25 0.02 250 / 0.05), 0 0 0 0 transparent;
+  --shadow-hover: 0 2px 4px oklch(0.25 0.02 250 / 0.04), 0 6px 16px oklch(0.25 0.02 250 / 0.07);
+  --shadow-raised: 0 12px 32px oklch(0.22 0.02 250 / 0.14), 0 2px 8px oklch(0.22 0.02 250 / 0.06);
+  --shadow-dock: 0 -1px 0 oklch(0.25 0.02 250 / 0.06), 0 -8px 24px oklch(0.25 0.02 250 / 0.06);
+
+  /* Motion: fast, decelerating; never on layout properties. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
 
   /* Layout */
   --bottom-nav-height: 4rem;
+  --mobile-header-height: 3.5rem;
 }
 
 @theme inline {
-  /* System fonts: fast, offline-safe for the PWA, native on every phone. */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-surface-muted: var(--surface-muted);
+  --color-surface-strong: var(--surface-strong);
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-soft: var(--primary-soft);
   --color-primary-soft-foreground: var(--primary-soft-foreground);
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -77,6 +115,9 @@
   --color-destructive-soft: var(--destructive-soft);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
+  --color-warning-strong: var(--warning-strong);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -88,7 +129,94 @@
   --radius-2xl: calc(var(--radius) + 4px);
 
   --shadow-card: var(--shadow-card);
+  --shadow-hover: var(--shadow-hover);
   --shadow-raised: var(--shadow-raised);
+  --shadow-dock: var(--shadow-dock);
+
+  --ease-out: var(--ease-out);
+
+  /* Slightly larger small print than Tailwind's default 12px: easier for every age. */
+  --text-xs: 0.78125rem;
+  --text-xs--line-height: 1.1rem;
+
+  --animate-page-in: page-in var(--dur-slow) var(--ease-out) backwards;
+  --animate-fade-in: fade-in var(--dur-base) var(--ease-out) backwards;
+  --animate-rise-in: rise-in var(--dur-slow) var(--ease-out) backwards;
+  --animate-skeleton: skeleton 1.6s ease-in-out infinite;
+  --animate-grow-y: grow-y 520ms var(--ease-out) backwards;
+  --animate-grow-x: grow-x 520ms var(--ease-out) backwards;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes skeleton {
+  50% {
+    opacity: 0.55;
+  }
 }
 
 @layer base {
@@ -98,14 +226,70 @@
   html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    /* Open digits and a friendlier "a"; numbers line up where it matters via .figure. */
+    font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
   }
   body {
     @apply bg-background font-sans text-foreground antialiased;
     overflow-x: hidden;
   }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  ::selection {
+    background: oklch(0.88 0.06 170);
+  }
   /* Content of a dialog opened as a sheet must not scroll the page behind it. */
   body:has(dialog[open]) {
     overflow: hidden;
+  }
+  /* Phones: a field focused near the bottom is scrolled clear of the bottom bar (and of a page's
+     sticky Save bar, see .action-dock), never hidden behind them. */
+  @media (max-width: 767.98px) {
+    html {
+      scroll-padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 1rem);
+    }
+    html:has([data-action-dock]) {
+      scroll-padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 5.5rem);
+    }
+  }
+
+  /* ---------- Dialogs (native <dialog>): sheet on phones, panel on desktop ---------- */
+  dialog[open] {
+    animation: sheet-in var(--dur-slow) var(--ease-out);
+  }
+  dialog[open]::backdrop {
+    animation: fade-in var(--dur-base) var(--ease-out);
+  }
+  dialog[data-state='closing'] {
+    animation: sheet-out var(--dur-base) var(--ease-in) forwards;
+  }
+  dialog[data-state='closing']::backdrop {
+    animation: fade-out var(--dur-base) var(--ease-in) forwards;
+  }
+  @media (min-width: 768px) {
+    dialog[open] {
+      animation: pop-in var(--dur-base) var(--ease-out);
+    }
+    dialog[data-state='closing'] {
+      animation: pop-out 140ms var(--ease-in) forwards;
+    }
+  }
+
+  /* Reduced motion: no movement anywhere, state changes stay instant and readable. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after,
+    *::backdrop {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
@@ -113,10 +297,187 @@
   /* Money and other figures line up in columns. */
   .figure {
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    font-feature-settings: 'tnum', 'cv11', 'ss01';
+    letter-spacing: -0.011em;
   }
   /* Space for the fixed phone bottom navigation and the device's safe area. */
   .pb-bottom-nav {
     padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 1.5rem);
+  }
+
+  /* Small uppercase label above a group of figures ("CURRENT BALANCES"). */
+  .eyebrow {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* Interactive surface (cards that are links): gentle lift on hover, press feedback on touch. */
+  .surface-interactive {
+    transition:
+      box-shadow var(--dur-base) var(--ease-out),
+      border-color var(--dur-base) var(--ease-out),
+      background-color var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .surface-interactive:hover {
+      box-shadow: var(--shadow-hover);
+      border-color: oklch(0.88 0.008 245);
+    }
+  }
+  .surface-interactive:active {
+    transform: scale(0.992);
+  }
+
+  /* ---------- Callouts: inline messages inside forms and pages ---------- */
+  .callout {
+    border-radius: var(--radius-lg);
+    border: 1px solid transparent;
+    padding: 0.75rem 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.35rem;
+    animation: fade-in var(--dur-base) var(--ease-out) backwards;
+  }
+  .callout-danger {
+    background: var(--destructive-soft);
+    border-color: oklch(0.54 0.19 27 / 0.2);
+    color: var(--destructive-text);
+  }
+  .callout-warning {
+    background: var(--warning-soft);
+    border-color: oklch(0.74 0.15 72 / 0.35);
+    color: var(--foreground);
+  }
+  .callout-info {
+    background: var(--info-soft);
+    border-color: oklch(0.5 0.11 255 / 0.15);
+    color: var(--foreground);
+  }
+  .callout-success {
+    background: var(--primary-soft);
+    border-color: oklch(0.49 0.088 170 / 0.2);
+    color: var(--primary-soft-foreground);
+  }
+
+  /* ---------- Data tables (desktop lists and reports) ---------- */
+  .table-shell {
+    overflow-x: auto;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+  }
+  .data-table {
+    width: 100%;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .data-table > thead {
+    background: var(--surface-muted);
+    text-align: left;
+  }
+  .data-table > thead th {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table > tbody > tr > td {
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table > tbody > tr:last-child > td {
+    border-bottom: 0;
+  }
+  .data-table > tbody > tr {
+    transition: background-color var(--dur-fast) var(--ease-out);
+  }
+  .data-table > tbody > tr:hover {
+    background: var(--row-hover);
+  }
+  .data-table > tfoot td,
+  .data-table > tfoot th {
+    border-top: 1px solid var(--border);
+    background: var(--surface-muted);
+    font-weight: 600;
+  }
+
+  /* ---------- Phone list cards ---------- */
+  .list-card {
+    display: block;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--border);
+    background: var(--card);
+    padding: 0.875rem;
+    box-shadow: var(--shadow-card);
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+  .list-card:active {
+    background: var(--accent);
+    transform: scale(0.992);
+  }
+  .list-card:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /*
+   * Sticky action dock (phones and tablets): the primary action stays just above the bottom
+   * navigation while the form scrolls, and comes to rest at the end of the form. It is hidden at
+   * once while the on-screen keyboard is open (data-keyboard="open") and fades back when it closes.
+   */
+  .action-dock {
+    position: sticky;
+    z-index: 15;
+    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+    margin-inline: -1rem;
+    padding: 0.75rem 1rem;
+    background: oklch(1 0 0 / 0.94);
+    border-top: 1px solid var(--border);
+    box-shadow: var(--shadow-dock);
+    backdrop-filter: saturate(1.4) blur(10px);
+    -webkit-backdrop-filter: saturate(1.4) blur(10px);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out);
+  }
+  .action-dock[data-keyboard='open'] {
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(100%);
+    transition: none;
+  }
+  @media (min-width: 768px) {
+    .action-dock {
+      bottom: 0;
+      margin-inline: 0;
+      padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+      border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+      border-inline: 1px solid var(--border);
+    }
+  }
+  @media (min-width: 1024px) {
+    .action-dock {
+      position: static;
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
   }
 }

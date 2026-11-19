@@ -72,7 +72,7 @@ export function SalesmenPage() {
         </Select>
       </div>
 
-      {list.isPending && <LoadingState label="Loading salesmen…" />}
+      {list.isPending && <LoadingState label="Loading salesmen…" skeleton="table" />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.isSuccess && list.data.items.length === 0 && (
         <EmptyState
@@ -95,11 +95,12 @@ export function SalesmenPage() {
           <ul className="space-y-2 md:hidden">
             {list.data.items.map((s) => (
               <li key={s.id}>
-                <Link to={`/salesmen/${s.id}`} className={cn('block rounded-xl border bg-card p-4 shadow-card', !s.isActive && 'opacity-80')}>
+                <Link to={`/salesmen/${s.id}`} className={cn('list-card', !s.isActive && 'opacity-80')}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="break-words font-medium">{s.name}</p>
-                      <p className="text-xs text-muted-foreground">{s.phone ?? 'No phone number'}</p>
+                      <p className="break-words font-semibold">{s.name}</p>
+                      <p className="text-sm text-muted-foreground">{s.phone ?? 'No phone number'}</p>
+                      {s.notes && <p className="mt-0.5 truncate text-xs text-muted-foreground">{s.notes}</p>}
                     </div>
                     {!s.isActive && <Badge>Deactivated</Badge>}
                   </div>
@@ -108,25 +109,25 @@ export function SalesmenPage() {
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+          <div className="table-shell hidden md:block">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Salesman</th>
-                  <th className="px-4 py-2.5 font-medium">Phone</th>
-                  <th className="px-4 py-2.5 font-medium">Notes</th>
+                  <th className="px-4 py-3">Salesman</th>
+                  <th className="px-3 py-3">Phone</th>
+                  <th className="px-4 py-3">Notes</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {list.data.items.map((s) => (
-                  <tr key={s.id} className={cn('cursor-pointer hover:bg-accent/50', !s.isActive && 'text-muted-foreground')} onClick={() => navigate(`/salesmen/${s.id}`)}>
+                  <tr key={s.id} className={cn('cursor-pointer', !s.isActive && 'text-muted-foreground')} onClick={() => navigate(`/salesmen/${s.id}`)}>
                     <td className="px-4 py-3">
-                      <Link to={`/salesmen/${s.id}`} className="font-medium text-foreground hover:underline" onClick={(e) => e.stopPropagation()}>
+                      <Link to={`/salesmen/${s.id}`} className="font-semibold text-foreground hover:underline" onClick={(e) => e.stopPropagation()}>
                         {s.name}
                       </Link>
                       {!s.isActive && <Badge className="ml-2">Deactivated</Badge>}
                     </td>
-                    <td className="px-4 py-3">{s.phone ?? '—'}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{s.phone ?? '—'}</td>
                     <td className="max-w-80 truncate px-4 py-3 text-muted-foreground">{s.notes ?? '—'}</td>
                   </tr>
                 ))}

@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { StatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useCategories, useCreateCategory, useUpdateCategory } from '@/features/categories/categories-api';
+import { cn } from '@/lib/utils';
 import type { Category } from '@/types/api';
 
 const schema = z.object({
@@ -71,7 +73,7 @@ function CategoryForm({
         )}
       </div>
       {formError && (
-        <p role="alert" className="text-sm text-destructive md:col-span-3">
+        <p role="alert" className="callout callout-danger md:col-span-3">
           {formError}
         </p>
       )}
@@ -92,7 +94,7 @@ function CategoryRow({ category }: { category: Category }) {
 
   if (editing) {
     return (
-      <li className="py-3">
+      <li className="animate-fade-in bg-surface-muted/50 px-4 py-4 md:px-5">
         <CategoryForm
           idPrefix={`edit-${category.id}`}
           initial={{ name: category.name, description: category.description ?? '' }}
@@ -109,20 +111,23 @@ function CategoryRow({ category }: { category: Category }) {
   }
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-3">
+    <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3.5 md:px-5">
       <div className="min-w-0">
-        <p className="font-medium">{category.name}</p>
+        <p className="flex flex-wrap items-center gap-2">
+          <span className={cn('font-semibold break-words', !category.isActive && 'text-muted-foreground')}>{category.name}</span>
+          {!category.isActive && <StatusBadge status="archived" />}
+        </p>
         <p className="text-sm text-muted-foreground">
           {category.description ? `${category.description} · ` : ''}
           {category.expenseCount} expense{category.expenseCount === 1 ? '' : 's'}
         </p>
         {update.isError && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="callout callout-danger mt-2">
             {errorMessage(update.error)}
           </p>
         )}
       </div>
-      <div className="flex gap-2">
+      <div className="flex shrink-0 gap-2">
         <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
           Edit
         </Button>
@@ -201,7 +206,7 @@ export function CategoriesPage() {
         </CardContent>
       </Card>
 
-      {categories.isPending && <LoadingState label="Loading categories…" />}
+      {categories.isPending && <LoadingState label="Loading categories…" skeleton="list" />}
       {categories.isError && <ErrorState error={categories.error} onRetry={() => void categories.refetch()} />}
       {categories.isSuccess && (
         <>
@@ -209,11 +214,11 @@ export function CategoriesPage() {
             <CardHeader>
               <CardTitle>Active ({active.length})</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-0 pb-1 md:px-0 md:pb-1">
               {active.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No active categories yet. Add one above.</p>
+                <p className="px-4 pb-3 text-sm text-muted-foreground md:px-5">No active categories yet. Add one above.</p>
               ) : (
-                <ul className="divide-y">
+                <ul className="divide-y border-t">
                   {active.map((c) => (
                     <CategoryRow key={c.id} category={c} />
                   ))}
@@ -227,8 +232,8 @@ export function CategoriesPage() {
                 <CardTitle>Archived ({archived.length})</CardTitle>
                 <CardDescription>Not available for new expenses. Existing expenses keep their category.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ul className="divide-y">
+              <CardContent className="px-0 pb-1 md:px-0 md:pb-1">
+                <ul className="divide-y border-t">
                   {archived.map((c) => (
                     <CategoryRow key={c.id} category={c} />
                   ))}

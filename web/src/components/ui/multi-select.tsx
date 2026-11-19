@@ -112,7 +112,7 @@ export function MultiSelect({
       type="button"
       disabled={disabled}
       onClick={() => add(o.id)}
-      className="inline-flex h-9 items-center gap-1 rounded-full border border-input bg-card px-3 text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+      className="inline-flex h-10 items-center gap-1 rounded-full border border-input bg-card px-3.5 text-sm font-medium transition-[background-color,border-color,transform] duration-150 hover:border-primary/40 hover:bg-primary-soft/60 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 md:h-9"
     >
       <Plus className="size-3.5 text-muted-foreground" aria-hidden="true" />
       {o.name}
@@ -132,7 +132,7 @@ export function MultiSelect({
           return (
             <li
               key={sid}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-primary bg-primary-soft pl-3 pr-1 text-sm text-primary-soft-foreground"
+              className="inline-flex h-10 animate-fade-in items-center gap-1.5 rounded-full border border-primary/40 bg-primary-soft pl-3.5 pr-1 text-sm font-semibold text-primary-soft-foreground md:h-9"
             >
               <span>{name}</span>
               {o && !o.isActive && <span className="text-xs text-muted-foreground">(archived)</span>}
@@ -216,7 +216,7 @@ export function MultiSelect({
         </p>
       )}
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-sm text-destructive">
+        <p id={`${id}-error`} role="alert" className="animate-fade-in text-sm font-medium text-destructive">
           {error}
         </p>
       )}

@@ -132,18 +132,18 @@ export function SettleAllDialog({
     >
       {dues.isPending && <LoadingState label="Loading dues…" />}
       {dues.isError && <ErrorState error={dues.error} onRetry={() => void dues.refetch()} />}
-      {dues.isSuccess && lines.length === 0 && <p className="text-sm text-muted-foreground">This customer has no unpaid dues.</p>}
+      {dues.isSuccess && lines.length === 0 && <p className="callout callout-success">This customer has no unpaid dues.</p>}
 
       {dues.isSuccess && lines.length > 0 && (
         <div className="space-y-4 text-sm">
           {changed && (
-            <p role="alert" className="rounded-lg border border-warning/30 bg-warning-soft p-3">
+            <p role="alert" className="callout callout-warning">
               {changed} The total below is up to date.
             </p>
           )}
-          <div className="rounded-lg bg-surface-muted p-3">
-            <p className="text-muted-foreground">Total outstanding</p>
-            <p className="figure text-2xl font-semibold" data-testid="settle-total">
+          <div className="rounded-xl border border-warning-strong/35 bg-warning-soft p-3.5">
+            <p className="text-xs font-medium text-muted-foreground">Total outstanding</p>
+            <p className="figure mt-0.5 text-2xl font-semibold tracking-tight text-warning md:text-3xl" data-testid="settle-total">
               {formatInr(total)}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -151,11 +151,12 @@ export function SettleAllDialog({
             </p>
           </div>
 
-          <ul className="divide-y rounded-lg border" aria-label="How the payment is allocated" data-testid="settle-allocation">
+          <p className="eyebrow -mb-2">Dues settled, oldest first</p>
+          <ul className="divide-y rounded-lg border bg-card" aria-label="How the payment is allocated" data-testid="settle-allocation">
             {lines.map((l) => (
-              <li key={l.due.id} className="flex items-center justify-between gap-3 px-3 py-2">
+              <li key={l.due.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <span className="min-w-0">
-                  <span className="block truncate font-medium">{dueTitle(l.due)}</span>
+                  <span className="block truncate font-semibold">{dueTitle(l.due)}</span>
                   <span className="block text-xs text-muted-foreground">{formatDate(l.due.txnDate)}</span>
                 </span>
                 <span className="figure shrink-0 font-semibold">{formatInr(l.pay)}</span>
@@ -164,14 +165,14 @@ export function SettleAllDialog({
           </ul>
 
           {confirming ? (
-            <div className="space-y-2">
+            <div className="space-y-3 animate-fade-in">
               <p>
                 Record <strong className="figure">{formatInr(total)}</strong> received from <strong>{customer.name}</strong> on{' '}
                 {formatDate(confirming.txnDate)} by {PAYMENT_MODE_LABELS[confirming.paymentMode as PaymentMode]}?
               </p>
-              <p className="text-muted-foreground">Their due becomes ₹0.00. Their advance ({formatInr(customer.advanceBalance)}) is not touched.</p>
+              <p className="callout callout-success">Their due becomes ₹0.00. Their advance ({formatInr(customer.advanceBalance)}) is not touched.</p>
               {settle.isError && (
-                <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-destructive">
+                <p role="alert" className="callout callout-danger">
                   {errorMessage(settle.error)}
                 </p>
               )}
@@ -195,7 +196,7 @@ export function SettleAllDialog({
                 <Textarea id="settle-notes" {...register('notes')} />
               </Field>
               {settle.isError && !changed && (
-                <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-destructive">
+                <p role="alert" className="callout callout-danger">
                   {errorMessage(settle.error)}
                 </p>
               )}

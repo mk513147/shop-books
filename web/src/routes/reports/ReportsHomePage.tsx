@@ -1,6 +1,7 @@
-import { BarChart3, CalendarDays, FileSpreadsheet, ListOrdered, Mail, PieChart, Truck, Users, type LucideIcon } from 'lucide-react';
+import { BarChart3, CalendarDays, ChevronRight, FileSpreadsheet, ListOrdered, Mail, PieChart, Truck, Users, type LucideIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
+import { Card } from '@/components/ui/card';
 import { useAuth } from '@/features/auth/auth-context';
 
 const CARDS: { to: string; icon: LucideIcon; title: string; text: string; owner?: boolean }[] = [
@@ -18,23 +19,32 @@ export function ReportsHomePage() {
   return (
     <Page>
       <PageHeader title="Reports" description="Read-only analysis of recorded transactions. Every report can be downloaded as an Excel file." />
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid gap-2.5 sm:grid-cols-2 md:gap-3 lg:grid-cols-3">
         {CARDS.filter((c) => !c.owner || user?.role === 'owner').map(({ to, icon: Icon, title, text }) => (
           <li key={to}>
-            <Link to={to} className="flex h-full items-start gap-3 rounded-xl border bg-card p-4 shadow-card transition-colors hover:bg-accent">
-              <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
-                <Icon className="size-5" aria-hidden="true" />
-              </span>
-              <span>
-                <span className="block font-medium">{title}</span>
-                <span className="block text-sm text-muted-foreground">{text}</span>
-              </span>
-            </Link>
+            <Card className="surface-interactive group h-full">
+              <Link
+                to={to}
+                className="flex h-full min-h-[4.75rem] items-center gap-3.5 rounded-xl p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+                  <Icon className="size-5" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold tracking-[-0.01em]">{title}</span>
+                  <span className="mt-0.5 block text-sm leading-snug text-muted-foreground">{text}</span>
+                </span>
+                <ChevronRight
+                  className="size-4 shrink-0 text-muted-foreground/70 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-foreground"
+                  aria-hidden="true"
+                />
+              </Link>
+            </Card>
           </li>
         ))}
       </ul>
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <FileSpreadsheet className="size-4" aria-hidden="true" />
+      <p className="flex items-start gap-2 text-xs text-muted-foreground">
+        <FileSpreadsheet className="mt-px size-4 shrink-0" aria-hidden="true" />
         Figures are recorded transactions only. Customer dues and advances are not sales or income.
       </p>
     </Page>

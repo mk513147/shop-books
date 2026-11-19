@@ -1,4 +1,4 @@
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/states';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +28,7 @@ export function CategoryReportPage() {
       <PageHeader title="Category analysis" actions={<ExportButton report="categories" params={period.query ?? {}} disabled={!period.query} />} />
       <ReportTabs />
       <PeriodSelector state={period} resolved={r?.period} />
-      {report.isPending && <LoadingState label="Calculating…" />}
+      {report.isPending && <LoadingState label="Calculating…" skeleton="cards" />}
       {report.isError && <ErrorState error={report.error} onRetry={() => void report.refetch()} />}
       {r && (
         <div className={cn('space-y-5', report.isPlaceholderData && 'opacity-60')}>
@@ -58,39 +58,69 @@ export function CategoryReportPage() {
               <CardHeader className="pb-2">
                 <CardTitle>Table</CardTitle>
               </CardHeader>
-              <CardContent className="overflow-x-auto px-0 md:px-0">
-                <table className="w-full min-w-[30rem] text-sm">
-                  <thead className="border-b text-left text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-2 font-medium">Category</th>
-                      <th className="px-2 py-2 text-right font-medium">Amount</th>
-                      <th className="px-2 py-2 text-right font-medium">Count</th>
-                      <th className="px-2 py-2 text-right font-medium">Share</th>
-                      <th className="px-2 py-2 text-right font-medium" title="Expenses carrying this category in any position">
-                        Tagged
-                      </th>
-                      <th className="px-4 py-2 text-right font-medium">vs previous</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {shown.map((c) => (
-                      <tr key={c.categoryId}>
-                        <td className="px-4 py-2">
-                          {c.name} {!c.isActive && <Badge className="ml-1">Archived</Badge>}
-                        </td>
-                        <td className="figure px-2 py-2 text-right">{formatInr(c.amount)}</td>
-                        <td className="figure px-2 py-2 text-right">{c.count}</td>
-                        <td className="figure px-2 py-2 text-right">{c.percent ?? '—'}%</td>
-                        <td className="figure px-2 py-2 text-right">{c.taggedCount}</td>
-                        <td className="px-4 py-2 text-right">
-                          <Change value={c.changePercent} />
-                          <span className="block text-xs text-muted-foreground">{formatInr(c.previousAmount)}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {shown.length === 0 && <p className="px-4 text-sm text-muted-foreground">No expenses in this or the previous period.</p>}
+              <CardContent className="px-0 pb-1 md:px-0 md:pb-1">
+                {shown.length > 0 && (
+                  <>
+                    <ul className="divide-y border-t md:hidden">
+                      {shown.map((c) => (
+                        <li key={c.categoryId} className="px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="flex min-w-0 items-center gap-2 font-semibold">
+                              <span className="truncate">{c.name}</span>
+                              {!c.isActive && <StatusBadge status="archived" />}
+                            </p>
+                            <p className="figure shrink-0 font-semibold">{formatInr(c.amount)}</p>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                            <span className="figure">
+                              {c.count} expense(s) · {c.percent === null ? '—' : `${c.percent}%`} · tagged {c.taggedCount}
+                            </span>
+                            <span className="figure shrink-0 text-right">
+                              <Change value={c.changePercent} /> vs {formatInr(c.previousAmount)}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="hidden overflow-x-auto border-t md:block">
+                      <table className="data-table min-w-[30rem]">
+                        <thead>
+                          <tr>
+                            <th className="px-4 py-3">Category</th>
+                            <th className="px-3 py-3 text-right">Amount</th>
+                            <th className="px-3 py-3 text-right">Count</th>
+                            <th className="px-3 py-3 text-right">Share</th>
+                            <th className="px-3 py-3 text-right" title="Expenses carrying this category in any position">
+                              Tagged
+                            </th>
+                            <th className="px-4 py-3 text-right">vs previous</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {shown.map((c) => (
+                            <tr key={c.categoryId}>
+                              <td className="px-4 py-3">
+                                <span className="inline-flex flex-wrap items-center gap-2">
+                                  <span className={cn('font-medium', !c.isActive && 'text-muted-foreground')}>{c.name}</span>
+                                  {!c.isActive && <StatusBadge status="archived" />}
+                                </span>
+                              </td>
+                              <td className="figure whitespace-nowrap px-3 py-3 text-right font-semibold">{formatInr(c.amount)}</td>
+                              <td className="figure px-3 py-3 text-right">{c.count}</td>
+                              <td className="figure px-3 py-3 text-right">{c.percent === null ? '—' : `${c.percent}%`}</td>
+                              <td className="figure px-3 py-3 text-right text-muted-foreground">{c.taggedCount}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right">
+                                <Change value={c.changePercent} />
+                                <span className="figure block text-xs text-muted-foreground">{formatInr(c.previousAmount)}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+                {shown.length === 0 && <p className="px-4 pb-4 text-sm text-muted-foreground md:px-5">No expenses in this or the previous period.</p>}
               </CardContent>
             </Card>
           </div>

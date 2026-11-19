@@ -26,7 +26,7 @@ export function SupplierDetailPage() {
   const payments = useSupplierPayments({ supplierId: id, status: 'all', pageSize: 5 });
   const [dialog, setDialog] = useState<'edit' | 'archive' | 'history' | null>(null);
 
-  if (supplier.isPending) return <LoadingState label="Loading supplier…" />;
+  if (supplier.isPending) return <LoadingState label="Loading supplier…" skeleton="detail" />;
   if (supplier.isError) return <ErrorState title="Could not load this supplier" error={supplier.error} />;
   const s = supplier.data;
 
@@ -37,7 +37,7 @@ export function SupplierDetailPage() {
         title={
           <span className="flex flex-wrap items-center gap-2">
             {s.name}
-            {!s.isActive && <Badge>Archived</Badge>}
+            {!s.isActive && <StatusBadge status="archived" />}
           </span>
         }
         actions={
@@ -54,12 +54,17 @@ export function SupplierDetailPage() {
 
       {balance.isError && <ErrorState error={balance.error} onRetry={() => void balance.refetch()} />}
       {balance.data && (
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <StatTile label="Payable now" amount={balance.data.payable} tone={balance.data.payable !== '0.00' ? 'warning' : 'muted'} hint="Still owed on bills" />
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
+          <StatTile
+            label="Payable now"
+            amount={balance.data.payable}
+            tone={balance.data.payable !== '0.00' ? 'warning' : 'muted'}
+            hint={balance.data.payable !== '0.00' ? 'Still owed on bills' : 'Nothing due'}
+          />
           <StatTile
             label="Unallocated payments"
             amount={balance.data.unallocated}
-            tone={balance.data.unallocated !== '0.00' ? 'accent' : 'muted'}
+            tone={balance.data.unallocated !== '0.00' ? 'info' : 'muted'}
             hint="Paid, not yet matched to bills"
           />
           <StatTile label="Bills (active)" amount={balance.data.totalBills} hint={`${balance.data.billCount} bill(s)`} />
@@ -71,26 +76,29 @@ export function SupplierDetailPage() {
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-2">
             <CardTitle>Unpaid bills</CardTitle>
-            <Link to={`/expenses?supplierId=${s.id}`} className="text-sm text-primary hover:underline">
+            <Link to={`/expenses?supplierId=${s.id}`} className="text-sm font-medium text-primary underline-offset-4 hover:underline">
               All expenses
             </Link>
           </CardHeader>
           <CardContent>
-            {bills.isPending && <LoadingState />}
+            {bills.isPending && <LoadingState skeleton="list" />}
             {bills.isError && <ErrorState error={bills.error} />}
             {bills.data?.length === 0 && <p className="text-sm text-muted-foreground">Nothing is payable to this supplier.</p>}
             <ul className="divide-y">
               {bills.data?.map((b) => (
-                <li key={b.id} className="flex items-center justify-between gap-3 py-2.5">
+                <li key={b.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                   <div className="min-w-0">
-                    <Link to={`/expenses/${b.id}`} className="block truncate text-sm font-medium hover:underline">
+                    <Link to={`/expenses/${b.id}`} className="block truncate text-sm font-semibold hover:underline">
                       {b.description}
                     </Link>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="figure text-xs text-muted-foreground">
                       {formatDate(b.expenseDate)} · bill {formatInr(b.amount)}
                     </p>
                   </div>
-                  <span className="figure shrink-0 text-sm font-semibold text-warning">{formatInr(b.payable)}</span>
+                  <span className="shrink-0 text-right">
+                    <span className="figure block text-sm font-semibold text-warning">{formatInr(b.payable)}</span>
+                    <span className="block text-xs font-medium text-warning">due</span>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -100,20 +108,23 @@ export function SupplierDetailPage() {
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-2">
             <CardTitle>Recent payments</CardTitle>
-            <Link to={`/supplier-payments?supplierId=${s.id}&status=all`} className="text-sm text-primary hover:underline">
+            <Link to={`/supplier-payments?supplierId=${s.id}&status=all`} className="text-sm font-medium text-primary underline-offset-4 hover:underline">
               All payments
             </Link>
           </CardHeader>
           <CardContent>
-            {payments.isPending && <LoadingState />}
+            {payments.isPending && <LoadingState skeleton="list" />}
             {payments.isError && <ErrorState error={payments.error} />}
             {payments.data?.items.length === 0 && <p className="text-sm text-muted-foreground">No payments recorded yet.</p>}
             <ul className="divide-y">
               {payments.data?.items.map((p) => (
                 <li key={p.id}>
-                  <Link to={`/supplier-payments/${p.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:bg-accent/40">
+                  <Link
+                    to={`/supplier-payments/${p.id}`}
+                    className="-mx-2 flex min-h-12 items-center justify-between gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium">{formatDate(p.paymentDate)}</p>
+                      <p className="text-sm font-semibold">{formatDate(p.paymentDate)}</p>
                       <p className="truncate text-xs text-muted-foreground">
                         {PAYMENT_MODE_LABELS[p.paymentMode]}
                         {p.reference && ` · ${p.reference}`}
@@ -150,25 +161,27 @@ export function SupplierDetailPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          {s.phone ? (
-            <a href={`tel:${s.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2">
-              <Phone className="size-4 text-muted-foreground" aria-hidden="true" /> {s.phone}
-            </a>
-          ) : (
-            <p className="text-muted-foreground">No phone number</p>
-          )}
-          {s.address && (
-            <p className="flex items-start gap-2">
-              <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="break-words">{s.address}</span>
-            </p>
-          )}
-          {s.notes && <p className="break-words text-muted-foreground">{s.notes}</p>}
+        <CardContent className="space-y-4 text-sm">
+          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            {s.phone ? (
+              <a href={`tel:${s.phone.replace(/[^\d+]/g, '')}`} className="flex min-h-9 items-center gap-2 font-medium">
+                <Phone className="size-4 text-muted-foreground" aria-hidden="true" /> {s.phone}
+              </a>
+            ) : (
+              <p className="flex min-h-9 items-center text-muted-foreground">No phone number</p>
+            )}
+            {s.address && (
+              <p className="flex items-start gap-2 sm:pt-2">
+                <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="break-words">{s.address}</span>
+              </p>
+            )}
+          </div>
+          {s.notes && <p className="break-words rounded-lg bg-surface-muted px-3 py-2.5 text-muted-foreground">{s.notes}</p>}
           {s.categories.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Usual categories</p>
-              <div className="flex flex-wrap gap-1">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Usual categories</p>
+              <div className="flex flex-wrap gap-1.5">
                 {s.categories.map((c) => (
                   <Badge key={c.id} tone={c.isActive ? 'accent' : 'neutral'}>
                     {c.name}
@@ -179,9 +192,9 @@ export function SupplierDetailPage() {
             </div>
           )}
           {(s.brands?.length ?? 0) > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Brands supplied</p>
-              <div className="flex flex-wrap gap-1">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Brands supplied</p>
+              <div className="flex flex-wrap gap-1.5">
                 {s.brands.map((b) => (
                   <Badge key={b.id} tone={b.isActive ? 'accent' : 'neutral'}>
                     {b.name}

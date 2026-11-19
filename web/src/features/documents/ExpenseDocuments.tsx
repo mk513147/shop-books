@@ -20,7 +20,7 @@ import { LocalAttachmentList, OfflineStorageWarning } from './queue/LocalAttachm
 function DocumentThumb({ doc }: { doc: ExpenseDocument }) {
   if (doc.mimeType === 'application/pdf') {
     return (
-      <span className="inline-flex size-14 shrink-0 flex-col items-center justify-center rounded-md border bg-surface-muted text-muted-foreground">
+      <span className="inline-flex size-14 shrink-0 flex-col items-center justify-center rounded-lg border bg-surface-muted text-muted-foreground">
         <FileText className="size-5" aria-hidden="true" />
         <span className="text-[10px] font-semibold">PDF</span>
       </span>
@@ -35,7 +35,7 @@ function DocumentThumb({ doc }: { doc: ExpenseDocument }) {
       alt={`Preview of ${doc.fileName}`}
       loading="lazy"
       decoding="async"
-      className="size-14 shrink-0 rounded-md border bg-surface-muted object-cover"
+      className="size-14 shrink-0 rounded-lg border bg-surface-muted object-cover"
     />
   );
 }
@@ -114,7 +114,7 @@ export function ExpenseDocuments({ expenseId, voided }: { expenseId: string; voi
             const reachable = attachmentsOn || doc.pendingDelivery;
             const canOpen = (!isRemoved || user?.role === 'owner') && reachable;
             return (
-              <li key={doc.id} className={cn('flex flex-wrap items-center gap-3 rounded-lg border p-2', isRemoved && 'bg-surface-muted')}>
+              <li key={doc.id} className={cn('flex flex-wrap items-center gap-3 rounded-xl border bg-card p-2.5 shadow-card', isRemoved && 'bg-surface-muted shadow-none')}>
                 {canOpen ? <DocumentThumb doc={doc} /> : <FileText className="size-6 text-muted-foreground" aria-hidden="true" />}
                 <div className="min-w-0 flex-1 basis-40">
                   <p className="truncate text-sm font-medium">{doc.fileName}</p>
@@ -181,7 +181,7 @@ export function ExpenseDocuments({ expenseId, voided }: { expenseId: string; voi
       )}
       {queue && <LocalAttachmentList queue={queue} items={local} />}
       {removed.length > 0 && (
-        <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setShowRemoved((v) => !v)}>
+        <button type="button" className="min-h-9 text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground" onClick={() => setShowRemoved((v) => !v)}>
           {showRemoved ? 'Hide removed documents' : `Show removed documents (${removed.length})`}
         </button>
       )}
@@ -200,7 +200,7 @@ export function ExpenseDocuments({ expenseId, voided }: { expenseId: string; voi
               </p>
               <FileChooserButtons onFiles={(files) => void addToQueue(files)} disabled={adding || remaining <= 0} hintId="add-documents-hint" />
               {queueProblems.length > 0 && (
-                <ul role="alert" className="space-y-1 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+                <ul role="alert" className="space-y-1 callout callout-danger">
                   {queueProblems.map((m) => (
                     <li key={m} className="break-words">
                       {m}

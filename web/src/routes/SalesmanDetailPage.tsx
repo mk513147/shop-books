@@ -25,7 +25,7 @@ export function SalesmanDetailPage() {
   const [dialog, setDialog] = useState<'edit' | 'status' | 'history' | null>(null);
   const history = useSalesmanHistory(id, dialog === 'history');
 
-  if (salesman.isPending) return <LoadingState label="Loading salesman…" />;
+  if (salesman.isPending) return <LoadingState label="Loading salesman…" skeleton="detail" />;
   if (salesman.isError) return <ErrorState title="Could not load this salesman" error={salesman.error} />;
   const s = salesman.data;
 
@@ -59,23 +59,26 @@ export function SalesmanDetailPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           {s.phone ? (
-            <a href={`tel:${s.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2">
-              <Phone className="size-4 text-muted-foreground" aria-hidden="true" /> {s.phone}
+            <a
+              href={`tel:${s.phone.replace(/[^\d+]/g, '')}`}
+              className="-ml-1 inline-flex min-h-11 items-center gap-2 rounded-lg px-1 text-base font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-10 md:text-sm"
+            >
+              <Phone className="size-4" aria-hidden="true" /> {s.phone}
             </a>
           ) : (
             <p className="text-muted-foreground">No phone number</p>
           )}
           {s.notes && <p className="whitespace-pre-line break-words text-muted-foreground">{s.notes}</p>}
-          <dl className="grid gap-1 border-t pt-3 text-xs text-muted-foreground">
+          <dl className="grid gap-x-6 gap-y-3 border-t pt-4 sm:grid-cols-2">
             <div>
-              <dt className="inline">Added: </dt>
-              <dd className="inline">
+              <dt className="text-xs font-medium text-muted-foreground">Added: </dt>
+              <dd className="mt-0.5 text-sm">
                 {formatDateTime(s.createdAt)} by {s.createdBy.name}
               </dd>
             </div>
             <div>
-              <dt className="inline">Last changed: </dt>
-              <dd className="inline">
+              <dt className="text-xs font-medium text-muted-foreground">Last changed: </dt>
+              <dd className="mt-0.5 text-sm">
                 {formatDateTime(s.updatedAt)} by {s.updatedBy.name}
               </dd>
             </div>
@@ -125,7 +128,7 @@ export function SalesmanDetailPage() {
             : `“${s.name}” will appear in the active list again.`}
         </p>
         {update.isError && (
-          <p role="alert" className="mt-3 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+          <p role="alert" className="mt-3 callout callout-danger">
             {errorMessage(update.error)}
           </p>
         )}

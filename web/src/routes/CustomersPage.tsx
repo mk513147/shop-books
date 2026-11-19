@@ -13,6 +13,32 @@ import { useCustomers, useCustomersSummary } from '@/features/customers/customer
 import { formatInr } from '@/lib/money';
 import { cn } from '@/lib/utils';
 
+/** Words for a customer's two separate balances: "Due" (amber), "Advance" (blue) or "No dues". */
+function BalanceBadges({ due, advance, archived }: { due: string; advance: string; archived: boolean }) {
+  const owes = due !== '0.00';
+  const holds = advance !== '0.00';
+  return (
+    <span className="flex flex-wrap justify-end gap-1">
+      {archived && <Badge>Archived</Badge>}
+      {owes && (
+        <Badge tone="warning" dot>
+          Due
+        </Badge>
+      )}
+      {holds && (
+        <Badge tone="info" dot>
+          Advance
+        </Badge>
+      )}
+      {!owes && !holds && !archived && (
+        <Badge tone="accent" dot>
+          No dues
+        </Badge>
+      )}
+    </span>
+  );
+}
+
 export function CustomersPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -52,9 +78,9 @@ export function CustomersPage() {
       />
 
       {summary.data && (
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 md:gap-3 lg:max-w-3xl">
           <StatTile label="Total customer dues" amount={summary.data.totalDue} tone={summary.data.totalDue !== '0.00' ? 'warning' : 'muted'} hint={`${summary.data.customersWithDue} customer(s) owe`} />
-          <StatTile label="Total advances held" amount={summary.data.totalAdvance} tone={summary.data.totalAdvance !== '0.00' ? 'accent' : 'muted'} hint={`${summary.data.customersWithAdvance} customer(s)`} />
+          <StatTile label="Total advances held" amount={summary.data.totalAdvance} tone={summary.data.totalAdvance !== '0.00' ? 'info' : 'muted'} hint={`${summary.data.customersWithAdvance} customer(s)`} />
         </div>
       )}
 
@@ -94,7 +120,7 @@ export function CustomersPage() {
         </Select>
       </div>
 
-      {list.isPending && <LoadingState label="Loading customers…" />}
+      {list.isPending && <LoadingState label="Loading customers…" skeleton="table" />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.isSuccess && list.data.items.length === 0 && (
         <EmptyState
@@ -117,24 +143,24 @@ export function CustomersPage() {
           <ul className="space-y-2 md:hidden">
             {list.data.items.map((c) => (
               <li key={c.id}>
-                <Link to={`/customers/${c.id}`} className={cn('block space-y-2 rounded-xl border bg-card p-4 shadow-card', !c.isActive && 'opacity-80')}>
+                <Link to={`/customers/${c.id}`} className={cn('list-card', !c.isActive && 'opacity-80')}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="font-medium break-words">{c.name}</p>
-                      {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                      <p className="font-semibold break-words">{c.name}</p>
+                      {c.phone && <p className="text-sm text-muted-foreground">{c.phone}</p>}
                     </div>
-                    {!c.isActive && <Badge>Archived</Badge>}
+                    <BalanceBadges due={c.dueBalance} advance={c.advanceBalance} archived={!c.isActive} />
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-2.5 text-sm">
                     <p>
                       <span className="block text-xs text-muted-foreground">Due</span>
                       <span className={cn('figure font-semibold', c.dueBalance !== '0.00' ? 'text-warning' : 'text-muted-foreground')}>
                         {formatInr(c.dueBalance)}
                       </span>
                     </p>
-                    <p>
+                    <p className="text-right">
                       <span className="block text-xs text-muted-foreground">Advance</span>
-                      <span className={cn('figure font-semibold', c.advanceBalance !== '0.00' ? 'text-primary' : 'text-muted-foreground')}>
+                      <span className={cn('figure font-semibold', c.advanceBalance !== '0.00' ? 'text-info' : 'text-muted-foreground')}>
                         {formatInr(c.advanceBalance)}
                       </span>
                     </p>
@@ -144,31 +170,34 @@ export function CustomersPage() {
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+          <div className="table-shell hidden md:block">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Customer</th>
-                  <th className="px-4 py-2.5 font-medium">Phone</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Due (owes shop)</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Advance (held)</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-3 py-3">Phone</th>
+                  <th className="px-3 py-3 text-right">Due (owes shop)</th>
+                  <th className="px-3 py-3 text-right">Advance (held)</th>
+                  <th className="px-4 py-3 text-right">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {list.data.items.map((c) => (
-                  <tr key={c.id} className={cn('cursor-pointer hover:bg-accent/50', !c.isActive && 'text-muted-foreground')} onClick={() => navigate(`/customers/${c.id}`)}>
+                  <tr key={c.id} className={cn('cursor-pointer', !c.isActive && 'text-muted-foreground')} onClick={() => navigate(`/customers/${c.id}`)}>
                     <td className="px-4 py-3">
-                      <Link to={`/customers/${c.id}`} className="font-medium text-foreground hover:underline" onClick={(e) => e.stopPropagation()}>
+                      <Link to={`/customers/${c.id}`} className="font-semibold text-foreground hover:underline" onClick={(e) => e.stopPropagation()}>
                         {c.name}
                       </Link>
-                      {!c.isActive && <Badge className="ml-2">Archived</Badge>}
                     </td>
-                    <td className="px-4 py-3">{c.phone ?? '—'}</td>
-                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', c.dueBalance !== '0.00' && 'font-medium text-warning')}>
+                    <td className="px-3 py-3 text-muted-foreground">{c.phone ?? '—'}</td>
+                    <td className={cn('figure whitespace-nowrap px-3 py-3 text-right', c.dueBalance !== '0.00' ? 'font-semibold text-warning' : 'text-muted-foreground')}>
                       {formatInr(c.dueBalance)}
                     </td>
-                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', c.advanceBalance !== '0.00' && 'font-medium text-primary')}>
+                    <td className={cn('figure whitespace-nowrap px-3 py-3 text-right', c.advanceBalance !== '0.00' ? 'font-semibold text-info' : 'text-muted-foreground')}>
                       {formatInr(c.advanceBalance)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <BalanceBadges due={c.dueBalance} advance={c.advanceBalance} archived={!c.isActive} />
                     </td>
                   </tr>
                 ))}

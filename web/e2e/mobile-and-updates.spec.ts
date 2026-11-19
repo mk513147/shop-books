@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 
 /**
  * Real-browser checks (production build, real CSS and service worker) for:
@@ -90,6 +90,9 @@ const keyboard = (page: Page, px: number) => page.evaluate((v) => (window as unk
 
 const KEYBOARD_PX = 330;
 
+/** Waits until the element's entrance/exit animations (sheet slide, panel ease-in) have finished. */
+const settled = (locator: Locator) => locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => undefined));
+
 test.describe('phone keyboard', () => {
   test.beforeEach(({ isMobile }) => test.skip(!isMobile, 'phone layout only'));
 
@@ -132,6 +135,8 @@ test.describe('phone keyboard', () => {
     // Keyboard closed again: the sheet returns to the bottom of the screen next time.
     await keyboard(page, 0);
     await page.getByRole('button', { name: 'Supplier' }).click();
+    await expect(dialog).toBeVisible();
+    await settled(dialog);
     const reopened = (await dialog.boundingBox())!;
     const height = await page.evaluate(() => window.innerHeight);
     expect(Math.abs(reopened.y + reopened.height - height)).toBeLessThan(2);
@@ -168,6 +173,7 @@ test.describe('desktop dropdowns are unchanged', () => {
     await page.getByRole('button', { name: 'Supplier' }).click();
     const dialog = page.getByRole('dialog', { name: 'Choose supplier' });
     await expect(dialog.getByRole('option').first()).toBeVisible();
+    await settled(dialog);
     const before = (await dialog.boundingBox())!;
     await keyboard(page, KEYBOARD_PX);
     await page.waitForTimeout(200);

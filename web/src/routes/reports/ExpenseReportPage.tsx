@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { StatTile } from '@/components/finance/StatTile';
-import { StatusBadge } from '@/components/finance/StatusBadge';
-import { Page, PageHeader } from '@/components/layout/PageHeader';
+import { PaymentStatusBadge } from '@/components/finance/StatusBadge';
+import { Page, PageHeader, PageSection } from '@/components/layout/PageHeader';
 import { ErrorState, LoadingState } from '@/components/states';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
@@ -108,11 +108,11 @@ export function ExpenseReportPage() {
         </Select>
       </FilterBar>
 
-      {report.isPending && <LoadingState label="Calculating…" />}
+      {report.isPending && <LoadingState label="Calculating…" skeleton="cards" />}
       {report.isError && <ErrorState error={report.error} onRetry={() => void report.refetch()} />}
       {r && (
         <div className={cn('space-y-5', report.isPlaceholderData && 'opacity-60')}>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-3">
             <StatTile label="Total expenses" amount={r.totals.amount} hint={`${r.totals.count} expense(s)`} />
             <StatTile label="Average expense" amount={r.totals.average} />
             <StatTile label="Paid at purchase" amount={r.totals.paidAtPurchase} />
@@ -181,41 +181,84 @@ export function ExpenseReportPage() {
             </Card>
           </div>
 
-          <Card>
-            <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 pb-2">
-              <CardTitle>Expenses in this period</CardTitle>
-              <span className="text-xs text-muted-foreground">{detail.data?.pagination.total ?? 0} including voided</span>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {detail.isPending && <LoadingState />}
-              <ul className="divide-y">
-                {detail.data?.items.map((e) => (
-                  <li key={e.id}>
-                    <Link to={`/expenses/${e.id}`} className="flex items-start justify-between gap-3 py-2.5 hover:bg-accent/40">
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{expenseLabel(e)}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {formatDate(e.expenseDate)} · {e.category.name}
-                          {e.supplier && ` · ${e.supplier.name}`} · {e.createdBy.name}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 flex-col items-end gap-0.5">
-                        <span className={cn('figure text-sm font-semibold', e.status === 'voided' && 'text-muted-foreground line-through')}>
-                          {formatInr(e.amount)}
-                        </span>
-                        {e.status === 'voided' ? (
-                          <StatusBadge status="voided" />
-                        ) : (
-                          e.outstanding !== '0.00' && <span className="figure text-xs text-warning">{formatInr(e.outstanding)} payable</span>
-                        )}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-              {detail.data && <Pager page={page} totalPages={detail.data.pagination.totalPages} onPage={(n) => period.set({ page: String(n) })} />}
-            </CardContent>
-          </Card>
+          <PageSection title="Expenses in this period" actions={<span className="figure text-xs text-muted-foreground">{detail.data?.pagination.total ?? 0} including voided</span>}>
+            {detail.isPending && <LoadingState skeleton="table" />}
+            {detail.data && detail.data.items.length === 0 && <p className="text-sm text-muted-foreground">No expenses in this period.</p>}
+            {detail.data && detail.data.items.length > 0 && (
+              <>
+                <ul className="space-y-2 md:hidden">
+                  {detail.data.items.map((e) => (
+                    <li key={e.id}>
+                      <Link to={`/expenses/${e.id}`} className="list-card">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className={cn('truncate font-semibold', e.status === 'voided' && 'text-muted-foreground')}>{expenseLabel(e)}</p>
+                            <p className="truncate text-sm text-muted-foreground">
+                              {e.category.name}
+                              {e.supplier && ` · ${e.supplier.name}`}
+                            </p>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <p className={cn('figure font-semibold', e.status === 'voided' && 'text-muted-foreground line-through')}>{formatInr(e.amount)}</p>
+                            {e.status !== 'voided' && e.outstanding !== '0.00' && (
+                              <p className="figure text-xs font-medium text-warning">{formatInr(e.outstanding)} payable</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span className="truncate">
+                            {formatDate(e.expenseDate)} · {e.createdBy.name}
+                          </span>
+                          <PaymentStatusBadge amount={e.amount} outstanding={e.outstanding} voided={e.status === 'voided'} />
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                <div className="table-shell hidden md:block">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-3 py-3">Expense</th>
+                        <th className="px-3 py-3">Category</th>
+                        <th className="px-3 py-3">Supplier</th>
+                        <th className="px-3 py-3">Recorded by</th>
+                        <th className="px-3 py-3 text-right">Amount</th>
+                        <th className="px-3 py-3 text-right">Payable</th>
+                        <th className="px-4 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.data.items.map((e) => (
+                        <tr key={e.id} className={cn(e.status === 'voided' && 'text-muted-foreground')}>
+                          <td className="figure whitespace-nowrap px-4 py-3 text-muted-foreground">{formatDate(e.expenseDate)}</td>
+                          <td className="max-w-64 px-3 py-3">
+                            <Link to={`/expenses/${e.id}`} className="line-clamp-2 font-medium hover:underline">
+                              {expenseLabel(e)}
+                            </Link>
+                          </td>
+                          <td className="px-3 py-3">{e.category.name}</td>
+                          <td className="px-3 py-3">{e.supplier?.name ?? '—'}</td>
+                          <td className="px-3 py-3 text-muted-foreground">{e.createdBy.name}</td>
+                          <td className={cn('figure whitespace-nowrap px-3 py-3 text-right font-semibold', e.status === 'voided' && 'font-medium line-through')}>
+                            {formatInr(e.amount)}
+                          </td>
+                          <td className={cn('figure whitespace-nowrap px-3 py-3 text-right', e.status !== 'voided' && e.outstanding !== '0.00' ? 'font-medium text-warning' : 'text-muted-foreground')}>
+                            {e.status === 'voided' || e.outstanding === '0.00' ? '—' : formatInr(e.outstanding)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <PaymentStatusBadge amount={e.amount} outstanding={e.outstanding} voided={e.status === 'voided'} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {detail.data && <Pager page={page} totalPages={detail.data.pagination.totalPages} onPage={(n) => period.set({ page: String(n) })} />}
+          </PageSection>
           <GeneratedNote />
         </div>
       )}

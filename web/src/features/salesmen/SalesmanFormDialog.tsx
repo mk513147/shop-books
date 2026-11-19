@@ -125,7 +125,7 @@ export function SalesmanFormDialog({
           <Textarea id="salesman-notes" {...errorProps('salesman-notes', errors.notes)} {...register('notes')} />
         </Field>
         {mutation.isError && (
-          <div role="alert" className="space-y-1 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+          <div role="alert" className="space-y-1 callout callout-danger">
             <p>{errorMessage(mutation.error)}</p>
             {mutation.error instanceof ApiError && mutation.error.code === 'VERSION_CONFLICT' && (
               <p className="text-muted-foreground">Close this window and open the salesman again to see the latest details.</p>

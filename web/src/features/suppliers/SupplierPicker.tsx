@@ -1,4 +1,4 @@
-import { ChevronsUpDown, Plus, Search, Truck, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Plus, Search, Truck, X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Dialog, SEARCH_SHEET_CLASS } from '@/components/ui/dialog';
 import { controlClass } from '@/components/ui/input';
@@ -155,7 +155,7 @@ export function SupplierPicker({
                 }}
                 className={cn(controlClass, 'h-11 pl-9 md:h-10')}
               />
-              </div>
+            </div>
           </div>
 
           <ul id={listId} role="listbox" aria-label="Suppliers" className="-mx-1 space-y-0.5">
@@ -171,10 +171,10 @@ export function SupplierPicker({
                   onClick={() => choose(option)}
                   onMouseMove={() => setActive(i)}
                   className={cn(
-                    'flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm',
+                    'flex min-h-12 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-[0.9375rem] transition-colors duration-100 md:min-h-11 md:text-sm',
                     i === active && 'bg-accent',
-                    selected && 'font-medium text-primary-soft-foreground',
-                    option.kind === 'add' && 'mt-1 border-t pt-3 text-primary',
+                    selected && 'bg-primary-soft font-semibold text-primary-soft-foreground',
+                    option.kind === 'add' && 'font-semibold text-primary',
                   )}
                 >
                   {option.kind === 'none' && <span className="text-muted-foreground">{noneLabel}</span>}
@@ -185,18 +185,21 @@ export function SupplierPicker({
                           {option.supplier.name}
                           {!option.supplier.isActive && <span className="text-muted-foreground"> (archived)</span>}
                         </span>
-                        {option.supplier.phone && <span className="block text-xs text-muted-foreground">{option.supplier.phone}</span>}
+                        {option.supplier.phone && <span className="block text-xs font-normal text-muted-foreground">{option.supplier.phone}</span>}
                       </span>
                       {outstandingOnly && (
-                        <span className="shrink-0 text-right text-xs text-muted-foreground">
-                          Owed <span className="figure font-medium text-warning">{formatInr(option.supplier.payable)}</span>
+                        <span className="shrink-0 text-right text-xs font-normal text-muted-foreground">
+                          Owed <span className="figure font-semibold text-warning">{formatInr(option.supplier.payable)}</span>
                         </span>
                       )}
                     </>
                   )}
+                  {selected && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
                   {option.kind === 'add' && (
                     <>
-                      <Plus className="size-4" aria-hidden="true" />
+                      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-primary-soft">
+                        <Plus className="size-4" aria-hidden="true" />
+                      </span>
                       <span className="truncate">{query.trim() ? `Add supplier “${query.trim()}”` : 'Add a new supplier'}</span>
                     </>
                   )}
@@ -205,7 +208,7 @@ export function SupplierPicker({
             })}
           </ul>
           {list.isFetching && <p className="text-xs text-muted-foreground">Searching…</p>}
-          {list.isError && <p className="text-sm text-destructive">Could not load suppliers. Check the connection and try again.</p>}
+          {list.isError && <p className="callout callout-danger">Could not load suppliers. Check the connection and try again.</p>}
           {list.isSuccess && list.data.items.length === 0 && (
             <p className="text-sm text-muted-foreground">
               {outstandingOnly

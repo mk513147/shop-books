@@ -136,9 +136,9 @@ export function usePendingFiles(
 export type PendingFiles = ReturnType<typeof usePendingFiles>;
 
 function Thumb({ name, previewUrl }: { name: string; previewUrl: string | null }) {
-  if (previewUrl) return <img src={previewUrl} alt="" className="size-12 shrink-0 rounded-md border object-cover" />;
+  if (previewUrl) return <img src={previewUrl} alt="" className="size-12 shrink-0 rounded-lg border object-cover" />;
   return (
-    <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-md border bg-surface-muted text-muted-foreground">
+    <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-lg border bg-surface-muted text-muted-foreground">
       <FileText className="size-5" aria-hidden="true" />
       <span className="sr-only">{name.toLowerCase().endsWith('.pdf') ? 'PDF document' : 'File'}</span>
     </span>
@@ -204,7 +204,7 @@ export function DocumentPicker({
       <FileChooserButtons onFiles={(files) => pending.add(files, maxCount)} disabled={locked || full} hintId={`${id}-hint`} />
 
       {pending.rejected.length > 0 && (
-        <ul role="alert" className="space-y-1 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+        <ul role="alert" className="space-y-1 callout callout-danger">
           {pending.rejected.map((m) => (
             <li key={m} className="break-words">
               {m}
@@ -216,7 +216,7 @@ export function DocumentPicker({
       {pending.files.length > 0 && (
         <ul className="space-y-2" aria-label="Selected files">
           {pending.files.map((f) => (
-            <li key={f.key} className={cn('flex items-center gap-3 rounded-lg border bg-card p-2', f.status === 'failed' && 'border-destructive/40')}>
+            <li key={f.key} className={cn('flex animate-fade-in items-center gap-3 rounded-xl border bg-card p-2.5 shadow-card', f.status === 'failed' && 'border-destructive/40')}>
               <Thumb name={f.file.name} previewUrl={f.previewUrl} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{f.file.name}</p>
@@ -236,7 +236,7 @@ export function DocumentPicker({
                     <div className="h-full bg-primary transition-[width]" style={{ width: `${Math.round(f.progress * 100)}%` }} />
                   </div>
                 )}
-                {f.status === 'failed' && <p className="mt-0.5 text-xs break-words text-destructive">{f.error}</p>}
+                {f.status === 'failed' && <p className="mt-0.5 text-xs font-medium break-words text-destructive">{f.error}</p>}
               </div>
               {f.status === 'done' ? (
                 <CheckCircle2 className="size-5 shrink-0 text-primary" aria-label="Uploaded" />

@@ -15,19 +15,24 @@ export interface NavItem {
   mobileTab?: boolean;
   /** Shorter label for the bottom bar. */
   mobileLabel?: string;
+  /** Sidebar section the item is listed under. */
+  group: NavGroup;
 }
 
+export type NavGroup = 'Overview' | 'Records' | 'People' | 'Setup';
+export const NAV_GROUPS: NavGroup[] = ['Overview', 'Records', 'People', 'Setup'];
+
 export const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, mobileTab: true, mobileLabel: 'Home' },
-  { to: '/expenses', label: 'Expenses', icon: ReceiptText, mobileTab: true },
-  { to: '/suppliers', label: 'Suppliers', icon: Truck, mobileTab: true },
-  { to: '/supplier-payments', label: 'Supplier payments', icon: Wallet },
-  { to: '/categories', label: 'Categories', icon: Tags },
-  { to: '/brands', label: 'Brands', icon: Factory },
-  { to: '/customers', label: 'Customers', icon: Users },
-  { to: '/salesmen', label: 'Salesmen', icon: BadgeCheck },
-  { to: '/reports', label: 'Reports', icon: BookOpen },
-  { to: '/users', label: 'Users', icon: UserCog, role: 'owner' },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, mobileTab: true, mobileLabel: 'Home', group: 'Overview' },
+  { to: '/expenses', label: 'Expenses', icon: ReceiptText, mobileTab: true, group: 'Records' },
+  { to: '/suppliers', label: 'Suppliers', icon: Truck, mobileTab: true, group: 'People' },
+  { to: '/supplier-payments', label: 'Supplier payments', icon: Wallet, group: 'Records' },
+  { to: '/categories', label: 'Categories', icon: Tags, group: 'Setup' },
+  { to: '/brands', label: 'Brands', icon: Factory, group: 'Setup' },
+  { to: '/customers', label: 'Customers', icon: Users, group: 'People' },
+  { to: '/salesmen', label: 'Salesmen', icon: BadgeCheck, group: 'People' },
+  { to: '/reports', label: 'Reports', icon: BookOpen, group: 'Overview' },
+  { to: '/users', label: 'Users', icon: UserCog, role: 'owner', group: 'Setup' },
 ];
 
 export function navItemsFor(role: Role | undefined): NavItem[] {

@@ -1,4 +1,4 @@
-import { ChevronsUpDown, Search, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Search, X } from 'lucide-react';
 import { useEffect, useId, useState, type ComponentType, type ReactNode } from 'react';
 import { Dialog, SEARCH_SHEET_CLASS } from '@/components/ui/dialog';
 import { controlClass } from '@/components/ui/input';
@@ -144,7 +144,7 @@ export function SearchSelect({
                 }}
                 className={cn(controlClass, 'h-11 pl-9 md:h-10')}
               />
-              </div>
+            </div>
           </div>
           <ul id={listId} role="listbox" aria-label={noun} className="-mx-1 space-y-0.5">
             {rows.map((option, i) => {
@@ -158,9 +158,9 @@ export function SearchSelect({
                   onClick={() => choose(option)}
                   onMouseMove={() => setActive(i)}
                   className={cn(
-                    'flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm',
+                    'flex min-h-12 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-[0.9375rem] transition-colors duration-100 md:min-h-11 md:text-sm',
                     i === active && 'bg-accent',
-                    selected && 'font-medium text-primary-soft-foreground',
+                    selected && 'bg-primary-soft font-semibold text-primary-soft-foreground',
                   )}
                 >
                   {option === null ? (
@@ -168,9 +168,10 @@ export function SearchSelect({
                   ) : (
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{option.name}</span>
-                      {option.detail && <span className="block text-xs text-muted-foreground">{option.detail}</span>}
+                      {option.detail && <span className="block text-xs font-normal text-muted-foreground">{option.detail}</span>}
                     </span>
                   )}
+                  {selected && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
                 </li>
               );
             })}

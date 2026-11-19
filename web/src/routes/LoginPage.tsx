@@ -69,7 +69,7 @@ export function LoginPage() {
               />
             </Field>
             {formError && (
-              <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+              <p role="alert" className="callout callout-danger">
                 {formError}
               </p>
             )}

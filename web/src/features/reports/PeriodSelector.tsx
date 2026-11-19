@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { formatDate, todayInKolkata } from '@/lib/dates';
+import { cn } from '@/lib/utils';
 import type { ReportPeriod } from './reports-api';
 
 export const PERIOD_OPTIONS = [
@@ -60,31 +61,58 @@ export function PeriodSelector({
   exclude?: string[];
 }) {
   const today = todayInKolkata();
+  const options = PERIOD_OPTIONS.filter(([v]) => !exclude.includes(v));
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-      <label className="sr-only" htmlFor="report-period">
-        Reporting period
-      </label>
-      <Select id="report-period" className="sm:w-48" value={state.period} onChange={(e) => state.set({ period: e.target.value })}>
-        {PERIOD_OPTIONS.filter(([v]) => !exclude.includes(v)).map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </Select>
+    <div className="space-y-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
+        <label className="sr-only" htmlFor="report-period">
+          Reporting period
+        </label>
+        {/* Phones and tablets: the native picker (eight choices do not fit in one row). */}
+        <Select id="report-period" className="sm:w-52 xl:hidden" value={state.period} onChange={(e) => state.set({ period: e.target.value })}>
+          {options.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
+        {/* Wide screens: the same choices as a segmented control. */}
+        <div role="group" aria-label="Reporting period presets" className="hidden gap-1 rounded-xl bg-surface-muted p-1 xl:flex">
+          {options.map(([value, label]) => {
+            const active = state.period === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => state.set({ period: value })}
+                className={cn(
+                  'inline-flex min-h-10 items-center rounded-lg px-3 text-sm whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active ? 'bg-card font-semibold text-foreground shadow-card' : 'font-medium text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {resolved && (
+          <p className="figure inline-flex w-fit items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-muted-foreground shadow-card">
+            <CalendarRange className="size-3.5" aria-hidden="true" />
+            {resolved.preset === 'all_time' ? 'All recorded transactions' : `${formatDate(resolved.from)} – ${formatDate(resolved.to)}`}
+          </p>
+        )}
+      </div>
       {state.period === 'custom' && (
-        <div className="grid grid-cols-2 gap-2 sm:flex">
-          <Input type="date" aria-label="From date" max={today} value={state.from} onChange={(e) => state.set({ from: e.target.value })} />
-          <Input type="date" aria-label="To date" max={today} value={state.to} onChange={(e) => state.set({ to: e.target.value })} />
+        <div className="grid animate-fade-in grid-cols-2 gap-2 sm:flex sm:items-center">
+          <Input type="date" aria-label="From date" className="sm:w-44" max={today} value={state.from} onChange={(e) => state.set({ from: e.target.value })} />
+          <span aria-hidden="true" className="hidden text-sm text-muted-foreground sm:inline">
+            to
+          </span>
+          <Input type="date" aria-label="To date" className="sm:w-44" max={today} value={state.to} onChange={(e) => state.set({ to: e.target.value })} />
         </div>
       )}
       {state.period === 'custom' && !state.query && <p className="text-sm text-muted-foreground">Choose a start and an end date.</p>}
-      {resolved && (
-        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <CalendarRange className="size-4" aria-hidden="true" />
-          {resolved.preset === 'all_time' ? 'All recorded transactions' : `${formatDate(resolved.from)} – ${formatDate(resolved.to)}`}
-        </p>
-      )}
     </div>
   );
 }

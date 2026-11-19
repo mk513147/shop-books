@@ -133,7 +133,7 @@ function SupplierForm({
     <form
       id={formId}
       noValidate
-      className="space-y-4"
+      className="space-y-5"
       onSubmit={handleSubmit(async (v) => {
         // Synchronous guard: a double tap must not send twice.
         if (inFlight.current) return;
@@ -167,20 +167,22 @@ function SupplierForm({
         }
       })}
     >
-      <Field id={`${formId}-name`} label="Supplier name" error={errors.name?.message}>
-        <Input id={`${formId}-name`} autoComplete="off" {...errorProps(`${formId}-name`, errors.name)} {...register('name')} />
-      </Field>
-      <Field id={`${formId}-phone`} label="Phone (optional)" error={errors.phone?.message}>
-        <Input
-          id={`${formId}-phone`}
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          placeholder="+91 98765 43210"
-          {...errorProps(`${formId}-phone`, errors.phone)}
-          {...register('phone')}
-        />
-      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field id={`${formId}-name`} label="Supplier name" error={errors.name?.message}>
+          <Input id={`${formId}-name`} autoComplete="off" {...errorProps(`${formId}-name`, errors.name)} {...register('name')} />
+        </Field>
+        <Field id={`${formId}-phone`} label="Phone (optional)" error={errors.phone?.message}>
+          <Input
+            id={`${formId}-phone`}
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="+91 98765 43210"
+            {...errorProps(`${formId}-phone`, errors.phone)}
+            {...register('phone')}
+          />
+        </Field>
+      </div>
       <Field id={`${formId}-address`} label="Address (optional)" error={errors.address?.message}>
         <Textarea id={`${formId}-address`} rows={2} className="min-h-16" {...errorProps(`${formId}-address`, errors.address)} {...register('address')} />
       </Field>
@@ -214,9 +216,9 @@ function SupplierForm({
         testId="supplier-categories"
       />
       {formError && (
-        <div role="alert" className="space-y-2 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+        <div role="alert" className="callout callout-danger space-y-1.5">
           <p>{formError.message}</p>
-          {formError.conflict && <p className="text-muted-foreground">Close this window and open the supplier again to see the latest details.</p>}
+          {formError.conflict && <p className="text-foreground">Close this window and open the supplier again to see the latest details.</p>}
         </div>
       )}
     </form>

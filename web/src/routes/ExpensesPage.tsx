@@ -1,6 +1,8 @@
 import { ChevronLeft, ChevronRight, Paperclip, Plus, ReceiptText, Search, SlidersHorizontal } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { PaymentStatusBadge } from '@/components/finance/StatusBadge';
+import { StatTile } from '@/components/finance/StatTile';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +18,6 @@ import { useSuppliers } from '@/features/suppliers/suppliers-api';
 import { formatDate } from '@/lib/dates';
 import { formatInr, MONEY_INPUT } from '@/lib/money';
 import { categorySummary, cn, expenseLabel } from '@/lib/utils';
-import type { Expense } from '@/types/api';
 
 const FILTER_KEYS = ['q', 'from', 'to', 'categoryId', 'brandId', 'supplierId', 'paymentMode', 'recordedBy', 'status', 'minAmount', 'maxAmount'] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
@@ -32,10 +33,6 @@ const SORT_OPTIONS = [
 
 function readFilters(params: URLSearchParams): Filters {
   return Object.fromEntries(FILTER_KEYS.map((k) => [k, params.get(k) ?? (k === 'status' ? 'active' : '')])) as Filters;
-}
-
-function StatusBadge({ status }: { status: Expense['status'] }) {
-  return status === 'voided' ? <Badge tone="danger">Voided</Badge> : null;
 }
 
 function FilterForm({ formId, initial, onApply }: { formId: string; initial: Filters; onApply: (f: Filters) => void }) {
@@ -139,20 +136,11 @@ function FilterForm({ formId, initial, onApply }: { formId: string; initial: Fil
         </Select>
       </Field>
       {error && (
-        <p role="alert" className="text-sm text-destructive sm:col-span-2">
+        <p role="alert" className="callout callout-danger sm:col-span-2">
           {error}
         </p>
       )}
     </form>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'warning' }) {
-  return (
-    <div className="min-w-0 rounded-xl border bg-card px-3 py-2.5 shadow-card md:px-4 md:py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn('figure truncate text-sm font-semibold md:text-lg', tone === 'warning' && 'text-warning')}>{value}</p>
-    </div>
   );
 }
 
@@ -245,11 +233,11 @@ export function ExpensesPage() {
       </div>
 
       {list.data && (
-        <section aria-label="Totals" className="space-y-1.5">
-          <div className="grid grid-cols-3 gap-2 md:gap-3">
-            <Stat label="Total" value={formatInr(list.data.totals.amount)} />
-            <Stat label="Paid" value={formatInr(list.data.totals.amountPaid)} />
-            <Stat label="Outstanding" value={formatInr(list.data.totals.outstanding)} tone={list.data.totals.outstanding !== '0.00' ? 'warning' : undefined} />
+        <section aria-label="Totals" className="space-y-2">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 md:gap-3">
+            <StatTile label="Total" amount={list.data.totals.amount} className="col-span-2 md:col-span-1" />
+            <StatTile label="Paid" amount={list.data.totals.amountPaid} tone="accent" />
+            <StatTile label="Outstanding" amount={list.data.totals.outstanding} tone={list.data.totals.outstanding !== '0.00' ? 'warning' : 'muted'} />
           </div>
           <p className="text-xs text-muted-foreground">
             {list.data.pagination.total} matching · totals cover {list.data.totals.count} active expense{list.data.totals.count === 1 ? '' : 's'} (voided excluded)
@@ -258,7 +246,7 @@ export function ExpensesPage() {
                 {' · '}
                 <button
                   type="button"
-                  className="text-primary hover:underline"
+                  className="font-medium text-primary hover:underline"
                   onClick={() => {
                     setSearch('');
                     setParams(new URLSearchParams());
@@ -272,7 +260,7 @@ export function ExpensesPage() {
         </section>
       )}
 
-      {list.isPending && <LoadingState label="Loading expenses…" />}
+      {list.isPending && <LoadingState label="Loading expenses…" skeleton="table" />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.isSuccess && list.data.items.length === 0 && (
         <EmptyState
@@ -298,13 +286,10 @@ export function ExpensesPage() {
           <ul className="space-y-2 md:hidden">
             {list.data.items.map((e) => (
               <li key={e.id}>
-                <Link
-                  to={`/expenses/${e.id}`}
-                  className={cn('block rounded-xl border bg-card p-3.5 shadow-card active:bg-accent', e.status === 'voided' && 'opacity-70')}
-                >
+                <Link to={`/expenses/${e.id}`} className="list-card">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="flex items-center gap-1 font-medium">
+                      <p className={cn('flex items-center gap-1 font-semibold', e.status === 'voided' && 'text-muted-foreground')}>
                         <span className="truncate">{expenseLabel(e)}</span>
                         {e.documentCount > 0 && <Paperclip className="size-3.5 shrink-0 text-muted-foreground" aria-label={`${e.documentCount} document(s)`} />}
                       </p>
@@ -313,8 +298,8 @@ export function ExpensesPage() {
                       )}
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className={cn('figure font-semibold', e.status === 'voided' && 'line-through')}>{formatInr(e.amount)}</p>
-                      {e.outstanding !== '0.00' && <p className="figure text-xs text-warning">due {formatInr(e.outstanding)}</p>}
+                      <p className={cn('figure font-semibold', e.status === 'voided' && 'text-muted-foreground line-through')}>{formatInr(e.amount)}</p>
+                      {e.outstanding !== '0.00' && e.status !== 'voided' && <p className="figure text-xs font-medium text-warning">due {formatInr(e.outstanding)}</p>}
                     </div>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -322,7 +307,7 @@ export function ExpensesPage() {
                       {formatDate(e.expenseDate)}
                       {e.supplier ? ` · ${categorySummary(e)}` : ''} · {e.createdBy.name}
                     </span>
-                    <StatusBadge status={e.status} />
+                    <PaymentStatusBadge amount={e.amount} outstanding={e.outstanding} voided={e.status === 'voided'} />
                   </div>
                 </Link>
               </li>
@@ -330,29 +315,32 @@ export function ExpensesPage() {
           </ul>
 
           {/* Desktop: table */}
-          <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+          <div className="table-shell hidden md:block">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Date</th>
-                  <th className="px-4 py-2.5 font-medium">Description</th>
-                  <th className="px-4 py-2.5 font-medium">Supplier</th>
-                  <th className="px-4 py-2.5 font-medium">Category</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Amount</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Paid</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Outstanding</th>
-                  <th className="px-4 py-2.5 font-medium">Mode</th>
-                  <th className="px-4 py-2.5 font-medium">Recorded by</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Description</th>
+                  <th className="px-4 py-3">Supplier</th>
+                  <th className="px-4 py-3">Category</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3 text-right">Paid</th>
+                  <th className="px-4 py-3 text-right">Outstanding</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="hidden px-4 py-3 2xl:table-cell">Mode</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {list.data.items.map((e) => (
                   <tr
                     key={e.id}
-                    className={cn('cursor-pointer transition-colors hover:bg-accent/60', e.status === 'voided' && 'text-muted-foreground')}
+                    className={cn('cursor-pointer', e.status === 'voided' && 'text-muted-foreground')}
                     onClick={() => navigate(`/expenses/${e.id}`)}
                   >
-                    <td className="whitespace-nowrap px-4 py-3">{formatDate(e.expenseDate)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                      <span className="figure block">{formatDate(e.expenseDate)}</span>
+                      <span className="block text-xs">by {e.createdBy.name}</span>
+                    </td>
                     <td className="max-w-64 px-4 py-3">
                       <Link to={`/expenses/${e.id}`} className="line-clamp-2 font-medium hover:underline" onClick={(ev) => ev.stopPropagation()}>
                         {expenseLabel(e)}
@@ -363,21 +351,24 @@ export function ExpensesPage() {
                           <span className="sr-only">document(s)</span>
                         </span>
                       )}
-                      {e.status === 'voided' && <Badge tone="danger" className="mt-1">Voided</Badge>}
                     </td>
                     <td className="px-4 py-3">{e.supplier?.name ?? '—'}</td>
                     <td className="px-4 py-3" title={e.categories?.map((c) => c.name).join(', ')}>
                       {categorySummary(e)}
                     </td>
-                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right font-medium', e.status === 'voided' && 'line-through')}>
+                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right font-semibold', e.status === 'voided' && 'font-medium line-through')}>
                       {formatInr(e.amount)}
                     </td>
                     <td className="figure whitespace-nowrap px-4 py-3 text-right">{formatInr(e.amountPaid)}</td>
-                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', e.outstanding !== '0.00' && 'text-warning')}>
+                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', e.outstanding !== '0.00' && e.status !== 'voided' && 'font-medium text-warning')}>
                       {formatInr(e.outstanding)}
                     </td>
-                    <td className="px-4 py-3">{e.payments.length ? e.payments.map((p) => PAYMENT_MODE_LABELS[p.paymentMode]).join(' + ') : '—'}</td>
-                    <td className="px-4 py-3">{e.createdBy.name}</td>
+                    <td className="px-4 py-3">
+                      <PaymentStatusBadge amount={e.amount} outstanding={e.outstanding} voided={e.status === 'voided'} />
+                    </td>
+                    <td className="hidden px-4 py-3 text-muted-foreground 2xl:table-cell">
+                      {e.payments.length ? e.payments.map((p) => PAYMENT_MODE_LABELS[p.paymentMode]).join(' + ') : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -388,7 +379,7 @@ export function ExpensesPage() {
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
               <ChevronLeft aria-hidden="true" /> Previous
             </Button>
-            <span className="text-muted-foreground">
+            <span className="figure text-muted-foreground">
               Page {list.data.pagination.page} of {list.data.pagination.totalPages}
             </span>
             <Button

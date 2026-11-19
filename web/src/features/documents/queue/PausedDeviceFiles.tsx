@@ -50,7 +50,7 @@ export function PausedDeviceFilesNotice({ userId }: { userId: string }) {
 
   if (count === 0 || hidden) return null;
   return (
-    <div role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-sm" data-testid="paused-device-files">
+    <div role="status" className="mb-4 flex flex-wrap items-center gap-2 callout callout-warning py-2" data-testid="paused-device-files">
       <span className="min-w-0 flex-1">
         {count} bill file{count === 1 ? '' : 's'} chosen on this device before bill attachments were paused {count === 1 ? 'is' : 'are'} still
         kept in this browser. {count === 1 ? 'It is' : 'They are'} not uploaded and not backed up; do not clear this browser&apos;s site data if

@@ -25,7 +25,7 @@ function Effect({ value, counted, tone }: { value: string | null; counted: boole
       className={cn(
         'figure font-medium',
         !counted && 'text-muted-foreground line-through',
-        counted && plus && (tone === 'due' ? 'text-warning' : 'text-primary'),
+        counted && plus && (tone === 'due' ? 'text-warning' : 'text-info'),
       )}
     >
       {plus ? '+' : '−'}
@@ -72,7 +72,7 @@ export function CustomerLedgerPage() {
     setParams(merged, { replace: true });
   }
 
-  if (ledger.isPending) return <LoadingState label="Loading ledger…" />;
+  if (ledger.isPending) return <LoadingState label="Loading ledger…" skeleton="table" />;
   if (ledger.isError) return <ErrorState title="Could not load the ledger" error={ledger.error} onRetry={() => void ledger.refetch()} />;
   const { customer, balances, entries, broughtForward, truncated } = ledger.data;
   const link = (e: CustomerLedgerEntry) => `/customers/${customer.id}/transactions/${e.id}`;
@@ -92,16 +92,16 @@ export function CustomerLedgerPage() {
       <CustomerBalances due={balances.due} advance={balances.advance} compact />
 
       <details className="rounded-xl border bg-card p-4 text-sm shadow-card">
-        <summary className="flex cursor-pointer items-center gap-2 font-medium">
+        <summary className="flex min-h-6 cursor-pointer items-center gap-2 font-semibold">
           <Info className="size-4 text-primary" aria-hidden="true" /> How to read this ledger
         </summary>
         <ul className="mt-3 list-disc space-y-1.5 pl-5 text-muted-foreground">
           <li>
-            <strong className="text-foreground">Due</strong> column: <strong className="text-foreground">+</strong> the customer owes more (a due was added),{' '}
+            <strong className="text-warning">Due</strong> column: <strong className="text-foreground">+</strong> the customer owes more (a due was added),{' '}
             <strong className="text-foreground">−</strong> they paid part of a due.
           </li>
           <li>
-            <strong className="text-foreground">Advance</strong> column: <strong className="text-foreground">+</strong> money received in advance,{' '}
+            <strong className="text-info">Advance</strong> column: <strong className="text-foreground">+</strong> money received in advance,{' '}
             <strong className="text-foreground">−</strong> advance refunded.
           </li>
           <li>The two running balances are independent: an advance is never subtracted from a due.</li>
@@ -137,7 +137,7 @@ export function CustomerLedgerPage() {
       </div>
 
       {broughtForward && (
-        <div className="grid grid-cols-2 gap-2 rounded-lg bg-surface-muted px-3 py-2.5 text-sm">
+        <div className="grid grid-cols-2 gap-2 rounded-lg border bg-surface-muted px-3.5 py-3 text-sm">
           <span className="text-muted-foreground">
             Before {formatDate(get('from'))}: due <strong className="figure text-foreground">{formatInr(broughtForward.due)}</strong>
           </span>
@@ -146,7 +146,7 @@ export function CustomerLedgerPage() {
           </span>
         </div>
       )}
-      {truncated && <p className="text-sm text-warning">Only the first 2,000 entries are shown. Narrow the date range.</p>}
+      {truncated && <p className="callout callout-warning">Only the first 2,000 entries are shown. Narrow the date range.</p>}
 
       {entries.length === 0 ? (
         <EmptyState icon={BookOpenText} title="No entries">
@@ -157,24 +157,24 @@ export function CustomerLedgerPage() {
           <ul className="space-y-2 md:hidden">
             {entries.map((e) => (
               <li key={e.id}>
-                <Link to={link(e)} className={cn('block space-y-2 rounded-xl border bg-card p-3 shadow-card', !e.counted && 'opacity-80')}>
+                <Link to={link(e)} className={cn('list-card space-y-2.5', !e.counted && 'opacity-80')}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">{formatDate(e.txnDate)}</p>
-                      <p className="text-sm font-medium">{TXN_LABELS[e.type]}</p>
+                      <p className="font-semibold">{TXN_LABELS[e.type]}</p>
                       {(title(e) || detail(e)) && (
-                        <p className="truncate text-xs text-muted-foreground">{[title(e), detail(e)].filter(Boolean).join(' · ')}</p>
+                        <p className="truncate text-sm text-muted-foreground">{[title(e), detail(e)].filter(Boolean).join(' · ')}</p>
                       )}
+                      <p className="text-xs text-muted-foreground">{formatDate(e.txnDate)}</p>
                     </div>
                     {!e.counted && <StatusBadge status="reversed" />}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 rounded-lg bg-surface-muted p-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 rounded-lg bg-surface-muted px-2.5 py-2 text-xs">
                     <div>
                       <p className="text-muted-foreground">Due</p>
                       <Effect value={e.dueEffect} counted={e.counted} tone="due" />
                       <p className="figure text-muted-foreground">= {formatInr(e.runningDue)}</p>
                     </div>
-                    <div>
+                    <div className="text-right">
                       <p className="text-muted-foreground">Advance</p>
                       <Effect value={e.advanceEffect} counted={e.counted} tone="advance" />
                       <p className="figure text-muted-foreground">= {formatInr(e.runningAdvance)}</p>
@@ -185,43 +185,43 @@ export function CustomerLedgerPage() {
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+          <div className="table-shell hidden md:block">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Date</th>
-                  <th className="px-4 py-2.5 font-medium">Entry</th>
-                  <th className="px-4 py-2.5 font-medium">Reference</th>
-                  <th className="px-4 py-2.5 font-medium">Description</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Due ±</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Advance ±</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Due balance</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Advance balance</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-3 py-3">Entry</th>
+                  <th className="px-3 py-3">Reference</th>
+                  <th className="px-3 py-3">Description</th>
+                  <th className="px-3 py-3 text-right">Due ±</th>
+                  <th className="px-3 py-3 text-right">Advance ±</th>
+                  <th className="px-3 py-3 text-right">Due balance</th>
+                  <th className="px-3 py-3 text-right">Advance balance</th>
+                  <th className="px-4 py-3">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {entries.map((e) => (
                   <tr key={e.id} className={cn('align-top', !e.counted && 'text-muted-foreground')}>
                     <td className="whitespace-nowrap px-4 py-3">{formatDate(e.txnDate)}</td>
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <Link to={link(e)} className="hover:underline">
+                    <td className="whitespace-nowrap px-3 py-3">
+                      <Link to={link(e)} className="font-medium hover:underline">
                         {TXN_LABELS[e.type]}
                       </Link>
                     </td>
-                    <td className="px-4 py-3">{e.reference ?? '—'}</td>
-                    <td className="max-w-64 px-4 py-3">
+                    <td className="px-3 py-3 text-muted-foreground">{e.reference ?? '—'}</td>
+                    <td className="max-w-64 px-3 py-3">
                       <span className="line-clamp-2">{title(e) ?? '—'}</span>
                       {detail(e) && <span className="block text-xs text-muted-foreground">{detail(e)}</span>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       <Effect value={e.dueEffect} counted={e.counted} tone="due" />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       <Effect value={e.advanceEffect} counted={e.counted} tone="advance" />
                     </td>
-                    <td className="figure whitespace-nowrap px-4 py-3 text-right">{formatInr(e.runningDue)}</td>
-                    <td className="figure whitespace-nowrap px-4 py-3 text-right">{formatInr(e.runningAdvance)}</td>
+                    <td className={cn('figure whitespace-nowrap px-3 py-3 text-right font-medium', e.runningDue !== '0.00' && 'text-warning')}>{formatInr(e.runningDue)}</td>
+                    <td className={cn('figure whitespace-nowrap px-3 py-3 text-right font-medium', e.runningAdvance !== '0.00' && 'text-info')}>{formatInr(e.runningAdvance)}</td>
                     <td className="px-4 py-3">
                       <StatusBadge status={e.status} />
                     </td>

@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { isChunkLoadError, reloadOnceForChunkError } from '@/features/system/app-update';
@@ -24,12 +25,17 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   override render(): ReactNode {
     if (!this.state.failed) return this.props.children;
     return (
-      <div role="alert" className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
-        <h1 className="text-xl font-semibold">Something went wrong</h1>
+      <div role="alert" className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-3 p-6 text-center">
+        <span className="inline-flex size-12 items-center justify-center rounded-2xl bg-destructive-soft text-destructive ring-1 ring-destructive/10">
+          <AlertTriangle className="size-5" aria-hidden="true" />
+        </span>
+        <h1 className="text-2xl font-semibold tracking-[-0.02em]">Something went wrong</h1>
         <p className="text-sm text-muted-foreground">
           The page hit an unexpected problem. Reloading usually fixes it.
         </p>
-        <Button onClick={() => window.location.reload()}>Reload</Button>
+        <Button className="mt-2 min-w-32" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
       </div>
     );
   }

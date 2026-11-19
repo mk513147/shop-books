@@ -158,19 +158,24 @@ export function AppUpdateNotice({ enabled = import.meta.env.PROD && BUILD_ID !==
   return (
     // In the page flow (above the app frame) and sticky: it takes its own space instead of covering
     // the header's back links or a form's fields and buttons, and stays visible while scrolling.
-    <div className="sticky top-0 z-30 flex justify-center bg-background/95 px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur">
+    <div className="sticky top-0 z-30 flex justify-center bg-background/90 px-3 pb-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] backdrop-blur-md">
       <section
         aria-labelledby="app-update-title"
         data-testid="app-update-notice"
         data-status={status}
-        className="w-full max-w-xl rounded-2xl border border-primary/25 bg-card p-4 shadow-raised"
+        className={cn(
+          'relative w-full max-w-xl animate-[toast-in_var(--dur-slow)_var(--ease-out)_backwards] overflow-hidden rounded-2xl border bg-card p-4 shadow-raised',
+          status === 'failed' ? 'border-warning-strong/40' : 'border-primary/25',
+        )}
       >
+        {/* Tone rail, as on toasts. */}
+        <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-1', status === 'failed' ? 'bg-warning-strong' : 'bg-primary')} />
         <div className="flex items-start gap-3" role="status" aria-live="polite">
           <span
             aria-hidden="true"
             className={cn(
-              'inline-flex size-10 shrink-0 items-center justify-center rounded-full',
-              status === 'failed' ? 'bg-warning-soft text-warning' : 'bg-primary-soft text-primary',
+              'inline-flex size-10 shrink-0 items-center justify-center rounded-full ring-1',
+              status === 'failed' ? 'bg-warning-soft text-warning ring-warning/20' : 'bg-primary-soft text-primary ring-primary/15',
             )}
           >
             <Icon className={cn('size-5', status === 'updating' && 'animate-spin')} />

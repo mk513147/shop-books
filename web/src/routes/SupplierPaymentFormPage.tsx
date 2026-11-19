@@ -7,6 +7,7 @@ import { MoneyInput } from '@/components/finance/MoneyInput';
 import { PaymentModeChips } from '@/components/finance/PaymentModeChips';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
+import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { errorProps, Field } from '@/components/ui/field';
@@ -37,9 +38,9 @@ type FormValues = z.infer<typeof schema>;
 function Section({ title, children, description }: { title: string; children: ReactNode; description?: ReactNode }) {
   return (
     <Card className="space-y-4 p-4 md:p-5">
-      <div className="space-y-0.5">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold tracking-[-0.01em]">{title}</h2>
+        {description && <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {children}
     </Card>
@@ -97,7 +98,7 @@ export function NewSupplierPaymentPage() {
     setServerAllocErrors({});
   }
 
-  if (presetId && preset.isPending) return <LoadingState label="Loading supplier…" />;
+  if (presetId && preset.isPending) return <LoadingState label="Loading supplier…" skeleton="detail" />;
 
   return (
     <Page width="medium">
@@ -169,17 +170,27 @@ export function NewSupplierPaymentPage() {
               />
             </Field>
             {nothingOwed && !errors.supplierId && (
-              <p role="status" className="text-sm text-warning">
+              <p role="status" className="callout callout-warning">
                 {nothingOwedMessage}
               </p>
             )}
             {balance.data && !nothingOwed && (
-              <p className="text-sm text-muted-foreground">
-                Currently payable: <strong className="figure text-warning">{formatInr(balance.data.payable)}</strong>
+              <div className="callout callout-warning space-y-2">
+                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Currently payable<span className="sr-only">:</span>{' '}
+                    <strong className="figure mt-0.5 block text-2xl font-semibold tracking-tight text-warning">{formatInr(balance.data.payable)}</strong>
+                  </p>
+                  <Badge tone="warning" dot>
+                    Owed to supplier
+                  </Badge>
+                </div>
                 {balance.data.unallocated !== '0.00' && (
-                  <> · unallocated payments: <strong className="figure">{formatInr(balance.data.unallocated)}</strong></>
+                  <p className="text-xs text-muted-foreground">
+                    Unallocated payments: <strong className="figure font-semibold text-info">{formatInr(balance.data.unallocated)}</strong>
+                  </p>
                 )}
-              </p>
+              </div>
             )}
             <Field id="amount" label="Amount paid" error={errors.amount?.message}>
               <MoneyInput id="amount" large {...errorProps('amount', errors.amount)} {...register('amount')} />
@@ -199,7 +210,11 @@ export function NewSupplierPaymentPage() {
                 <Textarea id="notes" {...errorProps('notes', errors.notes)} {...register('notes')} />
               </Field>
             ) : (
-              <button type="button" className="text-sm text-primary underline-offset-2 hover:underline" onClick={() => setShowNotes(true)}>
+              <button
+                type="button"
+                className="-ml-1 inline-flex min-h-10 items-center rounded-md px-1 text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setShowNotes(true)}
+              >
                 + Add notes
               </button>
             )}
@@ -229,16 +244,19 @@ export function NewSupplierPaymentPage() {
         </Section>
 
         {formError && (
-          <p role="alert" className="rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm text-destructive">
+          <p role="alert" className="callout callout-danger p-4">
             {formError}
           </p>
         )}
 
-        <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end">
-          <Link to={supplier ? `/suppliers/${supplier.id}` : '/supplier-payments'} className={buttonVariants({ variant: 'ghost', size: 'lg' })}>
+        <div className="flex flex-col-reverse gap-2 pt-1 md:flex-row md:items-center md:justify-end">
+          <Link
+            to={supplier ? `/suppliers/${supplier.id}` : '/supplier-payments'}
+            className={buttonVariants({ variant: 'outline', size: 'lg', className: 'w-full md:w-auto' })}
+          >
             Cancel
           </Link>
-          <Button type="submit" size="lg" className={cn('md:min-w-44')} loading={isSubmitting}>
+          <Button type="submit" size="lg" className={cn('w-full md:w-auto md:min-w-48')} loading={isSubmitting}>
             {isSubmitting ? 'Saving…' : 'Record payment'}
           </Button>
         </div>

@@ -1,9 +1,10 @@
+import { Search, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StatTile } from '@/components/finance/StatTile';
+import { StatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
-import { ErrorState, LoadingState } from '@/components/states';
-import { Badge } from '@/components/ui/badge';
+import { EmptyState, ErrorState, LoadingState } from '@/components/states';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { ExportButton } from '@/features/exports/ExportButton';
@@ -69,7 +70,10 @@ export function CustomerReportPage() {
             role="tab"
             aria-selected={kind === k}
             onClick={() => period.set({ kind: k === 'due' ? '' : k })}
-            className={cn('h-10 rounded-lg text-sm font-medium', kind === k ? 'bg-card shadow-card' : 'text-muted-foreground hover:text-foreground')}
+            className={cn(
+              'min-h-10 rounded-lg px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              kind === k ? 'bg-card font-semibold text-foreground shadow-card' : 'font-medium text-muted-foreground hover:text-foreground',
+            )}
           >
             {COPY[k].title}
           </button>
@@ -79,67 +83,97 @@ export function CustomerReportPage() {
       <FilterBar>
         <form
           role="search"
+          className="relative"
           onSubmit={(e) => {
             e.preventDefault();
             period.set({ q: search.trim() });
           }}
         >
-          <Input type="search" aria-label="Search customers" placeholder="Search name or phone" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input type="search" className="pl-9" aria-label="Search customers" placeholder="Search name or phone" value={search} onChange={(e) => setSearch(e.target.value)} />
         </form>
         <Select aria-label="Customer status" value={status} onChange={(e) => period.set({ status: e.target.value === 'all' ? '' : e.target.value })}>
           <option value="all">Active and archived</option>
           <option value="active">Active customers</option>
           <option value="archived">Archived customers</option>
         </Select>
-        <label className="flex h-11 items-center gap-2 rounded-lg border bg-card px-3 text-sm md:h-10">
-          <input type="checkbox" className="size-4" checked={outstandingOnly} onChange={(e) => period.set({ outstandingOnly: e.target.checked ? 'true' : '' })} />
+        <label className="flex h-11 cursor-pointer items-center gap-2.5 rounded-lg border border-input bg-card px-3 text-sm shadow-card transition-colors hover:border-[oklch(0.8_0.01_245)] md:h-10">
+          <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={outstandingOnly} onChange={(e) => period.set({ outstandingOnly: e.target.checked ? 'true' : '' })} />
           {copy.outstanding}
         </label>
       </FilterBar>
 
-      {report.isPending && <LoadingState label="Calculating…" />}
+      {report.isPending && <LoadingState label="Calculating…" skeleton="table" />}
       {report.isError && <ErrorState error={report.error} onRetry={() => void report.refetch()} />}
       {r && (
         <div className={cn('space-y-5', report.isPlaceholderData && 'opacity-60')}>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-3">
             <StatTile label={`${copy.added} (${periodWord})`} amount={r.totals.added} />
             <StatTile label={`${copy.reduced} (${periodWord})`} amount={r.totals.reduced} />
-            <StatTile label={`${copy.balance} (now)`} amount={r.totals.balance} tone={kind === 'due' ? 'warning' : 'accent'} hint={copy.balanceHint} />
+            <StatTile label={`${copy.balance} (now)`} amount={r.totals.balance} tone={kind === 'due' ? 'warning' : 'info'} hint={copy.balanceHint} className="col-span-2 lg:col-span-1" />
           </div>
 
           {r.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No customers match.</p>
+            <EmptyState icon={Users} title="No customers match." />
           ) : (
-            <div className="overflow-x-auto rounded-xl border bg-card shadow-card">
-              <table className="w-full min-w-[34rem] text-sm">
-                <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-2.5 font-medium">Customer</th>
-                    <th className="px-3 py-2.5 text-right font-medium">{copy.added}</th>
-                    <th className="px-3 py-2.5 text-right font-medium">{copy.reduced}</th>
-                    <th className="px-4 py-2.5 text-right font-medium">{copy.balance} now</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {r.items.map((c) => (
-                    <tr key={c.customerId}>
-                      <td className="px-4 py-2.5">
-                        <Link to={`/customers/${c.customerId}/ledger`} className="font-medium hover:underline">
-                          {c.name}
-                        </Link>
-                        {!c.isActive && <Badge className="ml-2">Archived</Badge>}
-                        {c.phone && <span className="block text-xs text-muted-foreground">{c.phone}</span>}
-                      </td>
-                      <td className="figure px-3 py-2.5 text-right">{formatInr(c.added)}</td>
-                      <td className="figure px-3 py-2.5 text-right">{formatInr(c.reduced)}</td>
-                      <td className={cn('figure px-4 py-2.5 text-right font-medium', c.balance !== '0.00' && (kind === 'due' ? 'text-warning' : 'text-primary'))}>
-                        {formatInr(c.balance)}
-                      </td>
+            <>
+              <ul className="space-y-2 md:hidden">
+                {r.items.map((c) => (
+                  <li key={c.customerId}>
+                    <Link to={`/customers/${c.customerId}/ledger`} className="list-card">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="flex items-center gap-2 font-semibold">
+                            <span className="truncate">{c.name}</span>
+                            {!c.isActive && <StatusBadge status="archived" />}
+                          </p>
+                          {c.phone && <p className="figure truncate text-sm text-muted-foreground">{c.phone}</p>}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className={cn('figure font-semibold', c.balance !== '0.00' && (kind === 'due' ? 'text-warning' : 'text-info'))}>{formatInr(c.balance)}</p>
+                          <p className="text-xs text-muted-foreground">{copy.balance} now</p>
+                        </div>
+                      </div>
+                      <p className="figure mt-2 text-xs text-muted-foreground">
+                        {copy.added} {formatInr(c.added)} · {copy.reduced} {formatInr(c.reduced)}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <div className="table-shell hidden md:block">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th className="px-4 py-3">Customer</th>
+                      <th className="px-3 py-3 text-right">{copy.added}</th>
+                      <th className="px-3 py-3 text-right">{copy.reduced}</th>
+                      <th className="px-4 py-3 text-right">{copy.balance} now</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {r.items.map((c) => (
+                      <tr key={c.customerId}>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex flex-wrap items-center gap-2">
+                            <Link to={`/customers/${c.customerId}/ledger`} className="font-medium hover:underline">
+                              {c.name}
+                            </Link>
+                            {!c.isActive && <StatusBadge status="archived" />}
+                          </span>
+                          {c.phone && <span className="figure block text-xs text-muted-foreground">{c.phone}</span>}
+                        </td>
+                        <td className="figure whitespace-nowrap px-3 py-3 text-right">{formatInr(c.added)}</td>
+                        <td className="figure whitespace-nowrap px-3 py-3 text-right">{formatInr(c.reduced)}</td>
+                        <td className={cn('figure whitespace-nowrap px-4 py-3 text-right font-semibold', c.balance !== '0.00' && (kind === 'due' ? 'text-warning' : 'text-info'))}>
+                          {formatInr(c.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
           <Pager page={page} totalPages={r.pagination.totalPages} onPage={(n) => period.set({ page: String(n) })} />
           <GeneratedNote />

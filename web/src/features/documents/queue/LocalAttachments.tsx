@@ -26,9 +26,9 @@ function LocalThumb({ item }: { item: QueuedAttachment }) {
     setUrl(u);
     return () => URL.revokeObjectURL(u);
   }, [item.blob, isImage]);
-  if (url) return <img src={url} alt={`Preview of ${item.fileName}`} className="size-14 shrink-0 rounded-md border object-cover" />;
+  if (url) return <img src={url} alt={`Preview of ${item.fileName}`} className="size-14 shrink-0 rounded-lg border object-cover" />;
   return (
-    <span className="inline-flex size-14 shrink-0 flex-col items-center justify-center rounded-md border bg-surface-muted text-muted-foreground">
+    <span className="inline-flex size-14 shrink-0 flex-col items-center justify-center rounded-lg border bg-surface-muted text-muted-foreground">
       <FileText className="size-5" aria-hidden="true" />
       <span className="text-[10px] font-semibold">{isImage ? 'IMG' : 'PDF'}</span>
     </span>
@@ -50,7 +50,7 @@ export function LocalAttachmentList({ queue, items }: { queue: AttachmentQueue; 
         {items.map((item) => {
           const progress = queue.progress.get(item.id);
           return (
-            <li key={item.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed p-2" data-testid="local-attachment">
+            <li key={item.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-input bg-card/70 p-2.5" data-testid="local-attachment">
               <LocalThumb item={item} />
               <div className="min-w-0 flex-1 basis-40">
                 <p className="truncate text-sm font-medium">{item.fileName}</p>
@@ -132,7 +132,7 @@ export function LocalAttachmentList({ queue, items }: { queue: AttachmentQueue; 
           </span>
         </p>
         {error && (
-          <p role="alert" className="mt-2 text-sm text-destructive">
+          <p role="alert" className="callout callout-danger mt-3">
             {error}
           </p>
         )}
@@ -145,7 +145,7 @@ export function LocalAttachmentList({ queue, items }: { queue: AttachmentQueue; 
 export function OfflineStorageWarning({ problem }: { problem: string | null }) {
   if (!problem) return null;
   return (
-    <p role="alert" className="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm">
+    <p role="alert" className="callout callout-warning">
       {problem} Files you attach are kept only while this page stays open and are uploaded when the shop PC is online. Do not close the page
       until they show as stored.
     </p>
@@ -162,7 +162,7 @@ export function AttachmentSyncBanner({ items, onRetry }: { items: readonly Queue
   const waiting = items.filter((i) => i.status === 'waiting_pc').length;
   const n = items.length;
   return (
-    <div role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-sm" data-testid="attachment-sync-banner">
+    <div role="status" className="mb-4 flex flex-wrap items-center gap-2 callout callout-warning py-2" data-testid="attachment-sync-banner">
       <span className="min-w-0 flex-1">
         {n} bill file{n === 1 ? ' is' : 's are'} on this device only
         {waiting > 0 && ` · ${waiting} waiting for the shop PC`}

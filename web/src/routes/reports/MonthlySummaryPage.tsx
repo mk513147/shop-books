@@ -53,30 +53,30 @@ export function MonthlySummaryPage() {
     <Page>
       <PageHeader title="Monthly summary" actions={<ExportButton report="monthly" params={{ year, month }} />} />
       <ReportTabs />
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <label htmlFor="summary-month" className="text-sm font-medium">
           Month
         </label>
         <Input
           id="summary-month"
           type="month"
-          className="w-48"
+          className="w-48 sm:w-52"
           max={todayInKolkata().slice(0, 7)}
           value={ym}
           onChange={(e) => e.target.value && setParams({ month: e.target.value }, { replace: true })}
         />
       </div>
-      {summary.isPending && <LoadingState label="Calculating…" />}
+      {summary.isPending && <LoadingState label="Calculating…" skeleton="cards" />}
       {summary.isError && <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />}
       {s && (
         <div className="space-y-6">
           <section className="space-y-3">
             <SectionHeading title={`Expenses: ${s.label}`} kind="period" />
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:gap-3 lg:grid-cols-4">
               <StatTile label="Total expenses" amount={s.expenses.amount} hint={`${s.expenses.count} expense(s)`} />
               <StatTile label="Paid at purchase" amount={s.expenses.paidAtPurchase} />
               <StatTile label="Settled by later payments" amount={s.expenses.settledByPayments} />
-              <StatTile label="Still payable on them" amount={s.expenses.outstanding} tone="warning" />
+              <StatTile label="Still payable on them" amount={s.expenses.outstanding} tone={s.expenses.outstanding !== '0.00' ? 'warning' : 'muted'} />
             </div>
             <ChangeNote change={s.expenses.changePercent} previous={s.expenses.previous.amount} />
             <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
@@ -110,7 +110,7 @@ export function MonthlySummaryPage() {
             </div>
           </section>
 
-          <section className="grid gap-4 lg:grid-cols-2">
+          <section className="grid gap-4 lg:grid-cols-2 lg:items-start">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle>Suppliers</CardTitle>
@@ -128,23 +128,23 @@ export function MonthlySummaryPage() {
               </CardHeader>
               <CardContent className="grid gap-4 sm:grid-cols-2">
                 <div className="divide-y">
-                  <p className="pb-1 text-xs font-medium text-warning">Dues</p>
+                  <p className="eyebrow pb-1.5">Dues</p>
                   <FigureRow label={`Recorded in ${s.label}`} amount={s.customerActivity.duesRecorded} />
                   <FigureRow label="Payments received" amount={s.customerActivity.duePaymentsReceived} />
                   <FigureRow label="Outstanding now" amount={s.customers.totalDue} tone="warning" />
                 </div>
                 <div className="divide-y">
-                  <p className="pb-1 text-xs font-medium text-primary">Advances</p>
+                  <p className="eyebrow pb-1.5">Advances</p>
                   <FigureRow label={`Received in ${s.label}`} amount={s.customerActivity.advancesReceived} />
                   <FigureRow label="Refunds issued" amount={s.customerActivity.refundsIssued} />
-                  <FigureRow label="Available now" amount={s.customers.totalAdvance} tone="accent" />
+                  <FigureRow label="Available now" amount={s.customers.totalAdvance} tone="info" />
                 </div>
               </CardContent>
             </Card>
           </section>
 
           {s.notes.length > 0 && (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <ul className="callout callout-info list-disc space-y-1 pl-8">
               {s.notes.map((n) => (
                 <li key={n}>{n}</li>
               ))}

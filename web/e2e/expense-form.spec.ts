@@ -48,25 +48,44 @@ test.describe('Add expense on a narrow Android phone', () => {
     await expect(amount).toHaveAttribute('inputmode', 'decimal');
     expect((await amount.boundingBox())!.height).toBeGreaterThanOrEqual(60);
 
-    // One column: the groups stack, and the summary with Save follows the form.
+    // One column: the groups stack; the Save dock is docked edge to edge just above the bottom bar.
     const form = (await page.getByLabel('Total expense amount').boundingBox())!;
-    const panel = (await page.getByTestId('expense-actions').boundingBox())!;
-    expect(panel.y).toBeGreaterThan(form.y);
-    expect(Math.abs(panel.width - (await page.getByTestId('expense-actions').evaluate((el) => el.parentElement!.getBoundingClientRect().width)))).toBeLessThan(2);
+    const dock = page.getByTestId('expense-actions');
+    expect(await dock.evaluate((el) => getComputedStyle(el).position)).toBe('sticky');
+    const dockBox = (await dock.boundingBox())!;
+    expect(dockBox.y).toBeGreaterThan(form.y);
+    expect(Math.abs(dockBox.width - 360)).toBeLessThan(2);
 
     // Every text control is at least 44px tall (touch target).
     for (const label of ['Description (optional)', 'Amount paid', 'Payment method', 'Expense date', 'Bill number (optional)']) {
       expect((await page.getByLabel(label).boundingBox())!.height, label).toBeGreaterThanOrEqual(44);
     }
 
-    // Save is at the end of the form, never floating: scrolled to, it is fully above the bottom navigation.
+    // Save is reachable without scrolling: on screen from the start, fully above the bottom navigation.
     const save = page.getByRole('button', { name: 'Save expense' });
-    await save.scrollIntoViewIfNeeded();
+    await expect(save).toBeInViewport();
     const nav = (await page.locator('nav.fixed').first().boundingBox())!;
-    const saveBox = (await save.boundingBox())!;
+    let saveBox = (await save.boundingBox())!;
     expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(nav.y + 1);
     expect(saveBox.height).toBeGreaterThanOrEqual(48);
-    expect(await page.getByTestId('expense-actions').evaluate((el) => getComputedStyle(el).position)).toBe('static');
+
+    // Still docked above the bottom bar in the middle of the form…
+    await page.getByLabel('Payment method').scrollIntoViewIfNeeded();
+    await expect(save).toBeInViewport();
+    saveBox = (await save.boundingBox())!;
+    expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(nav.y + 1);
+    // …and the focused field is never underneath the dock.
+    await page.getByLabel('Bill number (optional)').focus();
+    const bill = (await page.getByLabel('Bill number (optional)').boundingBox())!;
+    expect(bill.y + bill.height).toBeLessThanOrEqual((await dock.boundingBox())!.y + 1);
+
+    // Keyboard that resizes the page (Android resizes-content mode): the dock and the bottom bar step aside.
+    await page.setViewportSize({ width: 360, height: 400 });
+    await expect(dock).toBeHidden();
+    await expect(page.locator('nav.fixed').first()).toBeHidden();
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expect(dock).toBeVisible();
+    await expect(save).toBeInViewport();
     await amount.scrollIntoViewIfNeeded();
 
     await amount.fill('2500');
@@ -102,9 +121,12 @@ test.describe('Add expense on desktop', () => {
     const bill = (await page.getByLabel('Bill number (optional)').boundingBox())!;
     expect(Math.abs(date.y - bill.y)).toBeLessThan(2); // same row
     const amount = (await page.getByLabel('Total expense amount').boundingBox())!;
-    const panel = (await page.getByTestId('expense-actions').boundingBox())!;
+    // The summary column (summary card + Save dock) sits beside the top of the form.
+    const panel = (await page.getByRole('complementary', { name: 'Summary and save' }).boundingBox())!;
     expect(panel.x).toBeGreaterThan(amount.x + amount.width);
     expect(Math.abs(panel.y - amount.y)).toBeLessThan(120); // beside the top of the form
+    // Desktop: the Save buttons are plain buttons under the summary, not a docked bar.
+    expect(await page.getByTestId('expense-actions').evaluate((el) => getComputedStyle(el).position)).toBe('static');
 
     await page.getByLabel('Total expense amount').fill('2500');
     await expect(page.getByTestId('payment-badge')).toHaveText(/Fully paid/);

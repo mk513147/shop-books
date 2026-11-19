@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dialog, SEARCH_SHEET_CLASS } from '@/components/ui/dialog';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { setupUser } from '@/test/user-event';
-import { readViewportInset, revealAboveKeyboard } from './visual-viewport';
+import { readViewportInset, revealAboveKeyboard, useKeyboardOpen } from './visual-viewport';
 
 /** A controllable stand-in for window.visualViewport (jsdom has none). */
 class FakeVisualViewport extends EventTarget {
@@ -125,5 +125,45 @@ describe('inline category search on a phone', () => {
     expect(el.scrollIntoView).toHaveBeenCalledTimes(1);
     stop();
     el.remove();
+  });
+});
+
+describe('useKeyboardOpen (docked bars step aside for the keyboard)', () => {
+  function Probe() {
+    return <p data-testid="kb">{useKeyboardOpen() ? 'open' : 'closed'}</p>;
+  }
+
+  it('detects a keyboard that covers the visual viewport (Chrome default)', () => {
+    stubPhone(true);
+    render(<Probe />);
+    expect(screen.getByTestId('kb')).toHaveTextContent('closed');
+    act(() => vv.keyboard(320));
+    expect(screen.getByTestId('kb')).toHaveTextContent('open');
+    act(() => vv.keyboard(0));
+    expect(screen.getByTestId('kb')).toHaveTextContent('closed');
+  });
+
+  it('detects a keyboard that resizes the whole page (resizes-content), but not a small browser-bar change', () => {
+    stubPhone(true);
+    render(<Probe />);
+    const resizeWindow = (h: number) =>
+      act(() => {
+        vi.stubGlobal('innerHeight', h);
+        vv.height = h;
+        window.dispatchEvent(new Event('resize'));
+      });
+    resizeWindow(744); // address bar collapsing/expanding: not a keyboard
+    expect(screen.getByTestId('kb')).toHaveTextContent('closed');
+    resizeWindow(470);
+    expect(screen.getByTestId('kb')).toHaveTextContent('open');
+    resizeWindow(800);
+    expect(screen.getByTestId('kb')).toHaveTextContent('closed');
+  });
+
+  it('never reports a keyboard on desktop layouts', () => {
+    stubPhone(false);
+    render(<Probe />);
+    act(() => vv.keyboard(320));
+    expect(screen.getByTestId('kb')).toHaveTextContent('closed');
   });
 });

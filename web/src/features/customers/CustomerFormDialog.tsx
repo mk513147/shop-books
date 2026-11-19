@@ -110,7 +110,7 @@ export function CustomerFormDialog({
           <Textarea id="customer-notes" {...register('notes')} />
         </Field>
         {mutation.isError && !(mutation.error instanceof ApiError && mutation.error.code === 'CUSTOMER_PHONE_TAKEN') && (
-          <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+          <p role="alert" className="callout callout-danger">
             {errorMessage(mutation.error)}
           </p>
         )}

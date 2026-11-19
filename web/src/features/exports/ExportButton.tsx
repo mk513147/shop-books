@@ -1,4 +1,4 @@
-import { FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
@@ -90,12 +90,12 @@ export function ExportButton({
 
   return (
     <span className={cn('inline-flex flex-col items-start gap-1', className)}>
-      <Button variant="outline" size="sm" disabled={disabled || busy} onClick={() => void download()} aria-busy={busy}>
-        {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <FileSpreadsheet aria-hidden="true" />}
+      <Button variant="outline" size="sm" className="h-10 md:h-9" disabled={disabled} loading={busy} onClick={() => void download()}>
+        {!busy && <Download aria-hidden="true" />}
         {busy ? 'Preparing…' : label}
       </Button>
       {error && (
-        <span role="alert" className="max-w-64 text-xs text-destructive">
+        <span role="alert" className="max-w-64 animate-fade-in text-xs font-medium text-destructive">
           {error}
         </span>
       )}

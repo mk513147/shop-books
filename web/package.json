@@ -17,6 +17,7 @@
     "test:e2e:deploy": "node e2e/deploy-sim/build.mjs && playwright test -c playwright.deploy.config.ts"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
     "@hookform/resolvers": "^6.0.2",
     "@tanstack/react-query": "^5.105.0",
     "class-variance-authority": "^0.7.1",

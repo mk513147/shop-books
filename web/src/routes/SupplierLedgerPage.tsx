@@ -67,7 +67,7 @@ export function SupplierLedgerPage() {
     setParams(merged, { replace: true });
   }
 
-  if (ledger.isPending) return <LoadingState label="Loading ledger…" />;
+  if (ledger.isPending) return <LoadingState label="Loading ledger…" skeleton="table" />;
   if (ledger.isError) return <ErrorState title="Could not load the ledger" error={ledger.error} onRetry={() => void ledger.refetch()} />;
   const { supplier, balance, entries, broughtForward, truncated } = ledger.data;
 
@@ -84,20 +84,20 @@ export function SupplierLedgerPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 md:gap-3 lg:grid-cols-6">
         <StatTile label="Bills" amount={balance.totalBills} />
         <StatTile label="Paid at purchase" amount={balance.paidAtPurchase} />
         <StatTile label="Payments" amount={balance.totalPayments} />
         <StatTile label="Payable on bills" amount={balance.payable} tone={balance.payable !== '0.00' ? 'warning' : 'muted'} />
-        <StatTile label="Unallocated payments" amount={balance.unallocated} tone={balance.unallocated !== '0.00' ? 'accent' : 'muted'} />
+        <StatTile label="Unallocated payments" amount={balance.unallocated} tone={balance.unallocated !== '0.00' ? 'info' : 'muted'} />
         <StatTile label="Net balance owed" amount={balance.netBalance} hint="Payable − unallocated" />
       </div>
 
-      <details className="rounded-xl border bg-card p-4 text-sm shadow-card">
-        <summary className="flex cursor-pointer items-center gap-2 font-medium">
-          <Info className="size-4 text-primary" aria-hidden="true" /> How to read this ledger
+      <details className="rounded-xl border bg-card text-sm shadow-card">
+        <summary className="flex min-h-11 cursor-pointer select-none items-center gap-2 rounded-xl px-4 py-2.5 font-medium transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <Info className="size-4 text-info" aria-hidden="true" /> How to read this ledger
         </summary>
-        <ul className="mt-3 list-disc space-y-1.5 pl-5 text-muted-foreground">
+        <ul className="list-disc space-y-1.5 border-t px-4 pt-3 pb-4 pl-9 text-muted-foreground">
           <li>
             <strong className="text-foreground">Credit (+)</strong>: a bill from the supplier. It increases what the shop owes.
           </li>
@@ -133,12 +133,12 @@ export function SupplierLedgerPage() {
       </div>
 
       {broughtForward !== null && (
-        <p className="flex justify-between rounded-lg bg-surface-muted px-3 py-2.5 text-sm">
+        <p className="flex justify-between gap-3 rounded-xl border bg-surface-muted px-4 py-3 text-sm">
           <span className="text-muted-foreground">Balance before {formatDate(get('from'))} (from earlier entries)</span>
           <strong className="figure">{formatInr(broughtForward)}</strong>
         </p>
       )}
-      {truncated && <p className="text-sm text-warning">Only the first 2,000 entries are shown. Narrow the date range.</p>}
+      {truncated && <p className="callout callout-warning">Only the first 2,000 entries are shown. Narrow the date range.</p>}
 
       {entries.length === 0 ? (
         <EmptyState icon={BookOpenText} title="No entries">
@@ -149,47 +149,53 @@ export function SupplierLedgerPage() {
           <ul className="space-y-2 md:hidden">
             {entries.map((e) => (
               <li key={e.key}>
-                <Link to={linkFor(e)} className={cn('block space-y-1 rounded-xl border bg-card p-3 shadow-card', !e.counted && 'opacity-80')}>
+                <Link to={linkFor(e)} className="list-card space-y-1.5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">
+                      <p className={cn('truncate font-semibold', !e.counted && 'text-muted-foreground')}>{e.description || TYPE_LABELS[e.type]}</p>
+                      <p className="text-sm text-muted-foreground">
                         {formatDate(e.date)} · {TYPE_LABELS[e.type]}
                       </p>
-                      <p className="truncate text-sm font-medium">{e.description || TYPE_LABELS[e.type]}</p>
                     </div>
                     <Amount entry={e} />
                   </div>
                   <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
                     <span className="min-w-0 break-words">{detailLine(e)}</span>
-                    {e.counted ? <span className="figure shrink-0">Balance {formatInr(e.runningBalance)}</span> : <StatusBadge status={e.status} />}
+                    {e.counted ? (
+                      <span className="figure shrink-0">
+                        Balance <span className="font-semibold text-foreground">{formatInr(e.runningBalance)}</span>
+                      </span>
+                    ) : (
+                      <StatusBadge status={e.status} />
+                    )}
                   </div>
                 </Link>
               </li>
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+          <div className="table-shell hidden md:block">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Date</th>
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Reference</th>
-                  <th className="px-4 py-2.5 font-medium">Description</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Credit (bill)</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Debit (paid)</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Balance</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Reference</th>
+                  <th className="px-4 py-3">Description</th>
+                  <th className="px-4 py-3 text-right">Credit (bill)</th>
+                  <th className="px-4 py-3 text-right">Debit (paid)</th>
+                  <th className="px-4 py-3 text-right">Balance</th>
+                  <th className="px-4 py-3">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {entries.map((e) => (
                   <tr key={e.key} className={cn('align-top', !e.counted && 'text-muted-foreground')}>
-                    <td className="whitespace-nowrap px-4 py-3">{formatDate(e.date)}</td>
+                    <td className="figure whitespace-nowrap px-4 py-3">{formatDate(e.date)}</td>
                     <td className="whitespace-nowrap px-4 py-3">{TYPE_LABELS[e.type]}</td>
                     <td className="px-4 py-3">{e.reference ?? '—'}</td>
                     <td className="max-w-72 px-4 py-3">
-                      <Link to={linkFor(e)} className="line-clamp-2 hover:underline">
+                      <Link to={linkFor(e)} className="line-clamp-2 font-medium hover:underline">
                         {e.description || TYPE_LABELS[e.type]}
                       </Link>
                       {detailLine(e) && <span className="block text-xs text-muted-foreground">{detailLine(e)}</span>}
@@ -200,7 +206,7 @@ export function SupplierLedgerPage() {
                     <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', !e.counted && 'line-through')}>
                       {e.debit !== '0.00' ? formatInr(e.debit) : ''}
                     </td>
-                    <td className="figure whitespace-nowrap px-4 py-3 text-right font-medium">{e.counted ? formatInr(e.runningBalance) : '—'}</td>
+                    <td className="figure whitespace-nowrap px-4 py-3 text-right font-semibold">{e.counted ? formatInr(e.runningBalance) : '—'}</td>
                     <td className="px-4 py-3">
                       <StatusBadge status={e.status} />
                     </td>

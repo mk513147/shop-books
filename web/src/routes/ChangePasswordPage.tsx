@@ -89,7 +89,7 @@ export function ChangePasswordPage() {
               />
             </Field>
             {formError && (
-              <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+              <p role="alert" className="callout callout-danger">
                 {formError}
               </p>
             )}
@@ -97,7 +97,10 @@ export function ChangePasswordPage() {
               {isSubmitting ? 'Saving…' : 'Change password'}
             </Button>
             {!forced && (
-              <Link to="/" className="block text-center text-sm text-muted-foreground underline">
+              <Link
+                to="/"
+                className="flex h-11 items-center justify-center rounded-lg text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 Cancel
               </Link>
             )}

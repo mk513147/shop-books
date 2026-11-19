@@ -1,5 +1,6 @@
 import { MoneyInput } from '@/components/finance/MoneyInput';
 import { Button } from '@/components/ui/button';
+import { FieldError } from '@/components/ui/field';
 import { formatDate } from '@/lib/dates';
 import { formatInr, fromPaise, MONEY_INPUT, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
@@ -74,7 +75,7 @@ export function AllocationEditor({
   }
 
   if (bills.length === 0) {
-    return <p className="text-sm text-muted-foreground">This supplier has no unpaid bills. The payment will stay unallocated until bills are added.</p>;
+    return <p className="callout callout-info">This supplier has no unpaid bills. The payment will stay unallocated until bills are added.</p>;
   }
 
   return (
@@ -92,24 +93,27 @@ export function AllocationEditor({
           const error = serverErrors[bill.id] ?? problems[bill.id];
           const inputId = `alloc-${bill.id}`;
           return (
-            <li key={bill.id} className={cn('rounded-lg border p-3', error && 'border-destructive/40')}>
+            <li
+              key={bill.id}
+              className={cn('rounded-lg border bg-card p-3 transition-colors', error ? 'border-destructive/40 bg-destructive-soft/40' : draft[bill.id]?.trim() && 'border-primary/25')}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <label htmlFor={inputId} className="block truncate text-sm font-medium">
+                  <label htmlFor={inputId} className="block truncate text-sm font-semibold">
                     {bill.description}
                   </label>
                   <p className="text-xs text-muted-foreground">
                     {formatDate(bill.expenseDate)}
-                    {bill.invoiceReference && ` · ${bill.invoiceReference}`} · bill {formatInr(bill.amount)}
+                    {bill.invoiceReference && ` · ${bill.invoiceReference}`} · bill <span className="figure">{formatInr(bill.amount)}</span>
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-xs text-muted-foreground">Payable</p>
-                  <p className="figure text-sm font-semibold text-warning">{formatInr(bill.payable)}</p>
+                  <p className="figure whitespace-nowrap text-sm font-semibold text-warning">{formatInr(bill.payable)}</p>
                 </div>
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <div className="flex-1">
+              <div className="mt-2.5 flex items-center gap-2">
+                <div className="min-w-0 flex-1">
                   <MoneyInput
                     id={inputId}
                     value={draft[bill.id] ?? ''}
@@ -120,31 +124,33 @@ export function AllocationEditor({
                     onChange={(e) => onChange({ ...draft, [bill.id]: e.target.value })}
                   />
                 </div>
-                <Button size="sm" variant="outline" disabled={disabled} onClick={() => fillOne(bill)}>
+                <Button variant="outline" className="shrink-0" disabled={disabled} onClick={() => fillOne(bill)}>
                   Full
                 </Button>
               </div>
               {error && (
-                <p id={`${inputId}-error`} className="mt-1 text-sm text-destructive">
+                <FieldError id={`${inputId}-error`} className="mt-1.5">
                   {error}
-                </p>
+                </FieldError>
               )}
             </li>
           );
         })}
       </ul>
-      <div className="space-y-1 rounded-lg bg-surface-muted px-3 py-2.5 text-sm" aria-live="polite">
-        <div className="flex justify-between gap-2">
+      <div className="space-y-1.5 rounded-lg border bg-surface-muted px-3.5 py-3 text-sm" aria-live="polite">
+        <div className="flex items-baseline justify-between gap-2">
           <span className="text-muted-foreground">Allocating to bills</span>
-          <strong className="figure">{formatInr(fromPaise(total))}</strong>
+          <strong className="figure font-semibold">{formatInr(fromPaise(total))}</strong>
         </div>
         {left !== null && (
-          <div className="flex justify-between gap-2">
+          <div className="flex items-baseline justify-between gap-2">
             <span className="text-muted-foreground">Stays unallocated</span>
-            <strong className={cn('figure', left < 0n && 'text-destructive')}>{formatInr(fromPaise(left))}</strong>
+            <strong className={cn('figure font-semibold', left < 0n ? 'text-destructive' : left > 0n ? 'text-info' : 'text-muted-foreground')}>
+              {formatInr(fromPaise(left))}
+            </strong>
           </div>
         )}
-        {problems._total && <p className="text-destructive">{problems._total}</p>}
+        {problems._total && <FieldError className="pt-0.5">{problems._total}</FieldError>}
       </div>
     </div>
   );

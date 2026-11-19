@@ -5,6 +5,7 @@ import { StatTile } from '@/components/finance/StatTile';
 import { StatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { EmptyState, ErrorState, LoadingState } from '@/components/states';
+import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -71,13 +72,18 @@ export function SupplierPaymentsPage() {
       />
 
       {supplierId && (
-        <p className="flex items-center gap-2 text-sm">
-          <span className="rounded-full bg-primary-soft px-3 py-1 text-primary-soft-foreground">
-            Supplier: {supplier.data?.name ?? '…'}
+        <p className="flex items-center text-sm">
+          <span className="inline-flex min-w-0 items-center rounded-full bg-primary-soft py-1 pl-3 pr-1 font-medium text-primary-soft-foreground ring-1 ring-inset ring-primary/15">
+            <span className="truncate">Supplier: {supplier.data?.name ?? '…'}</span>
+            <button
+              type="button"
+              className="ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Show all suppliers"
+              onClick={() => update({ supplierId: '' })}
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
           </span>
-          <button type="button" className="inline-flex size-8 items-center justify-center rounded-full hover:bg-accent" aria-label="Show all suppliers" onClick={() => update({ supplierId: '' })}>
-            <X className="size-4" aria-hidden="true" />
-          </button>
         </p>
       )}
 
@@ -120,14 +126,19 @@ export function SupplierPaymentsPage() {
         <Input type="date" aria-label="To date" value={get('to')} onChange={(e) => update({ to: e.target.value })} />
       </div>
 
-      {list.isPending && <LoadingState label="Loading payments…" />}
+      {list.isPending && <LoadingState label="Loading payments…" skeleton="table" />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.isSuccess && (
         <>
-          <div className="grid grid-cols-3 gap-2">
-            <StatTile label={`Paid (${list.data.totals.count})`} amount={list.data.totals.amount} />
-            <StatTile label="Allocated" amount={list.data.totals.allocated} />
-            <StatTile label="Unallocated" amount={list.data.totals.unallocated} tone={list.data.totals.unallocated !== '0.00' ? 'warning' : 'muted'} />
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 md:gap-3">
+            <StatTile className="col-span-2 md:col-span-1" label={`Paid (${list.data.totals.count})`} amount={list.data.totals.amount} />
+            <StatTile label="Allocated" amount={list.data.totals.allocated} tone="accent" hint="Set against bills" />
+            <StatTile
+              label="Unallocated"
+              amount={list.data.totals.unallocated}
+              tone={list.data.totals.unallocated !== '0.00' ? 'info' : 'muted'}
+              hint="Not yet set against a bill"
+            />
           </div>
 
           {list.data.items.length === 0 ? (
@@ -139,24 +150,31 @@ export function SupplierPaymentsPage() {
               <ul className="space-y-2 md:hidden">
                 {list.data.items.map((p) => (
                   <li key={p.id}>
-                    <Link to={`/supplier-payments/${p.id}`} className="block space-y-1 rounded-xl border bg-card p-4 shadow-card">
+                    <Link to={`/supplier-payments/${p.id}`} className="list-card">
                       <div className="flex items-start justify-between gap-3">
-                        <p className="min-w-0 truncate font-medium">{p.supplier.name}</p>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">{p.supplier.name}</p>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {PAYMENT_MODE_LABELS[p.paymentMode]}
+                            {p.reference && ` · ${p.reference}`}
+                          </p>
+                        </div>
                         <p className={cn('figure shrink-0 font-semibold', p.status === 'reversed' && 'text-muted-foreground line-through')}>
                           {formatInr(p.amount)}
                         </p>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDate(p.paymentDate)} · {PAYMENT_MODE_LABELS[p.paymentMode]}
-                        {p.reference && ` · ${p.reference}`}
-                      </p>
-                      <div className="flex items-center justify-between gap-2 text-xs">
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground">{formatDate(p.paymentDate)}</span>
                         {p.status === 'reversed' ? (
                           <StatusBadge status="reversed" />
+                        ) : p.unallocatedAmount === '0.00' ? (
+                          <Badge tone="accent" dot>
+                            Fully allocated
+                          </Badge>
                         ) : (
-                          <span className={cn(p.unallocatedAmount !== '0.00' ? 'text-warning' : 'text-muted-foreground')}>
-                            {p.unallocatedAmount === '0.00' ? 'Fully allocated' : `${formatInr(p.unallocatedAmount)} unallocated`}
-                          </span>
+                          <Badge tone="info" dot>
+                            <span className="figure">{formatInr(p.unallocatedAmount)}</span> unallocated
+                          </Badge>
                         )}
                       </div>
                     </Link>
@@ -164,37 +182,37 @@ export function SupplierPaymentsPage() {
                 ))}
               </ul>
 
-              <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-                <table className="w-full text-sm">
-                  <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+              <div className="table-shell hidden md:block">
+                <table className="data-table">
+                  <thead>
                     <tr>
-                      <th className="px-4 py-2.5 font-medium">Date</th>
-                      <th className="px-4 py-2.5 font-medium">Supplier</th>
-                      <th className="px-4 py-2.5 font-medium">Mode / reference</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Amount</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Allocated</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Unallocated</th>
-                      <th className="px-4 py-2.5 font-medium">Status</th>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-3 py-3">Supplier</th>
+                      <th className="px-3 py-3">Mode / reference</th>
+                      <th className="px-3 py-3 text-right">Amount</th>
+                      <th className="px-3 py-3 text-right">Allocated</th>
+                      <th className="px-3 py-3 text-right">Unallocated</th>
+                      <th className="px-4 py-3">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
+                  <tbody>
                     {list.data.items.map((p) => (
-                      <tr key={p.id} className="cursor-pointer hover:bg-accent/50" onClick={() => navigate(`/supplier-payments/${p.id}`)}>
+                      <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/supplier-payments/${p.id}`)}>
                         <td className="whitespace-nowrap px-4 py-3">{formatDate(p.paymentDate)}</td>
-                        <td className="px-4 py-3">
-                          <Link to={`/supplier-payments/${p.id}`} className="font-medium hover:underline" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-3 py-3">
+                          <Link to={`/supplier-payments/${p.id}`} className="font-semibold hover:underline" onClick={(e) => e.stopPropagation()}>
                             {p.supplier.name}
                           </Link>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="px-3 py-3 text-muted-foreground">
                           {PAYMENT_MODE_LABELS[p.paymentMode]}
                           {p.reference && <span className="block text-xs">{p.reference}</span>}
                         </td>
-                        <td className={cn('figure whitespace-nowrap px-4 py-3 text-right font-medium', p.status === 'reversed' && 'line-through')}>
+                        <td className={cn('figure whitespace-nowrap px-3 py-3 text-right font-semibold', p.status === 'reversed' && 'text-muted-foreground line-through')}>
                           {formatInr(p.amount)}
                         </td>
-                        <td className="figure whitespace-nowrap px-4 py-3 text-right">{formatInr(p.allocatedAmount)}</td>
-                        <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', p.unallocatedAmount !== '0.00' && 'text-warning')}>
+                        <td className="figure whitespace-nowrap px-3 py-3 text-right">{formatInr(p.allocatedAmount)}</td>
+                        <td className={cn('figure whitespace-nowrap px-3 py-3 text-right', p.unallocatedAmount !== '0.00' ? 'font-medium text-info' : 'text-muted-foreground')}>
                           {formatInr(p.unallocatedAmount)}
                         </td>
                         <td className="px-4 py-3">

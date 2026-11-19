@@ -1,6 +1,7 @@
 import { Ban } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { StatTile } from '@/components/finance/StatTile';
 import { StatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
@@ -11,7 +12,7 @@ import { AuditHistory } from '@/features/audit/AuditHistory';
 import { TXN_LABELS, useCustomer, useCustomerTransaction, useCustomerTransactionHistory, useReverseCustomerTxn } from '@/features/customers/customers-api';
 import { PAYMENT_MODE_LABELS } from '@/features/expenses/expenses-api';
 import { formatDate, formatDateTime } from '@/lib/dates';
-import { formatInr } from '@/lib/money';
+import { formatInr, toPaise } from '@/lib/money';
 import { cn } from '@/lib/utils';
 import type { CustomerTransaction, PaymentMode } from '@/types/api';
 
@@ -19,11 +20,11 @@ const FIELD_LABELS: Record<string, string> = { status: 'Status', reversalReason:
 const display = (field: string, value: unknown) =>
   value === null || value === undefined || value === '' ? '—' : field === 'paymentMode' ? (PAYMENT_MODE_LABELS[value as PaymentMode] ?? String(value)) : String(value);
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex flex-col gap-0.5 py-2.5 text-sm sm:grid sm:grid-cols-[10rem_1fr] sm:gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words">{children}</dd>
+    <div className={cn('min-w-0', wide && 'sm:col-span-2')}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 min-w-0 break-words text-sm font-medium">{children}</dd>
     </div>
   );
 }
@@ -50,7 +51,7 @@ export function CustomerTransactionPage() {
   const reverse = useReverseCustomerTxn();
   const [reversing, setReversing] = useState(false);
 
-  if (txn.isPending) return <LoadingState label="Loading entry…" />;
+  if (txn.isPending) return <LoadingState label="Loading entry…" skeleton="detail" />;
   if (txn.isError) return <ErrorState title="Could not load this entry" error={txn.error} />;
   const t = txn.data;
   const reversed = t.status === 'reversed';
@@ -64,43 +65,44 @@ export function CustomerTransactionPage() {
         description={`${name} · ${formatDate(t.txnDate)}`}
         actions={
           !reversed && (
-            <Button variant="outline" size="sm" onClick={() => setReversing(true)}>
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setReversing(true)}>
               <Ban aria-hidden="true" /> Reverse
             </Button>
           )
         }
       />
       {reversed && (
-        <div role="status" className="rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm">
-          <p className="font-medium text-destructive">Reversed — this entry no longer counts.</p>
-          <p className="mt-1">
+        <div role="status" className="callout callout-danger text-foreground">
+          <p className="font-semibold text-destructive">Reversed — this entry no longer counts.</p>
+          <p className="mt-1 text-muted-foreground">
             By {t.reversedBy?.name} on {t.reversedAt && formatDateTime(t.reversedAt)}. Reason: {t.reversalReason}
           </p>
         </div>
       )}
 
       <Card>
-        <CardContent className="space-y-4 pt-4 md:pt-5">
+        <CardContent className="space-y-5 pt-4 md:pt-5">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs text-muted-foreground">Amount</p>
-              <p className={cn('figure text-3xl font-semibold tracking-tight', reversed && 'text-muted-foreground line-through')}>{formatInr(t.amount)}</p>
+            <div className="min-w-0">
+              <p className="eyebrow">Amount</p>
+              <p className={cn('figure mt-1 text-2xl font-semibold tracking-tight md:text-3xl', reversed && 'text-muted-foreground line-through')}>
+                {formatInr(t.amount)}
+              </p>
             </div>
             <StatusBadge status={t.status} />
           </div>
           {t.type === 'due' && t.paidAmount !== null && (
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <p className="rounded-lg bg-surface-muted px-3 py-2.5">
-                <span className="block text-xs text-muted-foreground">Paid so far</span>
-                <strong className="figure">{formatInr(t.paidAmount)}</strong>
-              </p>
-              <p className="rounded-lg bg-surface-muted px-3 py-2.5">
-                <span className="block text-xs text-muted-foreground">Still due</span>
-                <strong className={cn('figure', t.remainingAmount !== '0.00' && 'text-warning')}>{formatInr(t.remainingAmount ?? '0')}</strong>
-              </p>
+            <div className="grid grid-cols-2 gap-2 md:gap-3">
+              <StatTile label="Paid so far" amount={t.paidAmount} tone={t.paidAmount !== '0.00' ? 'accent' : 'muted'} />
+              <StatTile
+                label="Still due"
+                amount={t.remainingAmount ?? '0'}
+                tone={toPaise(t.remainingAmount ?? '0') > 0n ? 'warning' : 'muted'}
+                hint={toPaise(t.remainingAmount ?? '0') > 0n ? 'Owes the shop' : 'Settled'}
+              />
             </div>
           )}
-          <dl className="divide-y border-t">
+          <dl className="grid gap-x-6 gap-y-4 border-t pt-4 sm:grid-cols-2">
             {t.due && (
               <Row label="Pays the due of">
                 <Link to={`/customers/${id}/transactions/${t.due.id}`} className="text-primary hover:underline">
@@ -114,12 +116,22 @@ export function CustomerTransactionPage() {
                 {t.category ? `${t.category.name}${t.category.isActive ? '' : ' (archived)'}` : '— (recorded before categories)'}
               </Row>
             )}
-            {t.settlementId && <Row label="Recorded as">Part of a full outstanding payment (several dues settled at once)</Row>}
-            {(t.type !== 'due' || t.description) && <Row label="Description">{t.description ?? '—'}</Row>}
+            {t.settlementId && (
+              <Row label="Recorded as" wide>
+                Part of a full outstanding payment (several dues settled at once)
+              </Row>
+            )}
+            {(t.type !== 'due' || t.description) && (
+              <Row label="Description" wide>
+                {t.description ?? '—'}
+              </Row>
+            )}
             <Row label="Reference">{t.reference ?? '—'}</Row>
-            <Row label="Notes">{t.notes ?? '—'}</Row>
             <Row label="Recorded by">
-              {t.createdBy.name} · {formatDateTime(t.createdAt)}
+              {t.createdBy.name} <span className="font-normal text-muted-foreground">· {formatDateTime(t.createdAt)}</span>
+            </Row>
+            <Row label="Notes" wide>
+              <span className="whitespace-pre-line font-normal">{t.notes ?? '—'}</span>
             </Row>
           </dl>
         </CardContent>

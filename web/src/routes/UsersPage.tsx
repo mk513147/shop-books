@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { errorProps, Field } from '@/components/ui/field';
@@ -33,7 +34,7 @@ interface TemporaryPassword {
 function TemporaryPasswordNotice({ value, onDismiss }: { value: TemporaryPassword; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div role="status" className="space-y-3 rounded-xl border border-primary/25 bg-primary-soft p-4 text-sm">
+    <div role="status" className="space-y-3 callout callout-success p-4">
       <p>
         Temporary password for <strong>{value.name}</strong>. Give it to them privately; they must change it when
         they first sign in. <strong>It will not be shown again.</strong>
@@ -88,7 +89,7 @@ function CreateUserForm({ onCreated }: { onCreated: (value: TemporaryPassword) =
         {createUser.isPending ? 'Adding…' : 'Add manager'}
       </Button>
       {createUser.isError && (
-        <p role="alert" className="text-sm text-destructive md:col-span-3">
+        <p role="alert" className="callout callout-danger md:col-span-3">
           {errorMessage(createUser.error)}
         </p>
       )}
@@ -101,6 +102,13 @@ function statusText(user: UserSummary): string {
   if (user.lockedUntil) return `Locked until ${new Date(user.lockedUntil).toLocaleTimeString()}`;
   if (user.mustChangePassword) return 'Must change password';
   return 'Active';
+}
+
+function statusTone(user: UserSummary): 'neutral' | 'accent' | 'warning' | 'danger' {
+  if (!user.isActive) return 'neutral';
+  if (user.lockedUntil) return 'danger';
+  if (user.mustChangePassword) return 'warning';
+  return 'accent';
 }
 
 function UserRow({
@@ -120,16 +128,20 @@ function UserRow({
   const error = setActive.error ?? resetPassword.error ?? revokeSessions.error;
 
   return (
-    <li className="space-y-3 py-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+    <li className="space-y-3 px-4 py-4 md:px-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-medium">
-            {user.name} {isSelf && <span className="text-xs text-muted-foreground">(you)</span>}
+          <p className={user.isActive ? 'font-semibold' : 'font-semibold text-muted-foreground'}>
+            {user.name} {isSelf && <span className="text-xs font-medium text-muted-foreground">(you)</span>}
           </p>
           <p className="truncate text-sm text-muted-foreground">{user.email}</p>
         </div>
-        <p className="text-sm">
-          <span className="capitalize">{user.role}</span> · {statusText(user)}
+        <p className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="capitalize text-muted-foreground">{user.role}</span>
+          <span aria-hidden="true" className="text-muted-foreground/60">·</span>
+          <Badge tone={statusTone(user)} dot>
+            {statusText(user)}
+          </Badge>
         </p>
       </div>
       {user.role !== 'owner' && (
@@ -176,9 +188,9 @@ function UserRow({
           </Button>
         </div>
       )}
-      {message && <p className="text-sm text-muted-foreground">{message}</p>}
+      {message && <p className="callout callout-info">{message}</p>}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="callout callout-danger">
           {errorMessage(error)}
         </p>
       )}
@@ -214,11 +226,11 @@ export function UsersPage() {
         <CardHeader>
           <CardTitle>Accounts</CardTitle>
         </CardHeader>
-        <CardContent>
-          {users.isPending && <LoadingState label="Loading users…" />}
+        <CardContent className={users.isSuccess ? 'px-0 pb-1 md:px-0 md:pb-1' : undefined}>
+          {users.isPending && <LoadingState label="Loading users…" skeleton="list" />}
           {users.isError && <ErrorState error={users.error} onRetry={() => void users.refetch()} />}
           {users.isSuccess && (
-            <ul className="divide-y">
+            <ul className="divide-y border-t">
               {users.data.map((u) => (
                 <UserRow key={u.id} user={u} isSelf={u.id === me?.id} onTemporaryPassword={setTemporary} />
               ))}

@@ -203,12 +203,12 @@ export function CustomerTxnDialog({
           <p>
             Refund <strong className="figure">{formatInr(confirming.amount.trim())}</strong> of advance to <strong>{customer.name}</strong>?
           </p>
-          <p className="rounded-lg bg-surface-muted p-3">
-            Advance now <strong className="figure">{formatInr(customer.advanceBalance)}</strong> → after refund{' '}
-            <strong className="figure">{formatInr(fromPaise(toPaise(customer.advanceBalance) - toPaise(confirming.amount.trim())))}</strong>.
+          <p className="callout callout-info">
+            Advance now <strong className="figure text-info">{formatInr(customer.advanceBalance)}</strong> → after refund{' '}
+            <strong className="figure text-info">{formatInr(fromPaise(toPaise(customer.advanceBalance) - toPaise(confirming.amount.trim())))}</strong>.
             Their due ({formatInr(customer.dueBalance)}) does not change.
           </p>
-          {record.isError && <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-destructive">{errorMessage(record.error)}</p>}
+          {record.isError && <p role="alert" className="callout callout-danger">{errorMessage(record.error)}</p>}
         </div>
       ) : (
         <form id="customer-txn-form" noValidate className="space-y-4" onSubmit={onSubmit}>
@@ -313,13 +313,17 @@ export function CustomerTxnDialog({
               )}
             </>
           ) : (
-            <button type="button" className="text-sm text-primary underline-offset-2 hover:underline" onClick={() => setShowMore(true)}>
+            <button
+              type="button"
+              className="-ml-1 inline-flex min-h-10 items-center rounded-md px-1 text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setShowMore(true)}
+            >
               {t === 'due' ? '+ Reference' : '+ Reference and notes'}
             </button>
           )}
 
           {record.isError && (
-            <p role="alert" className="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+            <p role="alert" className="callout callout-danger">
               {errorMessage(record.error)}
             </p>
           )}

@@ -1,4 +1,5 @@
 import { Archive, ArchiveRestore, ChevronLeft, ChevronRight, History, MapPin, Pencil, Phone, Plus, Search, Truck } from 'lucide-react';
+import { StatusBadge } from '@/components/finance/StatusBadge';
 import { StatTile } from '@/components/finance/StatTile';
 import { useSuppliersSummary } from '@/features/supplierPayments/payments-api';
 import { formatInr } from '@/lib/money';
@@ -117,7 +118,7 @@ export function ArchiveDialog({ supplier, onClose }: { supplier: Supplier | null
           : `“${supplier?.name}” can be chosen for new expenses again.`}
       </p>
       {update.isError && (
-        <p role="alert" className="mt-3 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+        <p role="alert" className="mt-3 callout callout-danger">
           {errorMessage(update.error)}
         </p>
       )}
@@ -170,19 +171,23 @@ export function SuppliersPage() {
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           <StatTile label="Total payable" amount={summary.data.totalPayable} tone={summary.data.totalPayable !== '0.00' ? 'warning' : 'muted'} />
           <StatTile label="Total payments" amount={summary.data.totalPayments} />
-          <StatTile label="Unallocated payments" amount={summary.data.totalUnallocated} tone={summary.data.totalUnallocated !== '0.00' ? 'accent' : 'muted'} />
+          <StatTile label="Unallocated payments" amount={summary.data.totalUnallocated} tone={summary.data.totalUnallocated !== '0.00' ? 'info' : 'muted'} />
           <button
             type="button"
             onClick={() => update({ balance: balance === 'payable' ? '' : 'payable', page: '' })}
             className={cn(
-              'min-w-0 rounded-xl border bg-card p-3 text-left shadow-card hover:bg-accent md:p-4',
-              balance === 'payable' && 'border-primary ring-1 ring-primary',
+              'surface-interactive relative min-w-0 overflow-hidden rounded-xl border bg-card p-3.5 text-left shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:p-4',
+              balance === 'payable' && 'border-primary bg-primary-soft ring-1 ring-primary',
             )}
             aria-pressed={balance === 'payable'}
           >
-            <p className="text-xs text-muted-foreground">Suppliers with dues</p>
-            <p className="figure mt-0.5 text-lg font-semibold md:text-xl">{summary.data.suppliersWithPayable}</p>
-            <p className="mt-0.5 text-xs text-primary">{balance === 'payable' ? 'Showing only these' : 'Show only these'}</p>
+            <span
+              aria-hidden="true"
+              className={cn('absolute inset-y-3 left-0 w-[3px] rounded-r-full', summary.data.suppliersWithPayable > 0 ? 'bg-warning-strong' : 'bg-surface-strong')}
+            />
+            <p className="truncate text-xs font-medium text-muted-foreground">Suppliers with dues</p>
+            <p className="figure mt-1 text-lg font-semibold tracking-tight md:text-[1.375rem]">{summary.data.suppliersWithPayable}</p>
+            <p className="mt-0.5 text-xs font-medium text-primary">{balance === 'payable' ? 'Showing only these' : 'Show only these'}</p>
           </button>
         </div>
       )}
@@ -222,7 +227,7 @@ export function SuppliersPage() {
         </Select>
       </div>
 
-      {list.isPending && <LoadingState label="Loading suppliers…" />}
+      {list.isPending && <LoadingState label="Loading suppliers…" skeleton="table" />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.isSuccess && list.data.items.length === 0 && (
         <EmptyState
@@ -245,25 +250,32 @@ export function SuppliersPage() {
           {/* Phones: cards */}
           <ul className="space-y-2 md:hidden">
             {list.data.items.map((s) => (
-              <li key={s.id} className={cn('space-y-3 rounded-xl border bg-card p-4 shadow-card', !s.isActive && 'opacity-80')}>
-                <div className="flex items-start justify-between gap-2">
+              <li key={s.id} className="space-y-3 rounded-xl border bg-card p-3.5 shadow-card">
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <Link to={`/suppliers/${s.id}`} className="font-medium break-words hover:underline">
+                    <Link to={`/suppliers/${s.id}`} className={cn('block font-semibold break-words hover:underline', !s.isActive && 'text-muted-foreground')}>
                       {s.name}
                     </Link>
-                    <Link to={`/expenses?supplierId=${s.id}&status=all`} className="text-xs text-primary">
+                    <Link to={`/expenses?supplierId=${s.id}&status=all`} className="text-xs font-medium text-primary">
                       {s.expenseCount} expense{s.expenseCount === 1 ? '' : 's'}
                     </Link>
                   </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    {s.payable !== '0.00' && <span className="figure text-sm font-semibold text-warning">{formatInr(s.payable)}</span>}
-                    {!s.isActive && <Badge>Archived</Badge>}
+                  <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+                    {s.payable !== '0.00' ? (
+                      <>
+                        <span className="figure font-semibold text-warning">{formatInr(s.payable)}</span>
+                        <span className="text-xs font-medium text-warning">Payable</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Nothing due</span>
+                    )}
+                    {!s.isActive && <StatusBadge status="archived" />}
                   </div>
                 </div>
                 {(s.phone || s.address) && (
                   <div className="space-y-1 text-sm text-muted-foreground">
                     {s.phone && (
-                      <a href={`tel:${s.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2 text-foreground">
+                      <a href={`tel:${s.phone.replace(/[^\d+]/g, '')}`} className="flex min-h-8 items-center gap-2 text-foreground">
                         <Phone className="size-3.5" aria-hidden="true" />
                         {s.phone}
                       </a>
@@ -283,28 +295,28 @@ export function SuppliersPage() {
           </ul>
 
           {/* Desktop: table */}
-          <div className="hidden overflow-x-auto rounded-xl border bg-card shadow-card md:block">
-            <table className="w-full text-sm">
-              <thead className="border-b bg-surface-muted text-left text-xs text-muted-foreground">
+          <div className="table-shell hidden md:block">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Supplier</th>
-                  <th className="px-4 py-2.5 font-medium">Contact</th>
-                  <th className="px-4 py-2.5 font-medium">Usual categories</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Expenses</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Payable</th>
-                  <th className="px-4 py-2.5 font-medium">
+                  <th className="px-4 py-3">Supplier</th>
+                  <th className="px-4 py-3">Contact</th>
+                  <th className="px-4 py-3">Usual categories</th>
+                  <th className="px-4 py-3 text-right">Expenses</th>
+                  <th className="px-4 py-3 text-right">Payable</th>
+                  <th className="px-4 py-3">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody>
                 {list.data.items.map((s) => (
                   <tr key={s.id} className={cn('align-top', !s.isActive && 'text-muted-foreground')}>
                     <td className="px-4 py-3">
-                      <Link to={`/suppliers/${s.id}`} className="font-medium text-foreground hover:underline">
+                      <Link to={`/suppliers/${s.id}`} className={cn('font-semibold hover:underline', s.isActive ? 'text-foreground' : 'text-muted-foreground')}>
                         {s.name}
                       </Link>
-                      {!s.isActive && <Badge className="mt-1">Archived</Badge>}
+                      {!s.isActive && <StatusBadge status="archived" className="ml-2 align-middle" />}
                       {s.notes && <p className="mt-0.5 line-clamp-2 max-w-xs text-xs text-muted-foreground">{s.notes}</p>}
                     </td>
                     <td className="px-4 py-3">
@@ -315,13 +327,14 @@ export function SuppliersPage() {
                       <CategoryChips supplier={s} />
                     </td>
                     <td className="figure px-4 py-3 text-right">
-                      <Link to={`/expenses?supplierId=${s.id}&status=all`} className="text-primary hover:underline">
+                      <Link to={`/expenses?supplierId=${s.id}&status=all`} className="font-medium text-primary hover:underline">
                         {s.expenseCount}
                       </Link>
                     </td>
-                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', s.payable !== '0.00' && 'font-medium text-warning')}>
+                    <td className={cn('figure whitespace-nowrap px-4 py-3 text-right', s.payable !== '0.00' ? 'font-semibold text-warning' : 'text-muted-foreground')}>
                       {formatInr(s.payable)}
-                      {s.unallocated !== '0.00' && <span className="block text-xs text-muted-foreground">{formatInr(s.unallocated)} unallocated</span>}
+                      {s.payable === '0.00' && <span className="block text-xs font-normal">Settled</span>}
+                      {s.unallocated !== '0.00' && <span className="block text-xs font-normal text-info">{formatInr(s.unallocated)} unallocated</span>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">
@@ -339,7 +352,7 @@ export function SuppliersPage() {
               <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
                 <ChevronLeft aria-hidden="true" /> Previous
               </Button>
-              <span className="text-muted-foreground">
+              <span className="figure text-muted-foreground">
                 Page {list.data.pagination.page} of {list.data.pagination.totalPages}
               </span>
               <Button
