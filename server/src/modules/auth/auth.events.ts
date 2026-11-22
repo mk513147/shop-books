@@ -13,7 +13,9 @@ export type AuthEventType =
   | 'user_updated'
   | 'user_activated'
   | 'user_deactivated'
-  | 'sessions_revoked';
+  | 'sessions_revoked'
+  /** A manager revealed product purchase prices (no prices are recorded; migration 0015). */
+  | 'purchase_prices_viewed';
 
 export interface RequestContext {
   ip: string | null;

@@ -22,6 +22,11 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   reverse: 'Reversed',
   allocate: 'Payment allocated',
   release_allocation: 'Allocation released',
+  link_supplier: 'Supplier linked',
+  unlink_supplier: 'Supplier unlinked',
+  update_supplier_link: 'Supplier link changed',
+  commit: 'Import committed',
+  discard: 'Import discarded',
 };
 
 /** Events about one linked item: shown as "<label>: <item>" without a field diff. */
@@ -34,6 +39,9 @@ function itemText(entry: AuditHistoryEntry): string | null {
     case 'link_brand':
     case 'unlink_brand':
       return String(a.brandName ?? '');
+    case 'link_supplier':
+    case 'unlink_supplier':
+      return String(a.supplier ?? '');
     case 'document_add':
     case 'document_remove':
       return String(a.fileName ?? '');

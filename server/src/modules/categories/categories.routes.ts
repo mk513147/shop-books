@@ -14,13 +14,22 @@ const descriptionSchema = z
   .nullable()
   .transform((v) => (v ? v : null));
 
-const createSchema = z.strictObject({ name: nameSchema, description: descriptionSchema.optional() });
+const createSchema = z.strictObject({ name: nameSchema, description: descriptionSchema.optional(), isProductUsable: z.boolean().optional() });
 
 const updateSchema = z
-  .strictObject({ name: nameSchema.optional(), description: descriptionSchema.optional(), isActive: z.boolean().optional() })
+  .strictObject({
+    name: nameSchema.optional(),
+    description: descriptionSchema.optional(),
+    isActive: z.boolean().optional(),
+    isProductUsable: z.boolean().optional(),
+  })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
-const listQuerySchema = z.object({ status: z.enum(['active', 'archived', 'all']).default('all') });
+const listQuerySchema = z.object({
+  status: z.enum(['active', 'archived', 'all']).default('all'),
+  /** 'products' = only categories marked "Use for products" (product form). */
+  usage: z.enum(['products']).optional(),
+});
 
 function parseId(raw: string | undefined): string {
   const parsed = z.uuid().safeParse(raw);
@@ -33,13 +42,17 @@ export function createCategoriesRouter({ db }: { db: Database }): Router {
   const router = Router();
 
   router.get('/', async (req, res) => {
-    const { status } = listQuerySchema.parse(req.query);
-    res.json({ categories: await listCategories(db, status) });
+    const { status, usage } = listQuerySchema.parse(req.query);
+    res.json({ categories: await listCategories(db, status, usage) });
   });
 
   router.post('/', async (req, res) => {
     const body = createSchema.parse(req.body);
-    const category = await createCategory(db, { name: body.name, description: body.description ?? null }, getActor(res));
+    const category = await createCategory(
+      db,
+      { name: body.name, description: body.description ?? null, isProductUsable: body.isProductUsable },
+      getActor(res),
+    );
     res.status(201).json({ category });
   });
 

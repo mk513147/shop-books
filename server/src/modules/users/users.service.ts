@@ -13,6 +13,10 @@ export interface UserSummary {
   role: Role;
   isActive: boolean;
   mustChangePassword: boolean;
+  /** Effective permission to SEE product purchase prices (always true for the owner). */
+  canViewPurchasePrices: boolean;
+  /** Effective permission to CHANGE purchase prices (always true for the owner; needs view). */
+  canEditPurchasePrices: boolean;
   lockedUntil: string | null;
   lastLoginAt: string | null;
   createdAt: string;
@@ -25,12 +29,14 @@ interface UserRow {
   role: Role;
   is_active: boolean;
   must_change_password: boolean;
+  can_view_purchase_prices: boolean;
+  can_edit_purchase_prices: boolean;
   locked_until: Date | null;
   last_login_at: Date | null;
   created_at: Date;
 }
 
-const USER_COLUMNS = `id, email, name, role, is_active, must_change_password,
+const USER_COLUMNS = `id, email, name, role, is_active, must_change_password, can_view_purchase_prices, can_edit_purchase_prices,
   CASE WHEN locked_until > now() THEN locked_until END AS locked_until, last_login_at, created_at`;
 
 function toSummary(row: UserRow): UserSummary {
@@ -41,6 +47,8 @@ function toSummary(row: UserRow): UserSummary {
     role: row.role,
     isActive: row.is_active,
     mustChangePassword: row.must_change_password,
+    canViewPurchasePrices: row.role === 'owner' || row.can_view_purchase_prices,
+    canEditPurchasePrices: row.role === 'owner' || (row.can_view_purchase_prices && row.can_edit_purchase_prices),
     lockedUntil: row.locked_until?.toISOString() ?? null,
     lastLoginAt: row.last_login_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -102,7 +110,12 @@ async function lockUser(client: Queryable, id: string): Promise<UserRow> {
 export async function updateUser(
   db: Database,
   id: string,
-  changes: { name?: string | undefined; isActive?: boolean | undefined },
+  changes: {
+    name?: string | undefined;
+    isActive?: boolean | undefined;
+    canViewPurchasePrices?: boolean | undefined;
+    canEditPurchasePrices?: boolean | undefined;
+  },
   actor: Actor,
   ctx: RequestContext,
 ): Promise<UserSummary> {
@@ -111,16 +124,41 @@ export async function updateUser(
     if (changes.isActive === false && current.role === 'owner') {
       throw new AppError(409, 'OWNER_CANNOT_BE_DEACTIVATED', 'The owner account cannot be deactivated');
     }
+    if ((changes.canViewPurchasePrices !== undefined || changes.canEditPurchasePrices !== undefined) && current.role === 'owner') {
+      throw new AppError(400, 'OWNER_ALWAYS_HAS_ACCESS', 'The owner can always see and change purchase prices');
+    }
+    // Changing prices needs seeing them: turning "view" off also turns "change" off, and "change"
+    // cannot be turned on for someone who cannot see prices (also a CHECK in migration 0017).
+    const nextView = changes.canViewPurchasePrices ?? current.can_view_purchase_prices;
+    const nextEdit = nextView ? (changes.canEditPurchasePrices ?? current.can_edit_purchase_prices) : false;
+    if (changes.canEditPurchasePrices === true && !nextView) {
+      throw new AppError(400, 'EDIT_NEEDS_VIEW', 'Allow this manager to see purchase prices before allowing them to change prices');
+    }
 
     const result = await client.query<UserRow>(
       `UPDATE users
           SET name = COALESCE($2, name),
-              is_active = COALESCE($3, is_active)
+              is_active = COALESCE($3, is_active),
+              can_view_purchase_prices = $4,
+              can_edit_purchase_prices = $5
         WHERE id = $1
         RETURNING ${USER_COLUMNS}`,
-      [id, changes.name ?? null, changes.isActive ?? null],
+      [id, changes.name ?? null, changes.isActive ?? null, nextView, nextEdit],
     );
     const updated = result.rows[0]!;
+
+    // Takes effect on the user's next request (the flag is read from the database every time).
+    if (
+      updated.can_view_purchase_prices !== current.can_view_purchase_prices ||
+      updated.can_edit_purchase_prices !== current.can_edit_purchase_prices
+    ) {
+      await recordAuthEvent(client, ctx, {
+        type: 'user_updated',
+        userId: id,
+        actorUserId: actor.userId,
+        details: { canViewPurchasePrices: updated.can_view_purchase_prices, canEditPurchasePrices: updated.can_edit_purchase_prices },
+      });
+    }
 
     if (changes.name !== undefined && changes.name !== current.name) {
       await recordAuthEvent(client, ctx, { type: 'user_updated', userId: id, actorUserId: actor.userId });

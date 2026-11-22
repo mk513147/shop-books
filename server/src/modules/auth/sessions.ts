@@ -11,6 +11,17 @@ export interface AuthenticatedUser {
   name: string;
   role: Role;
   mustChangePassword: boolean;
+  /**
+   * May SEE product purchase prices: always true for the owner, otherwise the manager's own flag
+   * (users.can_view_purchase_prices). Read from the database on every request.
+   */
+  canViewPurchasePrices: boolean;
+  /**
+   * May CHANGE purchase prices (and make supplier-link changes that alter or delete one): always
+   * true for the owner, otherwise users.can_edit_purchase_prices (which requires the view flag;
+   * migration 0017). Read from the database on every request.
+   */
+  canEditPurchasePrices: boolean;
 }
 
 export interface SessionContext {
@@ -58,6 +69,8 @@ interface SessionRow {
   name: string;
   role: Role;
   must_change_password: boolean;
+  can_view_purchase_prices: boolean;
+  can_edit_purchase_prices: boolean;
 }
 
 /**
@@ -79,7 +92,9 @@ export async function findActiveSession(db: Queryable, token: string): Promise<S
             (s.last_seen_at < now() - ($3::bigint * interval '1 millisecond')
              OR LEAST(now() + ($4::bigint * interval '1 millisecond'), s.created_at + ($5::bigint * interval '1 millisecond'))
                 - s.absolute_expires_at > ($3::bigint * interval '1 millisecond')) AS needs_renewal,
-            u.id AS user_id, u.email, u.name, u.role, u.must_change_password
+            u.id AS user_id, u.email, u.name, u.role, u.must_change_password,
+            (u.role = 'owner' OR u.can_view_purchase_prices) AS can_view_purchase_prices,
+            (u.role = 'owner' OR (u.can_view_purchase_prices AND u.can_edit_purchase_prices)) AS can_edit_purchase_prices
        FROM sessions s
        JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = $1
@@ -123,6 +138,8 @@ export async function findActiveSession(db: Queryable, token: string): Promise<S
       name: row.name,
       role: row.role,
       mustChangePassword: row.must_change_password,
+      canViewPurchasePrices: row.can_view_purchase_prices,
+      canEditPurchasePrices: row.can_edit_purchase_prices,
     },
   };
 }

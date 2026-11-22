@@ -29,7 +29,8 @@ export type SyncEntityType =
   | 'supplier_payment'
   | 'customer'
   | 'customer_transaction'
-  | 'salesman';
+  | 'salesman'
+  | 'product';
 
 export interface SyncEvent {
   id: string;
@@ -69,6 +70,9 @@ export const AFFECTED: Record<SyncEntityType, string[]> = {
   customer: ['customers', 'reports'],
   customer_transaction: ['customers', 'reports'],
   salesman: ['salesmen'],
+  // Catalogue lists, details, quick-lookup results and brand/category product counts.
+  // Purchase prices are never part of the feed and their cache ('product-costs') is not refetched.
+  product: ['products', 'brands', 'categories'],
 };
 
 const PHRASES: Record<SyncEntityType, Record<string, string> & { default: string }> = {
@@ -117,6 +121,16 @@ const PHRASES: Record<SyncEntityType, Record<string, string> & { default: string
     default: 'updated a customer',
   },
   customer_transaction: { create: 'updated a customer ledger', reverse: 'reversed a customer ledger entry', default: 'updated a customer ledger' },
+  product: {
+    create: 'added a product',
+    update: 'updated a product',
+    archive: 'deactivated a product',
+    reactivate: 'reactivated a product',
+    link_supplier: 'linked a supplier to a product',
+    unlink_supplier: 'unlinked a supplier from a product',
+    update_supplier_link: 'updated a product’s supplier',
+    default: 'updated a product',
+  },
   salesman: {
     create: 'added a salesman',
     update: 'updated salesman details',

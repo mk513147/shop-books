@@ -14,6 +14,8 @@ import { createExpensesRouter } from '../modules/expenses/expenses.routes.js';
 import { createDocumentStorageStatusRouter } from '../modules/documents/documents.routes.js';
 import type { DocumentStorage } from '../modules/documents/storage.js';
 import type { EmailSender } from '../modules/email/email.js';
+import { createProductsRouter } from '../modules/products/products.routes.js';
+import { productImportsUnavailable } from '../modules/productImports/postponed.js';
 import { createMonthlyReportsRouter } from '../modules/monthlyReports/monthlyReports.routes.js';
 import { createHealthRouter } from '../modules/health/health.routes.js';
 import { createVersionRouter } from '../modules/health/version.routes.js';
@@ -34,6 +36,7 @@ export interface RouteDeps {
  * Mounts every module under /api/v1. ORDER MATTERS: this is deny-by-default.
  *
  *   1. cross-site guards for all state-changing requests (Origin/Referer + JSON only)
+ *      (/product-imports answers 503 right after the Origin check: Excel import is postponed)
  *   2. PUBLIC:  /health, /version, POST /auth/login <- nothing else may go above requireAuth
  *   3. requireAuth + requireCsrf                     <- everything below needs a session
  *   4. /auth (me, logout, change-password)           <- usable while a password change is pending
@@ -50,6 +53,10 @@ export function createApiRouter({ db, config, storage, emailSender, onReportQueu
   });
 
   router.use(verifyOrigin(config.frontendOrigins));
+  // Excel import of products is POSTPONED: every /product-imports request (upload, inspect, batch
+  // reads and writes, commit, report) gets 503 PRODUCT_IMPORT_UNAVAILABLE here, before any body
+  // handling, so no workbook is parsed, stored or returned. The import router is not mounted.
+  router.use('/product-imports', productImportsUnavailable);
   router.use(requireJson);
 
   router.use('/health', createHealthRouter({ db, appVersion: config.appVersion }));
@@ -87,6 +94,8 @@ export function createApiRouter({ db, config, storage, emailSender, onReportQueu
   router.use('/supplier-payments', createSupplierPaymentsRouter({ db }));
   router.use('/customers', createCustomersRouter({ db }));
   router.use('/salesmen', createSalesmenRouter({ db }));
+  // Product catalogue: owner and managers; purchase prices only behind requirePurchasePriceAccess.
+  router.use('/products', createProductsRouter({ db, sessionSecret: config.sessionSecret }));
   router.use('/reports', createReportsRouter({ db }));
   router.use('/exports', createExportsRouter({ db, shopName: config.shopName }));
 

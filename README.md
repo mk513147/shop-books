@@ -2,7 +2,7 @@
 
 A private, shared expense-management application for one physical shop, used by an owner and a few managers through a responsive website or an installable PWA.
 
-> **Status: Stages 1–5 implemented (Stages 3B–5 awaiting the owner's manual testing).** Expenses with bill documents, suppliers with payments and ledgers, customers with independent due/advance balances, a **dashboard and financial reports**, **Excel exports** of every report and ledger, and **automatic monthly e-mail reports** run by a PostgreSQL-backed scheduler. **Not production-ready for e-mail:** no real e-mail provider adapter exists yet (`EMAIL_PROVIDER=none` records deliveries as failed; the development `outbox` writes files only). See [docs/project-status.md](docs/project-status.md).
+> **Status: Stages 1–5 implemented (Stages 3B–5 awaiting the owner's manual testing).** Expenses with bill documents, suppliers with payments and ledgers, customers with independent due/advance balances, a **dashboard and financial reports**, **Excel exports** of every report and ledger, and **automatic monthly e-mail reports** run by a PostgreSQL-backed scheduler. **Not production-ready for e-mail:** no real e-mail provider adapter exists yet (`EMAIL_PROVIDER=none` records deliveries as failed; the development `outbox` writes files only). **Stage 9 adds a product catalogue** (products entered by hand with brands, categories, specifications, MRP/selling price, suppliers and purchase prices protected by separate *view* and *change* permissions with an access trail, fast search, F2/F4 desktop shortcuts; **Excel import is postponed** and disabled): [docs/products.md](docs/products.md). See [docs/project-status.md](docs/project-status.md).
 
 ## Conventions
 

@@ -27,6 +27,6 @@ export const useCreateCategory = () =>
 
 export const useUpdateCategory = () =>
   useCategoryMutation(
-    ({ id, ...changes }: { id: string; name?: string; description?: string | null; isActive?: boolean }) =>
+    ({ id, ...changes }: { id: string; name?: string; description?: string | null; isActive?: boolean; isProductUsable?: boolean }) =>
       apiRequest(`/categories/${id}`, { method: 'PATCH', json: changes }),
   );

@@ -1,4 +1,4 @@
-import { BadgeCheck, BookOpen, Factory, LayoutDashboard, ReceiptText, Tags, Truck, UserCog, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { BadgeCheck, BookOpen, Factory, LayoutDashboard, Package, ReceiptText, Tags, Truck, UserCog, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Role } from '@/types/api';
 
 export interface NavItem {
@@ -27,6 +27,8 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/expenses', label: 'Expenses', icon: ReceiptText, mobileTab: true, group: 'Records' },
   { to: '/suppliers', label: 'Suppliers', icon: Truck, mobileTab: true, group: 'People' },
   { to: '/supplier-payments', label: 'Supplier payments', icon: Wallet, group: 'Records' },
+  // Product catalogue: in the sidebar under Records; on phones it is listed under "More".
+  { to: '/products', label: 'Products', icon: Package, group: 'Records' },
   { to: '/categories', label: 'Categories', icon: Tags, group: 'Setup' },
   { to: '/brands', label: 'Brands', icon: Factory, group: 'Setup' },
   { to: '/customers', label: 'Customers', icon: Users, group: 'People' },

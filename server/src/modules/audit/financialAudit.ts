@@ -15,7 +15,13 @@ export type AuditEntityType =
   | 'report_job'
   | 'report_delivery'
   /** Brand master data (migration 0012). */
-  | 'brand';
+  | 'brand'
+  /** Product catalogue (migration 0015). Purchase prices are NEVER in 'product' snapshots. */
+  | 'product'
+  /** Default and supplier purchase prices of a product (entity id = product id); protected. */
+  | 'product_cost'
+  /** Excel import batch: create / commit / discard. */
+  | 'product_import';
 /** 'import' is written only by migrations (no actor); the application never records it. */
 export type AuditAction =
   | 'create'
@@ -40,7 +46,14 @@ export type AuditAction =
   | 'retry'
   /** Supplier default brand added / removed (migration 0012). */
   | 'link_brand'
-  | 'unlink_brand';
+  | 'unlink_brand'
+  /** Product <-> supplier links (migration 0015; no purchase prices in these snapshots). */
+  | 'link_supplier'
+  | 'unlink_supplier'
+  | 'update_supplier_link'
+  /** Product import batch committed / discarded. */
+  | 'commit'
+  | 'discard';
 type RecordableAction = Exclude<AuditAction, 'import'>;
 export type AuditSnapshot = Record<string, string | number | boolean | null>;
 
@@ -92,6 +105,8 @@ export function diffSnapshots(before: AuditSnapshot | null, after: AuditSnapshot
 
 export interface AuditHistoryEntry {
   id: string;
+  /** The audited record kind (a product's history also lists its 'product_cost' events). */
+  entityType: AuditEntityType;
   occurredAt: string;
   action: AuditAction;
   /** null for migration imports. */
@@ -103,11 +118,13 @@ export interface AuditHistoryEntry {
 
 export async function listAuditHistory(
   db: Queryable,
-  entityType: AuditEntityType,
+  entityType: AuditEntityType | AuditEntityType[],
   entityId: string,
 ): Promise<AuditHistoryEntry[]> {
+  const types = Array.isArray(entityType) ? entityType : [entityType];
   const result = await db.query<{
     id: string;
+    entity_type: AuditEntityType;
     occurred_at: Date;
     action: AuditAction;
     actor_id: string | null;
@@ -116,16 +133,17 @@ export async function listAuditHistory(
     before_values: AuditSnapshot | null;
     after_values: AuditSnapshot;
   }>(
-    `SELECT a.id, a.occurred_at, a.action, u.id AS actor_id, u.name AS actor_name, a.reason,
+    `SELECT a.id, a.entity_type, a.occurred_at, a.action, u.id AS actor_id, u.name AS actor_name, a.reason,
             a.before_values, a.after_values
        FROM financial_audit_events a
        LEFT JOIN users u ON u.id = a.actor_user_id
-      WHERE a.entity_type = $1 AND a.entity_id = $2
+      WHERE a.entity_type = ANY($1::text[]) AND a.entity_id = $2
       ORDER BY a.occurred_at DESC, a.id DESC`,
-    [entityType, entityId],
+    [types, entityId],
   );
   return result.rows.map((row) => ({
     id: String(row.id),
+    entityType: row.entity_type,
     occurredAt: row.occurred_at.toISOString(),
     action: row.action,
     actor: row.actor_id ? { id: row.actor_id, name: row.actor_name ?? '' } : null,

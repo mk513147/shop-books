@@ -15,6 +15,8 @@ export interface Brand {
   expenseCount: number;
   /** Suppliers that list this brand as a default. */
   supplierCount: number;
+  /** Catalogue products of this brand (any status). */
+  productCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -31,13 +33,15 @@ interface BrandRow {
   is_active: boolean;
   expense_count: number;
   supplier_count: number;
+  product_count: number;
   created_at: Date;
   updated_at: Date;
 }
 
 const BRAND_COLUMNS = `b.id, b.name, b.is_active, b.created_at, b.updated_at,
   (SELECT count(*)::int FROM expense_brands eb WHERE eb.brand_id = b.id) AS expense_count,
-  (SELECT count(*)::int FROM supplier_brands sb WHERE sb.brand_id = b.id) AS supplier_count`;
+  (SELECT count(*)::int FROM supplier_brands sb WHERE sb.brand_id = b.id) AS supplier_count,
+  (SELECT count(*)::int FROM products p WHERE p.brand_id = b.id) AS product_count`;
 
 function toBrand(row: BrandRow): Brand {
   return {
@@ -46,6 +50,7 @@ function toBrand(row: BrandRow): Brand {
     isActive: row.is_active,
     expenseCount: row.expense_count,
     supplierCount: row.supplier_count,
+    productCount: row.product_count,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

@@ -20,12 +20,14 @@ const cat = (id: string, name: string, isActive = true): Category => ({
   name,
   description: null,
   isActive,
+  isProductUsable: false,
   expenseCount: 0,
+  productCount: 0,
   createdAt: '',
   updatedAt: '',
 });
 const CATEGORIES = [cat('c1', 'Packaging'), cat('c2', 'Electronics'), cat('c3', 'Maintenance'), cat('c4', 'Transport')];
-const brand = (id: string, name: string, isActive = true) => ({ id, name, isActive, expenseCount: 0, supplierCount: 0, createdAt: '', updatedAt: '' });
+const brand = (id: string, name: string, isActive = true) => ({ id, name, isActive, expenseCount: 0, supplierCount: 0, productCount: 0, createdAt: '', updatedAt: '' });
 const BRANDS = [brand('b1', 'Samsung'), brand('b2', 'LG'), brand('b3', 'Sony'), brand('b4', 'HP')];
 
 const supplier = (id: string, name: string, extra: object = {}) => ({

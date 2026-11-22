@@ -15,6 +15,10 @@ export interface SessionUser {
   name: string;
   role: Role;
   mustChangePassword: boolean;
+  /** May see product purchase prices (always true for the owner). The API enforces it. */
+  canViewPurchasePrices: boolean;
+  /** May change purchase prices (always true for the owner; needs the view permission). */
+  canEditPurchasePrices: boolean;
 }
 
 /** POST /auth/login, GET /auth/me, POST /auth/change-password */
@@ -30,6 +34,10 @@ export interface UserSummary {
   role: Role;
   isActive: boolean;
   mustChangePassword: boolean;
+  /** Effective permission to see purchase prices (always true for the owner). */
+  canViewPurchasePrices: boolean;
+  /** Effective permission to change purchase prices (always true for the owner; needs view). */
+  canEditPurchasePrices: boolean;
   lockedUntil: string | null;
   lastLoginAt: string | null;
   createdAt: string;
@@ -51,7 +59,10 @@ export interface Category {
   name: string;
   description: string | null;
   isActive: boolean;
+  /** Offered in the product form (expense and customer-due pickers ignore it). */
+  isProductUsable: boolean;
   expenseCount: number;
+  productCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -76,6 +87,7 @@ export interface Brand {
   isActive: boolean;
   expenseCount: number;
   supplierCount: number;
+  productCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -216,10 +228,17 @@ export type AuditAction =
   | 'document_remove'
   | 'reverse'
   | 'allocate'
-  | 'release_allocation';
+  | 'release_allocation'
+  | 'link_supplier'
+  | 'unlink_supplier'
+  | 'update_supplier_link'
+  | 'commit'
+  | 'discard';
 
 export interface AuditHistoryEntry {
   id: string;
+  /** The audited record kind (a product's history may also list its 'product_cost' events). */
+  entityType?: string;
   occurredAt: string;
   action: AuditAction;
   /** null for records created by a data migration. */
@@ -488,4 +507,114 @@ export interface CustomerSettlement {
   txnDate: string;
   paymentMode: PaymentMode;
   allocations: { dueId: string; transactionId: string; amount: string; dueRemainingAfter: string }[];
+}
+
+// --- Product catalogue (migration 0015) ------------------------------------------------------------
+
+export type SellingUnit = 'piece' | 'pack' | 'box' | 'set' | 'ream';
+
+/** A catalogue product. Never contains purchase prices (those come only from the cost endpoints). */
+export interface Product {
+  id: string;
+  name: string;
+  brand: ClassRef | null;
+  category: ClassRef & { isProductUsable: boolean };
+  sku: string | null;
+  barcode: string | null;
+  description: string | null;
+  size: string | null;
+  pageCount: number | null;
+  gsm: number | null;
+  binding: string | null;
+  sellingUnit: SellingUnit;
+  packQty: number;
+  attributes: Record<string, string | number>;
+  searchAliases: string[];
+  mrp: string | null;
+  sellingPrice: string;
+  spAboveMrpConfirmation: { at: string; by: PersonRef } | null;
+  supplierCount: number;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: PersonRef;
+  updatedBy: PersonRef;
+}
+
+export interface ProductInput {
+  name: string;
+  brandId: string | null;
+  categoryId: string;
+  sku: string | null;
+  barcode: string | null;
+  description: string | null;
+  size: string | null;
+  pageCount: number | null;
+  gsm: number | null;
+  binding: string | null;
+  sellingUnit: SellingUnit;
+  packQty: number;
+  attributes: Record<string, string>;
+  searchAliases: string[];
+  mrp: string | null;
+  sellingPrice: string;
+  confirmations?: 'sp_above_mrp'[];
+}
+
+export interface ProductListResponse {
+  items: Product[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  closeMatches: boolean;
+}
+
+export interface QuickSearchItem {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: string;
+  size: string | null;
+  pageCount: number | null;
+  gsm: number | null;
+  binding: string | null;
+  sellingUnit: SellingUnit;
+  packQty: number;
+  sku: string | null;
+  barcode: string | null;
+  mrp: string | null;
+  sellingPrice: string;
+  close: boolean;
+}
+
+export interface SimilarProduct {
+  product: Product;
+  sameSpecs: boolean;
+}
+
+/** Protected: only from /products/purchase-prices and /products/:id/costs. */
+export interface EffectiveCost {
+  productId: string;
+  defaultPurchasePrice: string | null;
+  preferredSupplier: { id: string; name: string; isActive: boolean; purchasePrice: string | null } | null;
+  effectivePurchasePrice: string | null;
+  source: 'preferred_supplier' | 'default' | null;
+}
+
+export interface ProductCosts extends EffectiveCost {
+  version: number;
+  suppliers: { supplierId: string; supplierName: string; supplierActive: boolean; purchasePrice: string | null; isPreferred: boolean }[];
+  warnings: { code: string; message: string }[];
+}
+
+export interface ProductSupplierLink {
+  supplierId: string;
+  supplierName: string;
+  supplierPhone: string | null;
+  supplierActive: boolean;
+  supplierProductCode: string | null;
+  notes: string | null;
+  isPreferred: boolean;
+  version: number;
+  updatedAt: string;
+  // Never a purchase price: supplier prices come only from the protected costs endpoint.
 }

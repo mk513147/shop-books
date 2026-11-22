@@ -5,7 +5,7 @@ import { pino } from 'pino';
 import type { AppConfig } from '../src/config/env.js';
 import { loadDatabaseConfig } from '../src/config/env.js';
 import { configureTypeParsers, type Database } from '../src/database/connection.js';
-import { DESIGNATED_TEST_DATABASE, testDatabaseUrlProblem } from '../src/database/isolation.js';
+import { designatedTestDatabase, testDatabaseUrlProblem } from '../src/database/isolation.js';
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -101,10 +101,11 @@ export async function connectTestDatabase(): Promise<pg.Pool | null> {
   }
   // inet_server_addr() is NULL over a Unix socket, otherwise the address the server accepted us on.
   const loopback = server.addr === null || server.addr === '127.0.0.1' || server.addr === '::1';
-  if (server.name !== DESIGNATED_TEST_DATABASE || !loopback) {
+  const designated = designatedTestDatabase();
+  if (server.name !== designated || !loopback) {
     await pool.end();
     throw new Error(
-      `Refusing to run integration tests: the server reports database "${server.name}" at ${server.addr ?? 'a local socket'}; only "${DESIGNATED_TEST_DATABASE}" on this machine is allowed.`,
+      `Refusing to run integration tests: the server reports database "${server.name}" at ${server.addr ?? 'a local socket'}; only "${designated}" on this machine is allowed.`,
     );
   }
   return pool;

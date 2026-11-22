@@ -12,6 +12,7 @@ This is the project's status record (the equivalent of a `PHASE_1_STATUS.md`). I
 | 3D | Customer management and customer ledger | Implemented; awaiting owner's manual testing |
 | 4 | Dashboard and financial reports | Implemented; awaiting owner's manual testing |
 | 5 | Excel export and automated monthly e-mail reports | Implemented; awaiting owner's manual testing. **E-mail delivery needs a real provider adapter + credentials (not implemented)** |
+| 9 | Product catalogue (products entered by hand, suppliers & purchase prices, search, F2/F4 shortcuts; Excel import postponed) | Implemented and remediated after a security audit; awaiting independent re-audit, owner's manual testing and production rollout ([products.md](products.md)). Migrations 0015–0017 applied to local test databases only. |
 
 ## Stage 3B — Bill attachments and private document storage
 
@@ -193,3 +194,19 @@ Blocking items are marked **[blocker]**.
 - [ ] In-memory rate limits (uploads, exports) are per process: acceptable for one instance; revisit if several API instances run.
 - [ ] Re-check `npm audit` when ExcelJS 4.4.1 is released.
 - [ ] Turn the throw-away browser walkthroughs into permanent Playwright specs (testing-plan.md).
+
+## Stage 9 — Product catalogue
+
+Implemented (details: [products.md](products.md)):
+
+- [x] Migrations `0015_products`, `0016_product_search_words`, `0017_product_catalogue_hardening` (additive; upgrade from 0014 tested).
+- [x] Products CRUD with deactivate/reactivate, optimistic locking, idempotent create, SP > MRP confirmation (actor + time stored), unique SKU/barcode among active products.
+- [x] Categories: "Use for products" flag (default off), product counts; brands: product counts.
+- [x] Suppliers per product, preferred supplier, effective purchase price; default purchase price.
+- [x] Purchase prices: separate *view* and *change* permissions (owner always; managers per user), indirect changes through supplier links blocked, protected endpoints, separate protected cost history, reveal UI with automatic hiding and cache removal (incl. edit form, history, sign-out, revocation), access trail of every read (no amounts), redacted history, safe error logging.
+- [x] Search: pg_trgm, multi-token, structured (size/pages/GSM), code-first ranking, supplier-only last, typo tolerance via vocabulary; quick lookup; debounce + cancellation.
+- [x] Supplier links: optimistic unlink (version), archived suppliers cannot become preferred; case-insensitive barcodes; idempotency also covers the purchase price (keyed HMAC); concurrency-safe search refresh.
+- [ ] **Excel import — postponed (product decision).** Implemented earlier but disabled: every `/product-imports` route answers 503; no UI entry point; code kept unconnected. Before it returns, the reactivation checklist in [products.md](products.md#before-import-can-return-reactivation-checklist) (ZIP guard bypass, ExcelJS range expansion, stale preview, resource limits, retention/access) must be fixed and re-audited.
+- [x] Keyboard shortcuts F2 / F4 (+ Esc), desktop only, hints and help panel; phone top-bar lookup button.
+
+Automated verification executed (2026-11-22, local machine, truncating suites on a separate disposable database): see [products.md → Tests](products.md#tests). Not done: independent re-audit, production checks (`pg_trgm`, privileges, locale), production migration, deployment, manual testing.

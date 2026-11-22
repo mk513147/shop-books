@@ -1,15 +1,18 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Package } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { StatusBadge } from '@/components/finance/StatusBadge';
 import { Page, PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState, errorMessage, LoadingState } from '@/components/states';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogActions } from '@/components/ui/dialog';
 import { errorProps, Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { useToast } from '@/components/ui/toast';
 import { useCategories, useCreateCategory, useUpdateCategory } from '@/features/categories/categories-api';
 import { cn } from '@/lib/utils';
@@ -116,11 +119,44 @@ function CategoryRow({ category }: { category: Category }) {
         <p className="flex flex-wrap items-center gap-2">
           <span className={cn('font-semibold break-words', !category.isActive && 'text-muted-foreground')}>{category.name}</span>
           {!category.isActive && <StatusBadge status="archived" />}
+          {category.isProductUsable && (
+            <Badge tone="accent">
+              <Package className="size-3" aria-hidden="true" /> Products
+            </Badge>
+          )}
         </p>
         <p className="text-sm text-muted-foreground">
           {category.description ? `${category.description} · ` : ''}
           {category.expenseCount} expense{category.expenseCount === 1 ? '' : 's'}
+          {category.productCount > 0 && ` · ${category.productCount} product${category.productCount === 1 ? '' : 's'}`}
         </p>
+        <label className="mt-1.5 inline-flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            className="size-4 accent-[var(--color-primary)]"
+            checked={category.isProductUsable}
+            disabled={update.isPending || (!category.isActive && !category.isProductUsable)}
+            aria-describedby={`usable-hint-${category.id}`}
+            onChange={(e) =>
+              update.mutate(
+                { id: category.id, isProductUsable: e.target.checked },
+                {
+                  onSuccess: (r) =>
+                    toast({
+                      title: (r as { category: Category }).category.isProductUsable ? 'Now offered for products' : 'No longer offered for products',
+                      description: category.name,
+                      tone: 'success',
+                    }),
+                },
+              )
+            }
+          />
+          Use for products
+        </label>
+        <span id={`usable-hint-${category.id}`} className="sr-only">
+          When on, this category can be chosen for products. Expense entry is not affected.
+        </span>
         {update.isError && (
           <p role="alert" className="callout callout-danger mt-2">
             {errorMessage(update.error)}
@@ -178,7 +214,9 @@ export function CategoriesPage() {
   const categories = useCategories('all');
   const create = useCreateCategory();
   const toast = useToast();
-  const active = categories.data?.filter((c) => c.isActive) ?? [];
+  const [usage, setUsage] = useState<'all' | 'products' | 'other'>('all');
+  const active =
+    categories.data?.filter((c) => c.isActive && (usage === 'all' || (usage === 'products' ? c.isProductUsable : !c.isProductUsable))) ?? [];
   const archived = categories.data?.filter((c) => !c.isActive) ?? [];
 
   return (
@@ -211,8 +249,16 @@ export function CategoriesPage() {
       {categories.isSuccess && (
         <>
           <Card>
-            <CardHeader>
-              <CardTitle>Active ({active.length})</CardTitle>
+            <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+              <div>
+                <CardTitle>Active ({active.length})</CardTitle>
+                <CardDescription>“Use for products” makes a category available in the product catalogue. Expense entry is unchanged.</CardDescription>
+              </div>
+              <Select aria-label="Show categories" className="w-auto" value={usage} onChange={(e) => setUsage(e.target.value as typeof usage)}>
+                <option value="all">All categories</option>
+                <option value="products">Used for products</option>
+                <option value="other">Not used for products</option>
+              </Select>
             </CardHeader>
             <CardContent className="px-0 pb-1 md:px-0 md:pb-1">
               {active.length === 0 ? (

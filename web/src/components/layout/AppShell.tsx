@@ -1,4 +1,4 @@
-import { BookMarked, ChevronRight, KeyRound, LogOut, Menu, Plus } from 'lucide-react';
+import { BookMarked, ChevronRight, Keyboard, KeyRound, LogOut, Menu, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { NAV_GROUPS, navItemsFor, type NavItem } from '@/app/navigation';
@@ -8,6 +8,7 @@ import { AttachmentQueueProvider, useAttachmentQueue } from '@/features/document
 import { AttachmentSyncBanner } from '@/features/documents/queue/LocalAttachments';
 import { PausedDeviceFilesNotice } from '@/features/documents/queue/PausedDeviceFiles';
 import { billAttachmentsEnabled } from '@/features/documents/attachments-feature';
+import { ShortcutsProvider, useShortcuts } from '@/features/shortcuts/ShortcutsProvider';
 import { useLiveUpdates } from '@/features/sync/useLiveUpdates';
 import { cn } from '@/lib/utils';
 import { useKeyboardOpen } from '@/lib/visual-viewport';
@@ -240,6 +241,24 @@ export function AppShell() {
 }
 
 function AppFrame() {
+  return (
+    <ShortcutsProvider>
+      <AppFrameContent />
+    </ShortcutsProvider>
+  );
+}
+
+/** A keyboard-shortcut hint, shown only on desktop-class devices. */
+function Kbd({ children }: { children: string }) {
+  return (
+    <kbd className="ml-auto rounded border border-current/25 px-1 font-mono text-[0.6875rem] leading-4 opacity-80" aria-hidden="true">
+      {children}
+    </kbd>
+  );
+}
+
+function AppFrameContent() {
+  const shortcuts = useShortcuts();
   const { user } = useAuth();
   const location = useLocation();
   const items = navItemsFor(user?.role);
@@ -255,14 +274,25 @@ function AppFrame() {
         <div className="px-3 pb-2">
           <Link
             to="/expenses/new"
+            aria-keyshortcuts={shortcuts.desktop ? 'F2' : undefined}
             className="flex h-10 items-center justify-between gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground shadow-[0_1px_2px_oklch(0.3_0.06_170/0.25),inset_0_1px_0_oklch(1_0_0/0.12)] transition-[background-color,transform] duration-150 hover:bg-primary-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             <span className="flex items-center gap-2">
               <Plus className="size-4" strokeWidth={2.5} aria-hidden="true" />
               Add expense
             </span>
-            <ChevronRight className="size-4 opacity-70" aria-hidden="true" />
+            {shortcuts.desktop ? <Kbd>F2</Kbd> : <ChevronRight className="size-4 opacity-70" aria-hidden="true" />}
           </Link>
+          <button
+            type="button"
+            onClick={shortcuts.openQuickLookup}
+            aria-keyshortcuts={shortcuts.desktop ? 'F4' : undefined}
+            className="mt-1.5 flex h-9 w-full items-center gap-2 rounded-lg border bg-card px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Search className="size-4" aria-hidden="true" />
+            Product lookup
+            {shortcuts.desktop && <Kbd>F4</Kbd>}
+          </button>
         </div>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-2">
           {NAV_GROUPS.map((group) => {
@@ -279,13 +309,30 @@ function AppFrame() {
           })}
         </nav>
         <div className="border-t p-2">
+          {shortcuts.desktop && (
+            <button
+              type="button"
+              onClick={shortcuts.openHelp}
+              className="mb-1 flex h-8 w-full items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Keyboard className="size-3.5" aria-hidden="true" /> Keyboard shortcuts
+            </button>
+          )}
           <UserBlock compact />
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-10 flex h-[calc(var(--mobile-header-height)+env(safe-area-inset-top))] items-center border-b bg-card/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md md:hidden">
+        <header className="sticky top-0 z-10 flex h-[calc(var(--mobile-header-height)+env(safe-area-inset-top))] items-center justify-between border-b bg-card/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-md md:hidden">
           <Brand />
+          <button
+            type="button"
+            onClick={shortcuts.openQuickLookup}
+            aria-label="Product lookup"
+            className="inline-flex size-11 items-center justify-center rounded-full text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Search className="size-5" aria-hidden="true" />
+          </button>
         </header>
         <main className="pb-bottom-nav flex-1 px-4 pt-5 md:px-8 md:pb-12 md:pt-8 lg:px-10">
           <PendingAttachments />

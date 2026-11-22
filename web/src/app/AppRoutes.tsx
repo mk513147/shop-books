@@ -17,6 +17,9 @@ import { ExpensesPage } from '@/routes/ExpensesPage';
 import { LoginPage } from '@/routes/LoginPage';
 import { NotFoundPage } from '@/routes/NotFoundPage';
 import { PlaceholderPage } from '@/routes/PlaceholderPage';
+import { ProductDetailPage } from '@/routes/ProductDetailPage';
+import { EditProductPage, NewProductPage } from '@/routes/ProductFormPage';
+import { ProductsPage } from '@/routes/ProductsPage';
 import { CategoryReportPage } from '@/routes/reports/CategoryReportPage';
 import { CustomerReportPage } from '@/routes/reports/CustomerReportPage';
 import { ExpenseReportPage } from '@/routes/reports/ExpenseReportPage';
@@ -58,6 +61,10 @@ export function AppRoutes() {
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/customers/:id/ledger" element={<CustomerLedgerPage />} />
           <Route path="/customers/:id/transactions/:txnId" element={<CustomerTransactionPage />} />
+          <Route path="/products" element={<ProductsPage />} />
+          <Route path="/products/new" element={<NewProductPage />} />
+          <Route path="/products/:id" element={<ProductDetailPage />} />
+          <Route path="/products/:id/edit" element={<EditProductPage />} />
           <Route path="/salesmen" element={<SalesmenPage />} />
           <Route path="/salesmen/:id" element={<SalesmanDetailPage />} />
           <Route path="/reports" element={<ReportsHomePage />} />

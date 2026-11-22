@@ -306,6 +306,42 @@ function assertVersion(row: SupplierRow, expected: number): void {
 }
 
 /** Details, archive/reactivate and (optionally) the full set of linked categories, in one change. */
+/**
+ * A product's effective purchase price is its PREFERRED supplier's price while that supplier is
+ * active (productCosts.service.ts). Archiving or reactivating a supplier that is still preferred
+ * would therefore silently switch the effective price of those products, without the
+ * purchase-price CHANGE permission. So a supplier that is the preferred supplier of any product
+ * (active or not: an inactive product can be reactivated) cannot change its archived state: the
+ * user first chooses another preferred supplier, or none, on each product (an explicit change that
+ * follows the purchase-price rules). The same applies to everyone, the owner included.
+ *
+ * Concurrency: the supplier row is locked FOR UPDATE before this check (selectSupplier), and every
+ * path that makes a link preferred takes the supplier row FOR SHARE and re-checks it is active
+ * (productCosts.service.ts), so a link cannot become preferred between this check and the commit.
+ * The error names the products (not secret) but never a price.
+ */
+async function assertNotPreferredSupplier(client: Queryable, id: string, name: string, reactivating: boolean): Promise<void> {
+  const rows = (
+    await client.query<{ name: string; total: number }>(
+      `SELECT p.name, count(*) OVER ()::int AS total
+         FROM product_suppliers ps JOIN products p ON p.id = ps.product_id
+        WHERE ps.supplier_id = $1 AND ps.is_preferred
+        ORDER BY p.is_active DESC, lower(p.name), p.id
+        LIMIT 3`,
+      [id],
+    )
+  ).rows;
+  if (rows.length === 0) return;
+  const total = rows[0]!.total;
+  const names = rows.map((r) => `“${r.name}”`).join(', ') + (total > rows.length ? ` and ${total - rows.length} more` : '');
+  throw new AppError(
+    409,
+    'SUPPLIER_IS_PREFERRED',
+    `“${name}” is the preferred supplier of ${total === 1 ? '1 product' : `${total} products`} (${names}). ` +
+      `Choose another preferred supplier, or none, on ${total === 1 ? 'that product' : 'those products'} first, then ${reactivating ? 'reactivate' : 'archive'} it.`,
+  );
+}
+
 export async function updateSupplier(
   db: Database,
   id: string,
@@ -345,6 +381,7 @@ export async function updateSupplier(
 
       const linksChanged = toAdd.length + toRemove.length + brandsToAdd.length + brandsToRemove.length > 0;
       if (!detailsChanged && !linksChanged) return toSupplier(before);
+      if (before.is_active !== next.is_active) await assertNotPreferredSupplier(client, id, before.name, next.is_active);
 
       await client.query(
         `UPDATE suppliers SET name = $2, phone = $3, address = $4, notes = $5, is_active = $6,

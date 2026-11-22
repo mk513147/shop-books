@@ -8,7 +8,7 @@ import { ExpenseForm } from './ExpenseForm';
 
 vi.setConfig({ testTimeout: 15_000 });
 
-const cat = (id: string, name: string): Category => ({ id, name, description: null, isActive: true, expenseCount: 0, createdAt: '', updatedAt: '' });
+const cat = (id: string, name: string): Category => ({ id, name, description: null, isActive: true, isProductUsable: false, expenseCount: 0, productCount: 0, createdAt: '', updatedAt: '' });
 const CATEGORIES = [cat('c1', 'Packaging'), cat('c2', 'Transport')];
 
 async function fakeApi(input: RequestInfo | URL): Promise<Response> {

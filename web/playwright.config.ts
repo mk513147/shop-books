@@ -5,6 +5,8 @@ const channel = process.env.PW_CHANNEL || undefined;
 
 export default defineConfig({
   testDir: './e2e',
+  // The product suite needs the real API + test database: it has its own config (playwright.products.config.ts).
+  testIgnore: ['**/products/**'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

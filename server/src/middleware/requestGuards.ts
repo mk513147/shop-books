@@ -35,14 +35,16 @@ export function verifyOrigin(allowedOrigins: string[]): RequestHandler {
 }
 
 /**
- * The ONLY requests allowed to carry a non-JSON body: raw file uploads (POST
- * /expenses/:id/documents) as application/octet-stream. That type is not a "simple" CORS content
- * type, so a cross-site page cannot send it without a preflight; Origin and CSRF checks still apply.
+ * The ONLY requests allowed to carry a non-JSON body: raw file uploads as application/octet-stream
+ * (POST /expenses/:id/documents). That type is not a "simple" CORS content type, so a cross-site
+ * page cannot send it without a preflight; Origin and CSRF checks still apply.
+ * (The product import workbook upload is postponed: /product-imports answers 503 before this
+ * guard, see modules/productImports/postponed.ts. Re-add its paths only when import returns.)
  */
-const BINARY_UPLOAD_PATH = /^\/expenses\/[^/]+\/documents\/?$/;
+const BINARY_UPLOAD_PATHS = [/^\/expenses\/[^/]+\/documents\/?$/];
 
 export function isBinaryUpload(req: Request, type: string): boolean {
-  return req.method === 'POST' && type === 'application/octet-stream' && BINARY_UPLOAD_PATH.test(req.path);
+  return req.method === 'POST' && type === 'application/octet-stream' && BINARY_UPLOAD_PATHS.some((p) => p.test(req.path));
 }
 
 /** State-changing API requests must be JSON (blocks HTML-form and other simple cross-site posts). */

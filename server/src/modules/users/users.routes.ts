@@ -15,8 +15,13 @@ const createUserSchema = z.strictObject({
 
 // Roles cannot be changed here: the owner role is unique and managers stay managers (see docs).
 const updateUserSchema = z
-  .strictObject({ name: nameSchema.optional(), isActive: z.boolean().optional() })
-  .refine((v) => v.name !== undefined || v.isActive !== undefined, 'Nothing to update');
+  .strictObject({
+    name: nameSchema.optional(),
+    isActive: z.boolean().optional(),
+    canViewPurchasePrices: z.boolean().optional(),
+    canEditPurchasePrices: z.boolean().optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), 'Nothing to update');
 
 const idSchema = z.uuid();
 

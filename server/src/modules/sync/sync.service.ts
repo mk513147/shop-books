@@ -24,6 +24,9 @@ export const SYNC_ENTITY_TYPES = [
   'customer',
   'customer_transaction',
   'salesman',
+  // Products (migration 0015). 'product_cost' and 'product_import' are deliberately NOT listed:
+  // purchase-price changes are never broadcast, not even as a bare "something changed" event.
+  'product',
 ] as const;
 export type SyncEntityType = (typeof SYNC_ENTITY_TYPES)[number];
 

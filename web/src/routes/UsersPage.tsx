@@ -14,6 +14,7 @@ import {
   useCreateUser,
   useResetPassword,
   useRevokeSessions,
+  useSetPurchasePriceAccess,
   useSetUserActive,
   useUsers,
 } from '@/features/users/users-api';
@@ -123,9 +124,10 @@ function UserRow({
   const setActive = useSetUserActive();
   const resetPassword = useResetPassword();
   const revokeSessions = useRevokeSessions();
+  const setCostAccess = useSetPurchasePriceAccess();
   const [message, setMessage] = useState<string | null>(null);
-  const busy = setActive.isPending || resetPassword.isPending || revokeSessions.isPending;
-  const error = setActive.error ?? resetPassword.error ?? revokeSessions.error;
+  const busy = setActive.isPending || resetPassword.isPending || revokeSessions.isPending || setCostAccess.isPending;
+  const error = setActive.error ?? resetPassword.error ?? revokeSessions.error ?? setCostAccess.error;
 
   return (
     <li className="space-y-3 px-4 py-4 md:px-5">
@@ -144,6 +146,56 @@ function UserRow({
           </Badge>
         </p>
       </div>
+      {user.role === 'owner' && <p className="text-xs text-muted-foreground">Can always see and change purchase prices.</p>}
+      {user.role !== 'owner' && (
+        <div className="space-y-2">
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            className="size-4 accent-[var(--color-primary)]"
+            checked={user.canViewPurchasePrices}
+            disabled={busy}
+            onChange={(e) => {
+              const allow = e.target.checked;
+              const question = allow
+                ? `Allow ${user.name} to see product purchase prices? Changing them is a separate permission. Every time they look at prices it is recorded.`
+                : `Stop ${user.name} seeing purchase prices? They also lose permission to change them. It takes effect on their next action; no sign-out is needed.`;
+              if (!window.confirm(question)) return;
+              setMessage(null);
+              setCostAccess.mutate(
+                { id: user.id, canViewPurchasePrices: allow },
+                { onSuccess: () => setMessage(allow ? `${user.name} can now see purchase prices.` : `${user.name} can no longer see purchase prices.`) },
+              );
+            }}
+          />
+          Can view purchase prices
+        </label>
+        <label className={user.canViewPurchasePrices ? 'flex cursor-pointer items-center gap-2 text-sm' : 'flex items-center gap-2 text-sm text-muted-foreground'}>
+          <input
+            type="checkbox"
+            role="switch"
+            className="size-4 accent-[var(--color-primary)]"
+            checked={user.canEditPurchasePrices}
+            disabled={busy || !user.canViewPurchasePrices}
+            onChange={(e) => {
+              const allow = e.target.checked;
+              const question = allow
+                ? `Allow ${user.name} to change purchase prices? This includes default prices, supplier prices, removing a supplier that has a price, and choosing the preferred supplier when that changes the purchase price.`
+                : `Stop ${user.name} changing purchase prices? They can still see them.`;
+              if (!window.confirm(question)) return;
+              setMessage(null);
+              setCostAccess.mutate(
+                { id: user.id, canEditPurchasePrices: allow },
+                { onSuccess: () => setMessage(allow ? `${user.name} can now change purchase prices.` : `${user.name} can no longer change purchase prices.`) },
+              );
+            }}
+          />
+          Can change purchase prices
+          {!user.canViewPurchasePrices && <span className="text-xs">(needs “view” first)</span>}
+        </label>
+        </div>
+      )}
       {user.role !== 'owner' && (
         <div className="flex flex-wrap gap-2">
           <Button

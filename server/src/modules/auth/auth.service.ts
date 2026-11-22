@@ -15,6 +15,8 @@ interface UserAuthRow {
   role: Role;
   password_hash: string;
   must_change_password: boolean;
+  can_view_purchase_prices: boolean;
+  can_edit_purchase_prices: boolean;
   is_active: boolean;
   failed_login_count: number;
   lockout_count: number;
@@ -23,7 +25,7 @@ interface UserAuthRow {
 
 /** Row-locks the user so concurrent attempts are serialized and cannot bypass the lockout. */
 const SELECT_USER_FOR_UPDATE = `
-  SELECT id, email, name, role, password_hash, must_change_password, is_active,
+  SELECT id, email, name, role, password_hash, must_change_password, can_view_purchase_prices, can_edit_purchase_prices, is_active,
          failed_login_count, lockout_count, COALESCE(locked_until > now(), false) AS is_locked
     FROM users`;
 
@@ -34,6 +36,8 @@ function toAuthenticatedUser(row: UserAuthRow): AuthenticatedUser {
     name: row.name,
     role: row.role,
     mustChangePassword: row.must_change_password,
+    canViewPurchasePrices: row.role === 'owner' || row.can_view_purchase_prices,
+    canEditPurchasePrices: row.role === 'owner' || (row.can_view_purchase_prices && row.can_edit_purchase_prices),
   };
 }
 

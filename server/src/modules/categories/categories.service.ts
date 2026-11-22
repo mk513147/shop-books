@@ -11,7 +11,10 @@ export interface Category {
   name: string;
   description: string | null;
   isActive: boolean;
+  /** Offered in the product form (migration 0015). Expense and customer-due pickers ignore it. */
+  isProductUsable: boolean;
   expenseCount: number;
+  productCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -21,13 +24,16 @@ interface CategoryRow {
   name: string;
   description: string | null;
   is_active: boolean;
+  is_product_usable: boolean;
   expense_count: number;
+  product_count: number;
   created_at: Date;
   updated_at: Date;
 }
 
-const CATEGORY_COLUMNS = `c.id, c.name, c.description, c.is_active, c.created_at, c.updated_at,
-  (SELECT count(*)::int FROM expense_category_links l WHERE l.category_id = c.id) AS expense_count`;
+const CATEGORY_COLUMNS = `c.id, c.name, c.description, c.is_active, c.is_product_usable, c.created_at, c.updated_at,
+  (SELECT count(*)::int FROM expense_category_links l WHERE l.category_id = c.id) AS expense_count,
+  (SELECT count(*)::int FROM products p WHERE p.category_id = c.id) AS product_count`;
 
 function toCategory(row: CategoryRow): Category {
   return {
@@ -35,14 +41,16 @@ function toCategory(row: CategoryRow): Category {
     name: row.name,
     description: row.description,
     isActive: row.is_active,
+    isProductUsable: row.is_product_usable,
     expenseCount: row.expense_count,
+    productCount: row.product_count,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
 }
 
-function snapshot(row: Pick<CategoryRow, 'name' | 'description' | 'is_active'>): AuditSnapshot {
-  return { name: row.name, description: row.description, isActive: row.is_active };
+function snapshot(row: Pick<CategoryRow, 'name' | 'description' | 'is_active' | 'is_product_usable'>): AuditSnapshot {
+  return { name: row.name, description: row.description, isActive: row.is_active, isProductUsable: row.is_product_usable };
 }
 
 function nameTaken(err: unknown): boolean {
@@ -52,8 +60,13 @@ function nameTaken(err: unknown): boolean {
 
 const NAME_TAKEN = () => new AppError(409, 'CATEGORY_NAME_TAKEN', 'An active category with this name already exists');
 
-export async function listCategories(db: Queryable, status: CategoryStatus): Promise<Category[]> {
-  const filter = status === 'active' ? 'WHERE c.is_active' : status === 'archived' ? 'WHERE NOT c.is_active' : '';
+/**
+ * `usage: 'products'` narrows to categories marked "Use for products" (the product form); every other
+ * caller (expenses, customer dues, supplier defaults, reports) passes nothing and is unaffected.
+ */
+export async function listCategories(db: Queryable, status: CategoryStatus, usage?: 'products'): Promise<Category[]> {
+  const conditions = [status === 'active' ? 'c.is_active' : status === 'archived' ? 'NOT c.is_active' : null, usage === 'products' ? 'c.is_product_usable' : null].filter(Boolean);
+  const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await db.query<CategoryRow>(
     `SELECT ${CATEGORY_COLUMNS} FROM expense_categories c ${filter} ORDER BY c.is_active DESC, lower(c.name)`,
   );
@@ -72,15 +85,15 @@ async function selectCategory(client: Queryable, id: string, lock = false): Prom
 
 export async function createCategory(
   db: Database,
-  input: { name: string; description: string | null },
+  input: { name: string; description: string | null; isProductUsable?: boolean | undefined },
   actor: Actor,
 ): Promise<Category> {
   try {
     return await withSessionTransaction(db, actor.sessionId, async (client) => {
       const inserted = await client.query<{ id: string }>(
-        `INSERT INTO expense_categories (name, description, created_by, updated_by)
-         VALUES ($1, $2, $3, $3) RETURNING id`,
-        [input.name, input.description, actor.userId],
+        `INSERT INTO expense_categories (name, description, is_product_usable, created_by, updated_by)
+         VALUES ($1, $2, $3, $4, $4) RETURNING id`,
+        [input.name, input.description, input.isProductUsable ?? false, actor.userId],
       );
       const row = await selectCategory(client, inserted.rows[0]!.id);
       await recordFinancialAudit(client, {
@@ -106,7 +119,12 @@ export async function createCategory(
 export async function updateCategory(
   db: Database,
   id: string,
-  changes: { name?: string | undefined; description?: string | null | undefined; isActive?: boolean | undefined },
+  changes: {
+    name?: string | undefined;
+    description?: string | null | undefined;
+    isActive?: boolean | undefined;
+    isProductUsable?: boolean | undefined;
+  },
   actor: Actor,
 ): Promise<Category> {
   try {
@@ -116,14 +134,15 @@ export async function updateCategory(
         name: changes.name ?? before.name,
         description: changes.description === undefined ? before.description : changes.description,
         is_active: changes.isActive ?? before.is_active,
+        is_product_usable: changes.isProductUsable ?? before.is_product_usable,
       };
       const beforeSnap = snapshot(before);
       const afterSnap = snapshot(next);
       if (JSON.stringify(beforeSnap) === JSON.stringify(afterSnap)) return toCategory(before);
 
       await client.query(
-        `UPDATE expense_categories SET name = $2, description = $3, is_active = $4, updated_by = $5 WHERE id = $1`,
-        [id, next.name, next.description, next.is_active, actor.userId],
+        `UPDATE expense_categories SET name = $2, description = $3, is_active = $4, is_product_usable = $5, updated_by = $6 WHERE id = $1`,
+        [id, next.name, next.description, next.is_active, next.is_product_usable, actor.userId],
       );
       const action =
         before.is_active === next.is_active ? 'update' : next.is_active ? 'reactivate' : 'archive';

@@ -23,13 +23,31 @@ function onUserInput(event: Event): void {
   if (marksUnsavedWork(event.target)) dirty = true;
 }
 
-/** Starts listening (idempotent per document). Returns a function that stops it. */
+/** How many callers are tracking each document (the app updater, the keyboard shortcuts…). */
+const trackers = new WeakMap<Document, number>();
+
+/**
+ * Starts listening (shared per document). Returns a function that stops THIS caller's tracking.
+ * Reference-counted: the browser de-duplicates identical listeners, so without the count one
+ * caller stopping would silently stop tracking for every other caller too.
+ */
 export function trackUnsavedWork(doc: Document = document): () => void {
-  doc.addEventListener('input', onUserInput, true);
-  doc.addEventListener('change', onUserInput, true);
+  const count = trackers.get(doc) ?? 0;
+  if (count === 0) {
+    doc.addEventListener('input', onUserInput, true);
+    doc.addEventListener('change', onUserInput, true);
+  }
+  trackers.set(doc, count + 1);
+  let stopped = false;
   return () => {
-    doc.removeEventListener('input', onUserInput, true);
-    doc.removeEventListener('change', onUserInput, true);
+    if (stopped) return;
+    stopped = true;
+    const remaining = (trackers.get(doc) ?? 1) - 1;
+    trackers.set(doc, remaining);
+    if (remaining <= 0) {
+      doc.removeEventListener('input', onUserInput, true);
+      doc.removeEventListener('change', onUserInput, true);
+    }
   };
 }
 
@@ -42,7 +60,8 @@ export function hasUnsavedInput(): boolean {
   return dirty;
 }
 
-function isEditableField(el: Element | null): boolean {
+/** A text field, select, textarea or contenteditable element (typing there must not trigger shortcuts). */
+export function isEditableField(el: Element | null): boolean {
   if (!el) return false;
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true;
   if (el instanceof HTMLInputElement) return !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'range', 'color'].includes(el.type);

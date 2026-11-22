@@ -7,8 +7,8 @@ import type { SessionUser } from '@/types/api';
 import { AppRoutes } from './AppRoutes';
 import { AppProviders } from './providers';
 
-const OWNER: SessionUser = { id: 'u1', email: 'o@example.com', name: 'Olivia', role: 'owner', mustChangePassword: false };
-const MANAGER: SessionUser = { id: 'u2', email: 'm@example.com', name: 'Manu', role: 'manager', mustChangePassword: false };
+const OWNER: SessionUser = { id: 'u1', email: 'o@example.com', name: 'Olivia', role: 'owner', mustChangePassword: false, canViewPurchasePrices: false, canEditPurchasePrices: false };
+const MANAGER: SessionUser = { id: 'u2', email: 'm@example.com', name: 'Manu', role: 'manager', mustChangePassword: false, canViewPurchasePrices: false, canEditPurchasePrices: false };
 
 type Route = (url: string, init: RequestInit) => Response | Promise<Response>;
 

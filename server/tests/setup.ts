@@ -1,5 +1,5 @@
 import { loadEnvFiles } from '../src/config/loadEnvFiles.js';
-import { DESIGNATED_TEST_DATABASE, testDatabaseUrlProblem } from '../src/database/isolation.js';
+import { designatedTestDatabase, testDatabaseUrlProblem } from '../src/database/isolation.js';
 
 // Vitest sets NODE_ENV=test, so this reads <repo>/.env.test (if present) and never .env.development.
 if (process.env.NODE_ENV !== 'test') {
@@ -19,6 +19,6 @@ loadEnvFiles();
 if (process.env.DATABASE_URL !== undefined) {
   const problem = testDatabaseUrlProblem(process.env.DATABASE_URL);
   if (problem !== null) {
-    throw new Error(`Refusing to run the server tests: ${problem}. They may only use "${DESIGNATED_TEST_DATABASE}" on localhost.`);
+    throw new Error(`Refusing to run the server tests: ${problem}. They may only use "${designatedTestDatabase()}" on localhost.`);
   }
 }

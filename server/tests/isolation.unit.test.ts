@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  ALTERNATE_TEST_DATABASE_PATTERN,
   connectionTarget,
+  designatedTestDatabase,
   databaseNameProblem,
   DESIGNATED_DEV_DATABASE,
   DESIGNATED_TEST_DATABASE,
@@ -8,6 +10,15 @@ import {
   operationProblem,
   testDatabaseUrlProblem,
 } from '../src/database/isolation.js';
+
+// These rules are about the default designated database: pin the optional override off here, so
+// the file means the same whether or not the suite runs against an alternate disposable database.
+beforeAll(() => {
+  vi.stubEnv('SHOP_BOOKS_TEST_DATABASE', '');
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('database isolation: staging and production are never test or development databases', () => {
   it('designates exactly one automated-test database', () => {
@@ -126,5 +137,26 @@ describe('changing commands (db:migrate, documents:reconcile --delete-orphans)',
     expect(operationProblem('development', url('localhost/shop_books_dev?host=prod.example.com'), 'shop_books_dev', ['--confirm-database=shop_books_dev'])).toMatch(/can redirect/);
     expect(operationProblem('production', 'postgresql:///shopbooks', 'shopbooks', ['--confirm-database=shopbooks'])).toMatch(/host cannot be determined/);
     expect(operationProblem('development', dev, 'shop_books_test', ['--confirm-database=shop_books_test'])).toMatch(/server reports database "shop_books_test"/);
+  });
+});
+
+describe('alternate disposable test database (SHOP_BOOKS_TEST_DATABASE)', () => {
+  const url = (rest: string) => `postgresql://u:p@${rest}`;
+  it('defaults to shop_books_test', () => {
+    expect(designatedTestDatabase({})).toBe('shop_books_test');
+    expect(designatedTestDatabase({ SHOP_BOOKS_TEST_DATABASE: '  ' })).toBe('shop_books_test');
+  });
+  it('accepts only shop_books_<purpose>_test names, and then ONLY that name, on localhost', () => {
+    const env = { SHOP_BOOKS_TEST_DATABASE: 'shop_books_catalogue_fix_test' };
+    expect(designatedTestDatabase(env)).toBe('shop_books_catalogue_fix_test');
+    expect(testDatabaseUrlProblem(url('localhost/shop_books_catalogue_fix_test'), env)).toBeNull();
+    expect(testDatabaseUrlProblem(url('localhost/shop_books_test'), env)).toMatch(/is not "shop_books_catalogue_fix_test"/);
+    expect(testDatabaseUrlProblem(url('db.example.com/shop_books_catalogue_fix_test'), env)).toMatch(/not local/);
+  });
+  it('refuses any other override name', () => {
+    for (const name of ['shop_books_dev', 'neondb', 'other_test', 'shop_books_test', 'shop_books_X_test', 'shop_books_staging_test', 'shop_books_prod_copy_test', 'shop_books_product_remediation_test']) {
+      expect(() => designatedTestDatabase({ SHOP_BOOKS_TEST_DATABASE: name }), name).toThrow(/not allowed/);
+    }
+    expect(ALTERNATE_TEST_DATABASE_PATTERN.test('shop_books_catalogue_fix_test')).toBe(true);
   });
 });

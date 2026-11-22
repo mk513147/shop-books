@@ -9,6 +9,9 @@ The project follows a **build-first** approach: each stage runs only the essenti
 | Server unit + integration (Vitest, Supertest) | `npm --prefix server test` | `.env.test` pointing at **exactly** `shop_books_test` for the integration files (otherwise they are skipped, never reported as passing; any other database name, an unreadable name or `SHOP_BOOKS_ENV_FILE` aborts the run). The suite truncates that database. |
 | Web unit/component (Vitest, Testing Library) | `npm --prefix web test` | nothing |
 | E2E smoke (Playwright, production build) | `npm run test:e2e` | a browser (`PW_CHANNEL=msedge` or `npx playwright install chromium`) |
+| E2E product catalogue (Playwright, production build, **real API**) | `npm --prefix web run test:e2e:products` | a browser, free ports 3000 and 4173, `.env.test` → `shop_books_test` (**truncated and re-seeded** at start: users, categories, brands, suppliers, one product), or a separate disposable database via `SHOP_BOOKS_TEST_DATABASE` + `DATABASE_URL` (see below) |
+| Separate disposable test database (optional) | `SHOP_BOOKS_TEST_DATABASE=shop_books_<purpose>_test DATABASE_URL=postgresql://…@localhost:…/shop_books_<purpose>_test npx vitest run` (in `server/`) | a local database with that exact name (no `staging`/`prod` in it); every isolation guard still applies; `.env.test` unchanged. Lets the truncating suites run without touching `shop_books_test` ([products.md → Tests](products.md#running-the-truncating-suites-on-a-separate-disposable-database)) |
+| Product search benchmark (opt-in) | `PRODUCT_SEARCH_BENCH=1 npx vitest run tests/products.search.bench.integration.test.ts` (in `server/`) | `shop_books_test` (10,000 synthetic products, truncated afterwards) |
 
 Existing coverage worth knowing:
 

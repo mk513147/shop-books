@@ -29,6 +29,16 @@ export const useSetUserActive = () =>
     apiRequest<{ user: UserSummary }>(`/users/${id}`, { method: 'PATCH', json: { isActive } }),
   );
 
+/**
+ * Owner only: what a manager may do with product purchase prices (effective on their next
+ * request). Seeing and changing are separate; changing needs seeing, and turning seeing off also
+ * turns changing off (the server enforces both).
+ */
+export const useSetPurchasePriceAccess = () =>
+  useUsersMutation(({ id, ...access }: { id: string; canViewPurchasePrices?: boolean; canEditPurchasePrices?: boolean }) =>
+    apiRequest<{ user: UserSummary }>(`/users/${id}`, { method: 'PATCH', json: access }),
+  );
+
 export const useResetPassword = () =>
   useUsersMutation((id: string) =>
     apiRequest<TemporaryPasswordResponse>(`/users/${id}/reset-password`, { method: 'POST' }),

@@ -5,6 +5,25 @@
 export const DESIGNATED_TEST_DATABASE = 'shop_books_test';
 
 /**
+ * A separate, explicitly named disposable test database may be used INSTEAD of shop_books_test, so
+ * the (truncating) suites can run without touching it: set SHOP_BOOKS_TEST_DATABASE to its exact
+ * name. The name must look like shop_books_<something>_test; every other rule (local host only,
+ * exact name in the URL, the name the server itself reports) still applies to it.
+ * Example: SHOP_BOOKS_TEST_DATABASE=shop_books_catalogue_fix_test.
+ */
+export const ALTERNATE_TEST_DATABASE_PATTERN = /^shop_books_[a-z0-9_]+_test$/;
+
+/** The test database the suite may use in this process (shop_books_test unless explicitly overridden). */
+export function designatedTestDatabase(env: NodeJS.ProcessEnv = process.env): string {
+  const named = env.SHOP_BOOKS_TEST_DATABASE?.trim();
+  if (!named) return DESIGNATED_TEST_DATABASE;
+  if (!ALTERNATE_TEST_DATABASE_PATTERN.test(named) || isProtectedDatabaseName(named)) {
+    throw new Error(`SHOP_BOOKS_TEST_DATABASE="${named}" is not allowed: use a name like shop_books_<purpose>_test.`);
+  }
+  return named;
+}
+
+/**
  * Persistent environments (staging, production) are recognised by name. Such a database is never
  * disposable: it may only be opened with NODE_ENV=production, and destructive tooling needs the
  * operator to confirm its exact name.
@@ -92,11 +111,12 @@ export function connectionTarget(url: string): { target: ConnectionTarget; probl
  * Automated tests: the URL must reach exactly the designated test database on this machine.
  * (connectTestDatabase() additionally checks the name and address PostgreSQL itself reports.)
  */
-export function testDatabaseUrlProblem(url: string): string | null {
+export function testDatabaseUrlProblem(url: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const { target, problem } = connectionTarget(url);
   if (problem !== null) return problem;
   if (!target.local) return `the database host "${target.host}" is not local (only localhost / 127.0.0.1 / ::1)`;
-  if (target.database !== DESIGNATED_TEST_DATABASE) return `"${target.database}" is not "${DESIGNATED_TEST_DATABASE}"`;
+  const designated = designatedTestDatabase(env);
+  if (target.database !== designated) return `"${target.database}" is not "${designated}"`;
   return null;
 }
 
@@ -116,7 +136,7 @@ export function operationProblem(nodeEnv: string, databaseUrl: string, connected
   const routine =
     target.local &&
     ((nodeEnv === 'development' && target.database === DESIGNATED_DEV_DATABASE) ||
-      (nodeEnv === 'test' && target.database === DESIGNATED_TEST_DATABASE));
+      (nodeEnv === 'test' && target.database === designatedTestDatabase()));
   if (routine) return null;
   const given = args.find((a) => a.startsWith('--confirm-database='))?.slice('--confirm-database='.length);
   if (given === connectedDatabase) return null;

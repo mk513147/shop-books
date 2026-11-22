@@ -292,6 +292,20 @@ Additive, backward compatible. `customer_transactions` gets two nullable columns
 
 **Status:** 0014 has been applied only to `shop_books_test` (by the automated tests). Apply to dev/production with the normal procedure (backup first, `db:status`, `db:migrate`).
 
+### `0015_products`
+
+Product catalogue (details: [products.md](products.md)). `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public` (trusted extension: needs `CREATE` on the database, not superuser). New columns `expense_categories.is_product_usable` and `users.can_view_purchase_prices` (both `NOT NULL DEFAULT false`, metadata-only). New tables `products` (one sellable unit; every rule a named CHECK, incl. "SP > MRP only with a recorded confirmation"; unique SKU/barcode among active products; no-delete trigger), `product_costs` (default purchase price, protected, no-delete), `product_suppliers` (supplier price, code, notes, one preferred per product), `product_search` (trigger-maintained documents, pg_trgm GIN), `product_import_batches` / `product_import_rows` (import staging: selected block only, original row numbers, raw cells). Functions `product_search_norm`, `refresh_product_search` and refresh triggers on products, brand/category/supplier renames and supplier links (they write `product_search` only). CHECK lists extended: audit entities `product`, `product_cost`, `product_import` and actions `link_supplier`, `unlink_supplier`, `update_supplier_link`, `commit`, `discard`; auth event `purchase_prices_viewed`; idempotency operation `product.create`. No existing row is changed; the previous application keeps working.
+
+### `0016_product_search_words`
+
+Typo-tolerance vocabulary `product_search_words(word)` (GIN trigram index), filled from existing search documents; `refresh_product_search` now also records new words. Words are only added (a stale word just finds nothing).
+
+### `0017_product_catalogue_hardening`
+
+Security-audit fixes, additive. `users.can_edit_purchase_prices boolean NOT NULL DEFAULT false` + CHECK `users_edit_prices_needs_view` (changing purchase prices requires seeing them). Barcode uniqueness among active products and the barcode lookup index move to `lower(barcode)` (stored values unchanged; the migration stops with a clear message, changing nothing, if two active products already share a barcode that differs only in letter case); new `products_sku_lookup_idx` on `lower(sku)`. New function `product_search_lock()` (transaction-scoped advisory lock, key 726001003); `refresh_product_search` becomes PL/pgSQL, takes the lock first and then reads with a fresh snapshot; the brand / category / supplier rename triggers take the lock before choosing which products to refresh. Result: search documents stay correct when product edits and renames race, and refreshes cannot deadlock each other (cost: product-catalogue writes are serialised for the rest of their short transaction). Relies on READ COMMITTED (the default). Requires a Unicode-aware database character type for non-ASCII search (see [products.md](products.md#schema)).
+
+**Status (0015–0017):** applied only to local test databases (0015–0016 to `shop_books_test`; 0015–0017 to a separate disposable `shop_books_catalogue_fix_test` on a throwaway local cluster). `shop_books_dev` is at 0010. **Forward-only** once product audit rows exist (append-only audit log); take a Neon branch before migrating production and run the checks first (see [products.md → Production rollout](products.md#production-rollout)). The import tables of 0015 stay in place but are unused: Excel import is postponed.
+
 ### `0008_reporting_indexes` (Stage 4)
 
 Indexes only; no data or constraint changes: `expenses_created_at_idx`, `supplier_payments_created_at_idx`, `customer_txn_created_at_idx` (`created_at DESC`, for the "recently recorded" feed) and `customer_txn_active_date_idx` (`(txn_date, txn_type) WHERE reversed_at IS NULL`, for period activity across customers). Plain `CREATE INDEX` (the runner uses a transaction), which briefly blocks writes to those tables while building — negligible at shop scale. Rollback: drop the four indexes.

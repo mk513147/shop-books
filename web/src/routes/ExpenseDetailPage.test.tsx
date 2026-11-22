@@ -15,7 +15,7 @@ import type { Expense, SessionUser } from '@/types/api';
  * (loading → loaded) transitions through the router, exactly as a phone does.
  */
 
-const MANAGER: SessionUser = { id: 'u2', email: 'm@example.com', name: 'Manu', role: 'manager', mustChangePassword: false };
+const MANAGER: SessionUser = { id: 'u2', email: 'm@example.com', name: 'Manu', role: 'manager', mustChangePassword: false, canViewPurchasePrices: false, canEditPurchasePrices: false };
 
 const PERSON = { id: 'u1', name: 'Olivia' };
 
